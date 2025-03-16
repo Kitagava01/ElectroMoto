@@ -1,0 +1,188 @@
+<html>
+<head>
+<title>test_stream.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_stream.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2010, 2011 Sebastian Thiel (byronimo@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitDB and is released under</span>
+<span class="s0"># the New BSD License: https://opensource.org/license/bsd-3-clause/</span>
+<span class="s2">&quot;&quot;&quot;Test for object db&quot;&quot;&quot;</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">test</span><span class="s4">.</span><span class="s1">lib </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">TestBase</span><span class="s4">,</span>
+    <span class="s1">DummyStream</span><span class="s4">,</span>
+    <span class="s1">make_bytes</span><span class="s4">,</span>
+    <span class="s1">make_object</span><span class="s4">,</span>
+    <span class="s1">fixture_path</span>
+<span class="s4">)</span>
+
+<span class="s3">from </span><span class="s1">gitdb </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">DecompressMemMapReader</span><span class="s4">,</span>
+    <span class="s1">FDCompressedSha1Writer</span><span class="s4">,</span>
+    <span class="s1">LooseObjectDB</span><span class="s4">,</span>
+    <span class="s1">Sha1Writer</span><span class="s4">,</span>
+    <span class="s1">MemoryDB</span><span class="s4">,</span>
+    <span class="s1">IStream</span><span class="s4">,</span>
+<span class="s4">)</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">util </span><span class="s3">import </span><span class="s1">hex_to_bin</span>
+
+<span class="s3">import </span><span class="s1">zlib</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">typ </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">str_blob_type</span>
+<span class="s4">)</span>
+
+<span class="s3">import </span><span class="s1">tempfile</span>
+<span class="s3">import </span><span class="s1">os</span>
+<span class="s3">from </span><span class="s1">io </span><span class="s3">import </span><span class="s1">BytesIO</span>
+
+
+<span class="s3">class </span><span class="s1">TestStream</span><span class="s4">(</span><span class="s1">TestBase</span><span class="s4">):</span>
+
+    <span class="s2">&quot;&quot;&quot;Test stream classes&quot;&quot;&quot;</span>
+
+    <span class="s1">data_sizes </span><span class="s4">= (</span><span class="s5">15</span><span class="s4">, </span><span class="s5">10000</span><span class="s4">, </span><span class="s5">1000 </span><span class="s4">* </span><span class="s5">1024 </span><span class="s4">+ </span><span class="s5">512</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_assert_stream_reader</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">stream</span><span class="s4">, </span><span class="s1">cdata</span><span class="s4">, </span><span class="s1">rewind_stream</span><span class="s4">=</span><span class="s3">lambda </span><span class="s1">s</span><span class="s4">: </span><span class="s3">None</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Make stream tests - the orig_stream is seekable, allowing it to be 
+        rewound and reused 
+        :param cdata: the data we expect to read from stream, the contents 
+        :param rewind_stream: function called to rewind the stream to make it ready 
+            for reuse&quot;&quot;&quot;</span>
+        <span class="s1">ns </span><span class="s4">= </span><span class="s5">10</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">cdata</span><span class="s4">) &gt; </span><span class="s1">ns </span><span class="s4">- </span><span class="s5">1</span><span class="s4">, </span><span class="s6">&quot;Data must be larger than %i, was %i&quot; </span><span class="s4">% (</span><span class="s1">ns</span><span class="s4">, </span><span class="s1">len</span><span class="s4">(</span><span class="s1">cdata</span><span class="s4">))</span>
+
+        <span class="s0"># read in small steps</span>
+        <span class="s1">ss </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">cdata</span><span class="s4">) // </span><span class="s1">ns</span>
+        <span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">ns</span><span class="s4">):</span>
+            <span class="s1">data </span><span class="s4">= </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">(</span><span class="s1">ss</span><span class="s4">)</span>
+            <span class="s1">chunk </span><span class="s4">= </span><span class="s1">cdata</span><span class="s4">[</span><span class="s1">i </span><span class="s4">* </span><span class="s1">ss</span><span class="s4">:(</span><span class="s1">i </span><span class="s4">+ </span><span class="s5">1</span><span class="s4">) * </span><span class="s1">ss</span><span class="s4">]</span>
+            <span class="s3">assert </span><span class="s1">data </span><span class="s4">== </span><span class="s1">chunk</span>
+        <span class="s0"># END for each step</span>
+        <span class="s1">rest </span><span class="s4">= </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()</span>
+        <span class="s3">if </span><span class="s1">rest</span><span class="s4">:</span>
+            <span class="s3">assert </span><span class="s1">rest </span><span class="s4">== </span><span class="s1">cdata</span><span class="s4">[-</span><span class="s1">len</span><span class="s4">(</span><span class="s1">rest</span><span class="s4">):]</span>
+        <span class="s0"># END handle rest</span>
+
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">stream</span><span class="s4">, </span><span class="s1">DecompressMemMapReader</span><span class="s4">):</span>
+            <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">stream</span><span class="s4">.</span><span class="s1">data</span><span class="s4">()) == </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">compressed_bytes_read</span><span class="s4">()</span>
+        <span class="s0"># END handle special type</span>
+
+        <span class="s1">rewind_stream</span><span class="s4">(</span><span class="s1">stream</span><span class="s4">)</span>
+
+        <span class="s0"># read everything</span>
+        <span class="s1">rdata </span><span class="s4">= </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()</span>
+        <span class="s3">assert </span><span class="s1">rdata </span><span class="s4">== </span><span class="s1">cdata</span>
+
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">stream</span><span class="s4">, </span><span class="s1">DecompressMemMapReader</span><span class="s4">):</span>
+            <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">stream</span><span class="s4">.</span><span class="s1">data</span><span class="s4">()) == </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">compressed_bytes_read</span><span class="s4">()</span>
+        <span class="s0"># END handle special type</span>
+
+    <span class="s3">def </span><span class="s1">test_decompress_reader</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">for </span><span class="s1">close_on_deletion </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s5">2</span><span class="s4">):</span>
+            <span class="s3">for </span><span class="s1">with_size </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s5">2</span><span class="s4">):</span>
+                <span class="s3">for </span><span class="s1">ds </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">data_sizes</span><span class="s4">:</span>
+                    <span class="s1">cdata </span><span class="s4">= </span><span class="s1">make_bytes</span><span class="s4">(</span><span class="s1">ds</span><span class="s4">, </span><span class="s1">randomize</span><span class="s4">=</span><span class="s3">False</span><span class="s4">)</span>
+
+                    <span class="s0"># zdata = zipped actual data</span>
+                    <span class="s0"># cdata = original content data</span>
+
+                    <span class="s0"># create reader</span>
+                    <span class="s3">if </span><span class="s1">with_size</span><span class="s4">:</span>
+                        <span class="s0"># need object data</span>
+                        <span class="s1">zdata </span><span class="s4">= </span><span class="s1">zlib</span><span class="s4">.</span><span class="s1">compress</span><span class="s4">(</span><span class="s1">make_object</span><span class="s4">(</span><span class="s1">str_blob_type</span><span class="s4">, </span><span class="s1">cdata</span><span class="s4">))</span>
+                        <span class="s1">typ</span><span class="s4">, </span><span class="s1">size</span><span class="s4">, </span><span class="s1">reader </span><span class="s4">= </span><span class="s1">DecompressMemMapReader</span><span class="s4">.</span><span class="s1">new</span><span class="s4">(</span><span class="s1">zdata</span><span class="s4">, </span><span class="s1">close_on_deletion</span><span class="s4">)</span>
+                        <span class="s3">assert </span><span class="s1">size </span><span class="s4">== </span><span class="s1">len</span><span class="s4">(</span><span class="s1">cdata</span><span class="s4">)</span>
+                        <span class="s3">assert </span><span class="s1">typ </span><span class="s4">== </span><span class="s1">str_blob_type</span>
+
+                        <span class="s0"># even if we don't set the size, it will be set automatically on first read</span>
+                        <span class="s1">test_reader </span><span class="s4">= </span><span class="s1">DecompressMemMapReader</span><span class="s4">(</span><span class="s1">zdata</span><span class="s4">, </span><span class="s1">close_on_deletion</span><span class="s4">=</span><span class="s3">False</span><span class="s4">)</span>
+                        <span class="s3">assert </span><span class="s1">test_reader</span><span class="s4">.</span><span class="s1">_s </span><span class="s4">== </span><span class="s1">len</span><span class="s4">(</span><span class="s1">cdata</span><span class="s4">)</span>
+                    <span class="s3">else</span><span class="s4">:</span>
+                        <span class="s0"># here we need content data</span>
+                        <span class="s1">zdata </span><span class="s4">= </span><span class="s1">zlib</span><span class="s4">.</span><span class="s1">compress</span><span class="s4">(</span><span class="s1">cdata</span><span class="s4">)</span>
+                        <span class="s1">reader </span><span class="s4">= </span><span class="s1">DecompressMemMapReader</span><span class="s4">(</span><span class="s1">zdata</span><span class="s4">, </span><span class="s1">close_on_deletion</span><span class="s4">, </span><span class="s1">len</span><span class="s4">(</span><span class="s1">cdata</span><span class="s4">))</span>
+                        <span class="s3">assert </span><span class="s1">reader</span><span class="s4">.</span><span class="s1">_s </span><span class="s4">== </span><span class="s1">len</span><span class="s4">(</span><span class="s1">cdata</span><span class="s4">)</span>
+                    <span class="s0"># END get reader</span>
+
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">_assert_stream_reader</span><span class="s4">(</span><span class="s1">reader</span><span class="s4">, </span><span class="s1">cdata</span><span class="s4">, </span><span class="s3">lambda </span><span class="s1">r</span><span class="s4">: </span><span class="s1">r</span><span class="s4">.</span><span class="s1">seek</span><span class="s4">(</span><span class="s5">0</span><span class="s4">))</span>
+
+                    <span class="s0"># put in a dummy stream for closing</span>
+                    <span class="s1">dummy </span><span class="s4">= </span><span class="s1">DummyStream</span><span class="s4">()</span>
+                    <span class="s1">reader</span><span class="s4">.</span><span class="s1">_m </span><span class="s4">= </span><span class="s1">dummy</span>
+
+                    <span class="s3">assert not </span><span class="s1">dummy</span><span class="s4">.</span><span class="s1">closed</span>
+                    <span class="s3">del</span><span class="s4">(</span><span class="s1">reader</span><span class="s4">)</span>
+                    <span class="s3">assert </span><span class="s1">dummy</span><span class="s4">.</span><span class="s1">closed </span><span class="s4">== </span><span class="s1">close_on_deletion</span>
+                <span class="s0"># END for each datasize</span>
+            <span class="s0"># END whether size should be used</span>
+        <span class="s0"># END whether stream should be closed when deleted</span>
+
+    <span class="s3">def </span><span class="s1">test_sha_writer</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">writer </span><span class="s4">= </span><span class="s1">Sha1Writer</span><span class="s4">()</span>
+        <span class="s3">assert </span><span class="s5">2 </span><span class="s4">== </span><span class="s1">writer</span><span class="s4">.</span><span class="s1">write</span><span class="s4">(</span><span class="s7">b&quot;hi&quot;</span><span class="s4">)</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">writer</span><span class="s4">.</span><span class="s1">sha</span><span class="s4">(</span><span class="s1">as_hex</span><span class="s4">=</span><span class="s5">1</span><span class="s4">)) == </span><span class="s5">40</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">writer</span><span class="s4">.</span><span class="s1">sha</span><span class="s4">(</span><span class="s1">as_hex</span><span class="s4">=</span><span class="s5">0</span><span class="s4">)) == </span><span class="s5">20</span>
+
+        <span class="s0"># make sure it does something ;)</span>
+        <span class="s1">prev_sha </span><span class="s4">= </span><span class="s1">writer</span><span class="s4">.</span><span class="s1">sha</span><span class="s4">()</span>
+        <span class="s1">writer</span><span class="s4">.</span><span class="s1">write</span><span class="s4">(</span><span class="s7">b&quot;hi again&quot;</span><span class="s4">)</span>
+        <span class="s3">assert </span><span class="s1">writer</span><span class="s4">.</span><span class="s1">sha</span><span class="s4">() != </span><span class="s1">prev_sha</span>
+
+    <span class="s3">def </span><span class="s1">test_compressed_writer</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">for </span><span class="s1">ds </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">data_sizes</span><span class="s4">:</span>
+            <span class="s1">fd</span><span class="s4">, </span><span class="s1">path </span><span class="s4">= </span><span class="s1">tempfile</span><span class="s4">.</span><span class="s1">mkstemp</span><span class="s4">()</span>
+            <span class="s1">ostream </span><span class="s4">= </span><span class="s1">FDCompressedSha1Writer</span><span class="s4">(</span><span class="s1">fd</span><span class="s4">)</span>
+            <span class="s1">data </span><span class="s4">= </span><span class="s1">make_bytes</span><span class="s4">(</span><span class="s1">ds</span><span class="s4">, </span><span class="s1">randomize</span><span class="s4">=</span><span class="s3">False</span><span class="s4">)</span>
+
+            <span class="s0"># for now, just a single write, code doesn't care about chunking</span>
+            <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">data</span><span class="s4">) == </span><span class="s1">ostream</span><span class="s4">.</span><span class="s1">write</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)</span>
+            <span class="s1">ostream</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+
+            <span class="s0"># its closed already</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">assertRaises</span><span class="s4">(</span><span class="s1">OSError</span><span class="s4">, </span><span class="s1">os</span><span class="s4">.</span><span class="s1">close</span><span class="s4">, </span><span class="s1">fd</span><span class="s4">)</span>
+
+            <span class="s0"># read everything back, compare to data we zip</span>
+            <span class="s1">fd </span><span class="s4">= </span><span class="s1">os</span><span class="s4">.</span><span class="s1">open</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">os</span><span class="s4">.</span><span class="s1">O_RDONLY </span><span class="s4">| </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">os</span><span class="s4">, </span><span class="s6">'O_BINARY'</span><span class="s4">, </span><span class="s5">0</span><span class="s4">))</span>
+            <span class="s1">written_data </span><span class="s4">= </span><span class="s1">os</span><span class="s4">.</span><span class="s1">read</span><span class="s4">(</span><span class="s1">fd</span><span class="s4">, </span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">getsize</span><span class="s4">(</span><span class="s1">path</span><span class="s4">))</span>
+            <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">written_data</span><span class="s4">) == </span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">getsize</span><span class="s4">(</span><span class="s1">path</span><span class="s4">)</span>
+            <span class="s1">os</span><span class="s4">.</span><span class="s1">close</span><span class="s4">(</span><span class="s1">fd</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">written_data </span><span class="s4">== </span><span class="s1">zlib</span><span class="s4">.</span><span class="s1">compress</span><span class="s4">(</span><span class="s1">data</span><span class="s4">, </span><span class="s5">1</span><span class="s4">)   </span><span class="s0"># best speed</span>
+
+            <span class="s1">os</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">path</span><span class="s4">)</span>
+        <span class="s0"># END for each os</span>
+
+    <span class="s3">def </span><span class="s1">test_decompress_reader_special_case</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">odb </span><span class="s4">= </span><span class="s1">LooseObjectDB</span><span class="s4">(</span><span class="s1">fixture_path</span><span class="s4">(</span><span class="s6">'objects'</span><span class="s4">))</span>
+        <span class="s1">mdb </span><span class="s4">= </span><span class="s1">MemoryDB</span><span class="s4">()</span>
+        <span class="s3">for </span><span class="s1">sha </span><span class="s3">in </span><span class="s4">(</span><span class="s7">b'888401851f15db0eed60eb1bc29dec5ddcace911'</span><span class="s4">,</span>
+                    <span class="s7">b'7bb839852ed5e3a069966281bb08d50012fb309b'</span><span class="s4">,):</span>
+            <span class="s1">ostream </span><span class="s4">= </span><span class="s1">odb</span><span class="s4">.</span><span class="s1">stream</span><span class="s4">(</span><span class="s1">hex_to_bin</span><span class="s4">(</span><span class="s1">sha</span><span class="s4">))</span>
+
+            <span class="s0"># if there is a bug, we will be missing one byte exactly !</span>
+            <span class="s1">data </span><span class="s4">= </span><span class="s1">ostream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()</span>
+            <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">data</span><span class="s4">) == </span><span class="s1">ostream</span><span class="s4">.</span><span class="s1">size</span>
+
+            <span class="s0"># Putting it back in should yield nothing new - after all, we have</span>
+            <span class="s1">dump </span><span class="s4">= </span><span class="s1">mdb</span><span class="s4">.</span><span class="s1">store</span><span class="s4">(</span><span class="s1">IStream</span><span class="s4">(</span><span class="s1">ostream</span><span class="s4">.</span><span class="s1">type</span><span class="s4">, </span><span class="s1">ostream</span><span class="s4">.</span><span class="s1">size</span><span class="s4">, </span><span class="s1">BytesIO</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)))</span>
+            <span class="s3">assert </span><span class="s1">dump</span><span class="s4">.</span><span class="s1">hexsha </span><span class="s4">== </span><span class="s1">sha</span>
+        <span class="s0"># end for each loose object sha to test</span>
+</pre>
+</body>
+</html>

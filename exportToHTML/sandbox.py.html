@@ -1,0 +1,452 @@
+<html>
+<head>
+<title>sandbox.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #7a7e85;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+sandbox.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;A sandbox layer that ensures unsafe operations cannot be performed. 
+Useful when the template itself comes from an untrusted source. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">operator</span>
+<span class="s2">import </span><span class="s1">types</span>
+<span class="s2">import </span><span class="s1">typing </span><span class="s2">as </span><span class="s1">t</span>
+<span class="s2">from </span><span class="s1">collections </span><span class="s2">import </span><span class="s1">abc</span>
+<span class="s2">from </span><span class="s1">collections </span><span class="s2">import </span><span class="s1">deque</span>
+<span class="s2">from </span><span class="s1">string </span><span class="s2">import </span><span class="s1">Formatter</span>
+
+<span class="s2">from </span><span class="s1">_string </span><span class="s2">import </span><span class="s1">formatter_field_name_split  </span><span class="s3"># type: ignore</span>
+<span class="s2">from </span><span class="s1">markupsafe </span><span class="s2">import </span><span class="s1">EscapeFormatter</span>
+<span class="s2">from </span><span class="s1">markupsafe </span><span class="s2">import </span><span class="s1">Markup</span>
+
+<span class="s2">from </span><span class="s4">.</span><span class="s1">environment </span><span class="s2">import </span><span class="s1">Environment</span>
+<span class="s2">from </span><span class="s4">.</span><span class="s1">exceptions </span><span class="s2">import </span><span class="s1">SecurityError</span>
+<span class="s2">from </span><span class="s4">.</span><span class="s1">runtime </span><span class="s2">import </span><span class="s1">Context</span>
+<span class="s2">from </span><span class="s4">.</span><span class="s1">runtime </span><span class="s2">import </span><span class="s1">Undefined</span>
+
+<span class="s1">F </span><span class="s4">= </span><span class="s1">t</span><span class="s4">.</span><span class="s1">TypeVar</span><span class="s4">(</span><span class="s5">&quot;F&quot;</span><span class="s4">, </span><span class="s1">bound</span><span class="s4">=</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Callable</span><span class="s4">[..., </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">])</span>
+
+<span class="s3">#: maximum number of items a range may produce</span>
+<span class="s1">MAX_RANGE </span><span class="s4">= </span><span class="s6">100000</span>
+
+<span class="s3">#: Unsafe function attributes.</span>
+<span class="s1">UNSAFE_FUNCTION_ATTRIBUTES</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Set</span><span class="s4">[</span><span class="s1">str</span><span class="s4">] = </span><span class="s1">set</span><span class="s4">()</span>
+
+<span class="s3">#: Unsafe method attributes. Function attributes are unsafe for methods too.</span>
+<span class="s1">UNSAFE_METHOD_ATTRIBUTES</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Set</span><span class="s4">[</span><span class="s1">str</span><span class="s4">] = </span><span class="s1">set</span><span class="s4">()</span>
+
+<span class="s3">#: unsafe generator attributes.</span>
+<span class="s1">UNSAFE_GENERATOR_ATTRIBUTES </span><span class="s4">= {</span><span class="s5">&quot;gi_frame&quot;</span><span class="s4">, </span><span class="s5">&quot;gi_code&quot;</span><span class="s4">}</span>
+
+<span class="s3">#: unsafe attributes on coroutines</span>
+<span class="s1">UNSAFE_COROUTINE_ATTRIBUTES </span><span class="s4">= {</span><span class="s5">&quot;cr_frame&quot;</span><span class="s4">, </span><span class="s5">&quot;cr_code&quot;</span><span class="s4">}</span>
+
+<span class="s3">#: unsafe attributes on async generators</span>
+<span class="s1">UNSAFE_ASYNC_GENERATOR_ATTRIBUTES </span><span class="s4">= {</span><span class="s5">&quot;ag_code&quot;</span><span class="s4">, </span><span class="s5">&quot;ag_frame&quot;</span><span class="s4">}</span>
+
+<span class="s1">_mutable_spec</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Type</span><span class="s4">[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">], </span><span class="s1">t</span><span class="s4">.</span><span class="s1">FrozenSet</span><span class="s4">[</span><span class="s1">str</span><span class="s4">]], ...] = (</span>
+    <span class="s4">(</span>
+        <span class="s1">abc</span><span class="s4">.</span><span class="s1">MutableSet</span><span class="s4">,</span>
+        <span class="s1">frozenset</span><span class="s4">(</span>
+            <span class="s4">[</span>
+                <span class="s5">&quot;add&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;clear&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;difference_update&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;discard&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;pop&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;remove&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;symmetric_difference_update&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;update&quot;</span><span class="s4">,</span>
+            <span class="s4">]</span>
+        <span class="s4">),</span>
+    <span class="s4">),</span>
+    <span class="s4">(</span>
+        <span class="s1">abc</span><span class="s4">.</span><span class="s1">MutableMapping</span><span class="s4">,</span>
+        <span class="s1">frozenset</span><span class="s4">([</span><span class="s5">&quot;clear&quot;</span><span class="s4">, </span><span class="s5">&quot;pop&quot;</span><span class="s4">, </span><span class="s5">&quot;popitem&quot;</span><span class="s4">, </span><span class="s5">&quot;setdefault&quot;</span><span class="s4">, </span><span class="s5">&quot;update&quot;</span><span class="s4">]),</span>
+    <span class="s4">),</span>
+    <span class="s4">(</span>
+        <span class="s1">abc</span><span class="s4">.</span><span class="s1">MutableSequence</span><span class="s4">,</span>
+        <span class="s1">frozenset</span><span class="s4">([</span><span class="s5">&quot;append&quot;</span><span class="s4">, </span><span class="s5">&quot;reverse&quot;</span><span class="s4">, </span><span class="s5">&quot;insert&quot;</span><span class="s4">, </span><span class="s5">&quot;sort&quot;</span><span class="s4">, </span><span class="s5">&quot;extend&quot;</span><span class="s4">, </span><span class="s5">&quot;remove&quot;</span><span class="s4">]),</span>
+    <span class="s4">),</span>
+    <span class="s4">(</span>
+        <span class="s1">deque</span><span class="s4">,</span>
+        <span class="s1">frozenset</span><span class="s4">(</span>
+            <span class="s4">[</span>
+                <span class="s5">&quot;append&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;appendleft&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;clear&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;extend&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;extendleft&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;pop&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;popleft&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;remove&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;rotate&quot;</span><span class="s4">,</span>
+            <span class="s4">]</span>
+        <span class="s4">),</span>
+    <span class="s4">),</span>
+<span class="s4">)</span>
+
+
+<span class="s2">def </span><span class="s1">inspect_format_method</span><span class="s4">(</span><span class="s1">callable</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Callable</span><span class="s4">[..., </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">]) </span><span class="s1">-&gt; t</span><span class="s4">.</span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">str</span><span class="s4">]:</span>
+    <span class="s2">if not </span><span class="s1">isinstance</span><span class="s4">(</span>
+        <span class="s1">callable</span><span class="s4">, (</span><span class="s1">types</span><span class="s4">.</span><span class="s1">MethodType</span><span class="s4">, </span><span class="s1">types</span><span class="s4">.</span><span class="s1">BuiltinMethodType</span><span class="s4">)</span>
+    <span class="s4">) </span><span class="s2">or </span><span class="s1">callable</span><span class="s4">.</span><span class="s1">__name__ </span><span class="s2">not in </span><span class="s4">(</span><span class="s5">&quot;format&quot;</span><span class="s4">, </span><span class="s5">&quot;format_map&quot;</span><span class="s4">):</span>
+        <span class="s2">return None</span>
+
+    <span class="s1">obj </span><span class="s4">= </span><span class="s1">callable</span><span class="s4">.</span><span class="s1">__self__</span>
+
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">str</span><span class="s4">):</span>
+        <span class="s2">return </span><span class="s1">obj</span>
+
+    <span class="s2">return None</span>
+
+
+<span class="s2">def </span><span class="s1">safe_range</span><span class="s4">(*</span><span class="s1">args</span><span class="s4">: </span><span class="s1">int</span><span class="s4">) </span><span class="s1">-&gt; range</span><span class="s4">:</span>
+    <span class="s0">&quot;&quot;&quot;A range that can't generate ranges with a length of more than 
+    MAX_RANGE items. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">rng </span><span class="s4">= </span><span class="s1">range</span><span class="s4">(*</span><span class="s1">args</span><span class="s4">)</span>
+
+    <span class="s2">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">rng</span><span class="s4">) &gt; </span><span class="s1">MAX_RANGE</span><span class="s4">:</span>
+        <span class="s2">raise </span><span class="s1">OverflowError</span><span class="s4">(</span>
+            <span class="s5">&quot;Range too big. The sandbox blocks ranges larger than&quot;</span>
+            <span class="s5">f&quot; MAX_RANGE (</span><span class="s2">{</span><span class="s1">MAX_RANGE</span><span class="s2">}</span><span class="s5">).&quot;</span>
+        <span class="s4">)</span>
+
+    <span class="s2">return </span><span class="s1">rng</span>
+
+
+<span class="s2">def </span><span class="s1">unsafe</span><span class="s4">(</span><span class="s1">f</span><span class="s4">: </span><span class="s1">F</span><span class="s4">) </span><span class="s1">-&gt; F</span><span class="s4">:</span>
+    <span class="s0">&quot;&quot;&quot;Marks a function or method as unsafe. 
+ 
+    .. code-block: python 
+ 
+        @unsafe 
+        def delete(self): 
+            pass 
+    &quot;&quot;&quot;</span>
+    <span class="s1">f</span><span class="s4">.</span><span class="s1">unsafe_callable </span><span class="s4">= </span><span class="s2">True  </span><span class="s3"># type: ignore</span>
+    <span class="s2">return </span><span class="s1">f</span>
+
+
+<span class="s2">def </span><span class="s1">is_internal_attribute</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">: </span><span class="s1">str</span><span class="s4">) </span><span class="s1">-&gt; bool</span><span class="s4">:</span>
+    <span class="s0">&quot;&quot;&quot;Test if the attribute given is an internal python attribute.  For 
+    example this function returns `True` for the `func_code` attribute of 
+    python objects.  This is useful if the environment method 
+    :meth:`~SandboxedEnvironment.is_safe_attribute` is overridden. 
+ 
+    &gt;&gt;&gt; from jinja2.sandbox import is_internal_attribute 
+    &gt;&gt;&gt; is_internal_attribute(str, &quot;mro&quot;) 
+    True 
+    &gt;&gt;&gt; is_internal_attribute(str, &quot;upper&quot;) 
+    False 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">types</span><span class="s4">.</span><span class="s1">FunctionType</span><span class="s4">):</span>
+        <span class="s2">if </span><span class="s1">attr </span><span class="s2">in </span><span class="s1">UNSAFE_FUNCTION_ATTRIBUTES</span><span class="s4">:</span>
+            <span class="s2">return True</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">types</span><span class="s4">.</span><span class="s1">MethodType</span><span class="s4">):</span>
+        <span class="s2">if </span><span class="s1">attr </span><span class="s2">in </span><span class="s1">UNSAFE_FUNCTION_ATTRIBUTES </span><span class="s2">or </span><span class="s1">attr </span><span class="s2">in </span><span class="s1">UNSAFE_METHOD_ATTRIBUTES</span><span class="s4">:</span>
+            <span class="s2">return True</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">type</span><span class="s4">):</span>
+        <span class="s2">if </span><span class="s1">attr </span><span class="s4">== </span><span class="s5">&quot;mro&quot;</span><span class="s4">:</span>
+            <span class="s2">return True</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, (</span><span class="s1">types</span><span class="s4">.</span><span class="s1">CodeType</span><span class="s4">, </span><span class="s1">types</span><span class="s4">.</span><span class="s1">TracebackType</span><span class="s4">, </span><span class="s1">types</span><span class="s4">.</span><span class="s1">FrameType</span><span class="s4">)):</span>
+        <span class="s2">return True</span>
+    <span class="s2">elif </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">types</span><span class="s4">.</span><span class="s1">GeneratorType</span><span class="s4">):</span>
+        <span class="s2">if </span><span class="s1">attr </span><span class="s2">in </span><span class="s1">UNSAFE_GENERATOR_ATTRIBUTES</span><span class="s4">:</span>
+            <span class="s2">return True</span>
+    <span class="s2">elif </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">types</span><span class="s4">, </span><span class="s5">&quot;CoroutineType&quot;</span><span class="s4">) </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">types</span><span class="s4">.</span><span class="s1">CoroutineType</span><span class="s4">):</span>
+        <span class="s2">if </span><span class="s1">attr </span><span class="s2">in </span><span class="s1">UNSAFE_COROUTINE_ATTRIBUTES</span><span class="s4">:</span>
+            <span class="s2">return True</span>
+    <span class="s2">elif </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">types</span><span class="s4">, </span><span class="s5">&quot;AsyncGeneratorType&quot;</span><span class="s4">) </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s4">(</span>
+        <span class="s1">obj</span><span class="s4">, </span><span class="s1">types</span><span class="s4">.</span><span class="s1">AsyncGeneratorType</span>
+    <span class="s4">):</span>
+        <span class="s2">if </span><span class="s1">attr </span><span class="s2">in </span><span class="s1">UNSAFE_ASYNC_GENERATOR_ATTRIBUTES</span><span class="s4">:</span>
+            <span class="s2">return True</span>
+    <span class="s2">return </span><span class="s1">attr</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">&quot;__&quot;</span><span class="s4">)</span>
+
+
+<span class="s2">def </span><span class="s1">modifies_known_mutable</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">: </span><span class="s1">str</span><span class="s4">) </span><span class="s1">-&gt; bool</span><span class="s4">:</span>
+    <span class="s0">&quot;&quot;&quot;This function checks if an attribute on a builtin mutable object 
+    (list, dict, set or deque) or the corresponding ABCs would modify it 
+    if called. 
+ 
+    &gt;&gt;&gt; modifies_known_mutable({}, &quot;clear&quot;) 
+    True 
+    &gt;&gt;&gt; modifies_known_mutable({}, &quot;keys&quot;) 
+    False 
+    &gt;&gt;&gt; modifies_known_mutable([], &quot;append&quot;) 
+    True 
+    &gt;&gt;&gt; modifies_known_mutable([], &quot;index&quot;) 
+    False 
+ 
+    If called with an unsupported object, ``False`` is returned. 
+ 
+    &gt;&gt;&gt; modifies_known_mutable(&quot;foo&quot;, &quot;upper&quot;) 
+    False 
+    &quot;&quot;&quot;</span>
+    <span class="s2">for </span><span class="s1">typespec</span><span class="s4">, </span><span class="s1">unsafe </span><span class="s2">in </span><span class="s1">_mutable_spec</span><span class="s4">:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">typespec</span><span class="s4">):</span>
+            <span class="s2">return </span><span class="s1">attr </span><span class="s2">in </span><span class="s1">unsafe</span>
+    <span class="s2">return False</span>
+
+
+<span class="s2">class </span><span class="s1">SandboxedEnvironment</span><span class="s4">(</span><span class="s1">Environment</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;The sandboxed environment.  It works like the regular environment but 
+    tells the compiler to generate sandboxed code.  Additionally subclasses of 
+    this environment may override the methods that tell the runtime what 
+    attributes or functions are safe to access. 
+ 
+    If the template tries to access insecure code a :exc:`SecurityError` is 
+    raised.  However also other exceptions may occur during the rendering so 
+    the caller has to ensure that all exceptions are caught. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">sandboxed </span><span class="s4">= </span><span class="s2">True</span>
+
+    <span class="s3">#: default callback table for the binary operators.  A copy of this is</span>
+    <span class="s3">#: available on each instance of a sandboxed environment as</span>
+    <span class="s3">#: :attr:`binop_table`</span>
+    <span class="s1">default_binop_table</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Callable</span><span class="s4">[[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">], </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">]] = {</span>
+        <span class="s5">&quot;+&quot;</span><span class="s4">: </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">add</span><span class="s4">,</span>
+        <span class="s5">&quot;-&quot;</span><span class="s4">: </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">sub</span><span class="s4">,</span>
+        <span class="s5">&quot;*&quot;</span><span class="s4">: </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">mul</span><span class="s4">,</span>
+        <span class="s5">&quot;/&quot;</span><span class="s4">: </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">truediv</span><span class="s4">,</span>
+        <span class="s5">&quot;//&quot;</span><span class="s4">: </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">floordiv</span><span class="s4">,</span>
+        <span class="s5">&quot;**&quot;</span><span class="s4">: </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">pow</span><span class="s4">,</span>
+        <span class="s5">&quot;%&quot;</span><span class="s4">: </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">mod</span><span class="s4">,</span>
+    <span class="s4">}</span>
+
+    <span class="s3">#: default callback table for the unary operators.  A copy of this is</span>
+    <span class="s3">#: available on each instance of a sandboxed environment as</span>
+    <span class="s3">#: :attr:`unop_table`</span>
+    <span class="s1">default_unop_table</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Callable</span><span class="s4">[[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">], </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">]] = {</span>
+        <span class="s5">&quot;+&quot;</span><span class="s4">: </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">pos</span><span class="s4">,</span>
+        <span class="s5">&quot;-&quot;</span><span class="s4">: </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">neg</span><span class="s4">,</span>
+    <span class="s4">}</span>
+
+    <span class="s3">#: a set of binary operators that should be intercepted.  Each operator</span>
+    <span class="s3">#: that is added to this set (empty by default) is delegated to the</span>
+    <span class="s3">#: :meth:`call_binop` method that will perform the operator.  The default</span>
+    <span class="s3">#: operator callback is specified by :attr:`binop_table`.</span>
+    <span class="s3">#:</span>
+    <span class="s3">#: The following binary operators are interceptable:</span>
+    <span class="s3">#: ``//``, ``%``, ``+``, ``*``, ``-``, ``/``, and ``**``</span>
+    <span class="s3">#:</span>
+    <span class="s3">#: The default operation form the operator table corresponds to the</span>
+    <span class="s3">#: builtin function.  Intercepted calls are always slower than the native</span>
+    <span class="s3">#: operator call, so make sure only to intercept the ones you are</span>
+    <span class="s3">#: interested in.</span>
+    <span class="s3">#:</span>
+    <span class="s3">#: .. versionadded:: 2.6</span>
+    <span class="s1">intercepted_binops</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">FrozenSet</span><span class="s4">[</span><span class="s1">str</span><span class="s4">] = </span><span class="s1">frozenset</span><span class="s4">()</span>
+
+    <span class="s3">#: a set of unary operators that should be intercepted.  Each operator</span>
+    <span class="s3">#: that is added to this set (empty by default) is delegated to the</span>
+    <span class="s3">#: :meth:`call_unop` method that will perform the operator.  The default</span>
+    <span class="s3">#: operator callback is specified by :attr:`unop_table`.</span>
+    <span class="s3">#:</span>
+    <span class="s3">#: The following unary operators are interceptable: ``+``, ``-``</span>
+    <span class="s3">#:</span>
+    <span class="s3">#: The default operation form the operator table corresponds to the</span>
+    <span class="s3">#: builtin function.  Intercepted calls are always slower than the native</span>
+    <span class="s3">#: operator call, so make sure only to intercept the ones you are</span>
+    <span class="s3">#: interested in.</span>
+    <span class="s3">#:</span>
+    <span class="s3">#: .. versionadded:: 2.6</span>
+    <span class="s1">intercepted_unops</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">FrozenSet</span><span class="s4">[</span><span class="s1">str</span><span class="s4">] = </span><span class="s1">frozenset</span><span class="s4">()</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, *</span><span class="s1">args</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, **</span><span class="s1">kwargs</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s4">:</span>
+        <span class="s1">super</span><span class="s4">().</span><span class="s1">__init__</span><span class="s4">(*</span><span class="s1">args</span><span class="s4">, **</span><span class="s1">kwargs</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">globals</span><span class="s4">[</span><span class="s5">&quot;range&quot;</span><span class="s4">] = </span><span class="s1">safe_range</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">binop_table </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">default_binop_table</span><span class="s4">.</span><span class="s1">copy</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">unop_table </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">default_unop_table</span><span class="s4">.</span><span class="s1">copy</span><span class="s4">()</span>
+
+    <span class="s2">def </span><span class="s1">is_safe_attribute</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">: </span><span class="s1">str</span><span class="s4">, </span><span class="s1">value</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; bool</span><span class="s4">:</span>
+        <span class="s0">&quot;&quot;&quot;The sandboxed environment will call this method to check if the 
+        attribute of an object is safe to access.  Per default all attributes 
+        starting with an underscore are considered private as well as the 
+        special attributes of internal python objects as returned by the 
+        :func:`is_internal_attribute` function. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return not </span><span class="s4">(</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">startswith</span><span class="s4">(</span><span class="s5">&quot;_&quot;</span><span class="s4">) </span><span class="s2">or </span><span class="s1">is_internal_attribute</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">))</span>
+
+    <span class="s2">def </span><span class="s1">is_safe_callable</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; bool</span><span class="s4">:</span>
+        <span class="s0">&quot;&quot;&quot;Check if an object is safely callable. By default callables 
+        are considered safe unless decorated with :func:`unsafe`. 
+ 
+        This also recognizes the Django convention of setting 
+        ``func.alters_data = True``. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return not </span><span class="s4">(</span>
+            <span class="s1">getattr</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s5">&quot;unsafe_callable&quot;</span><span class="s4">, </span><span class="s2">False</span><span class="s4">) </span><span class="s2">or </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s5">&quot;alters_data&quot;</span><span class="s4">, </span><span class="s2">False</span><span class="s4">)</span>
+        <span class="s4">)</span>
+
+    <span class="s2">def </span><span class="s1">call_binop</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">context</span><span class="s4">: </span><span class="s1">Context</span><span class="s4">, </span><span class="s1">operator</span><span class="s4">: </span><span class="s1">str</span><span class="s4">, </span><span class="s1">left</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">right</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span>
+    <span class="s4">) </span><span class="s1">-&gt; t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">:</span>
+        <span class="s0">&quot;&quot;&quot;For intercepted binary operator calls (:meth:`intercepted_binops`) 
+        this function is executed instead of the builtin operator.  This can 
+        be used to fine tune the behavior of certain operators. 
+ 
+        .. versionadded:: 2.6 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">binop_table</span><span class="s4">[</span><span class="s1">operator</span><span class="s4">](</span><span class="s1">left</span><span class="s4">, </span><span class="s1">right</span><span class="s4">)</span>
+
+    <span class="s2">def </span><span class="s1">call_unop</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">context</span><span class="s4">: </span><span class="s1">Context</span><span class="s4">, </span><span class="s1">operator</span><span class="s4">: </span><span class="s1">str</span><span class="s4">, </span><span class="s1">arg</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">:</span>
+        <span class="s0">&quot;&quot;&quot;For intercepted unary operator calls (:meth:`intercepted_unops`) 
+        this function is executed instead of the builtin operator.  This can 
+        be used to fine tune the behavior of certain operators. 
+ 
+        .. versionadded:: 2.6 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">unop_table</span><span class="s4">[</span><span class="s1">operator</span><span class="s4">](</span><span class="s1">arg</span><span class="s4">)</span>
+
+    <span class="s2">def </span><span class="s1">getitem</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">argument</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Union</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">]</span>
+    <span class="s4">) </span><span class="s1">-&gt; t</span><span class="s4">.</span><span class="s1">Union</span><span class="s4">[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">Undefined</span><span class="s4">]:</span>
+        <span class="s0">&quot;&quot;&quot;Subscribe an object from sandboxed code.&quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s4">:</span>
+            <span class="s2">return </span><span class="s1">obj</span><span class="s4">[</span><span class="s1">argument</span><span class="s4">]</span>
+        <span class="s2">except </span><span class="s4">(</span><span class="s1">TypeError</span><span class="s4">, </span><span class="s1">LookupError</span><span class="s4">):</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">argument</span><span class="s4">, </span><span class="s1">str</span><span class="s4">):</span>
+                <span class="s2">try</span><span class="s4">:</span>
+                    <span class="s1">attr </span><span class="s4">= </span><span class="s1">str</span><span class="s4">(</span><span class="s1">argument</span><span class="s4">)</span>
+                <span class="s2">except </span><span class="s1">Exception</span><span class="s4">:</span>
+                    <span class="s2">pass</span>
+                <span class="s2">else</span><span class="s4">:</span>
+                    <span class="s2">try</span><span class="s4">:</span>
+                        <span class="s1">value </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">)</span>
+                    <span class="s2">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+                        <span class="s2">pass</span>
+                    <span class="s2">else</span><span class="s4">:</span>
+                        <span class="s2">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">is_safe_attribute</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">argument</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+                            <span class="s2">return </span><span class="s1">value</span>
+                        <span class="s2">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">unsafe_undefined</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">argument</span><span class="s4">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">undefined</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">=</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">name</span><span class="s4">=</span><span class="s1">argument</span><span class="s4">)</span>
+
+    <span class="s2">def </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">attribute</span><span class="s4">: </span><span class="s1">str</span><span class="s4">) </span><span class="s1">-&gt; t</span><span class="s4">.</span><span class="s1">Union</span><span class="s4">[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">Undefined</span><span class="s4">]:</span>
+        <span class="s0">&quot;&quot;&quot;Subscribe an object from sandboxed code and prefer the 
+        attribute.  The attribute passed *must* be a bytestring. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">attribute</span><span class="s4">)</span>
+        <span class="s2">except </span><span class="s1">AttributeError</span><span class="s4">:</span>
+            <span class="s2">try</span><span class="s4">:</span>
+                <span class="s2">return </span><span class="s1">obj</span><span class="s4">[</span><span class="s1">attribute</span><span class="s4">]</span>
+            <span class="s2">except </span><span class="s4">(</span><span class="s1">TypeError</span><span class="s4">, </span><span class="s1">LookupError</span><span class="s4">):</span>
+                <span class="s2">pass</span>
+        <span class="s2">else</span><span class="s4">:</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">is_safe_attribute</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">attribute</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+                <span class="s2">return </span><span class="s1">value</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">unsafe_undefined</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">attribute</span><span class="s4">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">undefined</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">=</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">name</span><span class="s4">=</span><span class="s1">attribute</span><span class="s4">)</span>
+
+    <span class="s2">def </span><span class="s1">unsafe_undefined</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">attribute</span><span class="s4">: </span><span class="s1">str</span><span class="s4">) </span><span class="s1">-&gt; Undefined</span><span class="s4">:</span>
+        <span class="s0">&quot;&quot;&quot;Return an undefined object for unsafe attributes.&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">undefined</span><span class="s4">(</span>
+            <span class="s5">f&quot;access to attribute </span><span class="s2">{</span><span class="s1">attribute</span><span class="s2">!r} </span><span class="s5">of&quot;</span>
+            <span class="s5">f&quot; </span><span class="s2">{</span><span class="s1">type</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">).</span><span class="s1">__name__</span><span class="s2">!r} </span><span class="s5">object is unsafe.&quot;</span><span class="s4">,</span>
+            <span class="s1">name</span><span class="s4">=</span><span class="s1">attribute</span><span class="s4">,</span>
+            <span class="s1">obj</span><span class="s4">=</span><span class="s1">obj</span><span class="s4">,</span>
+            <span class="s1">exc</span><span class="s4">=</span><span class="s1">SecurityError</span><span class="s4">,</span>
+        <span class="s4">)</span>
+
+    <span class="s2">def </span><span class="s1">format_string</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">s</span><span class="s4">: </span><span class="s1">str</span><span class="s4">,</span>
+        <span class="s1">args</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, ...],</span>
+        <span class="s1">kwargs</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">format_func</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Callable</span><span class="s4">[..., </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">]] = </span><span class="s2">None</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; str</span><span class="s4">:</span>
+        <span class="s0">&quot;&quot;&quot;If a format call is detected, then this is routed through this 
+        method so that our safety sandbox can be used for it. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">formatter</span><span class="s4">: </span><span class="s1">SandboxedFormatter</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">s</span><span class="s4">, </span><span class="s1">Markup</span><span class="s4">):</span>
+            <span class="s1">formatter </span><span class="s4">= </span><span class="s1">SandboxedEscapeFormatter</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">escape</span><span class="s4">=</span><span class="s1">s</span><span class="s4">.</span><span class="s1">escape</span><span class="s4">)</span>
+        <span class="s2">else</span><span class="s4">:</span>
+            <span class="s1">formatter </span><span class="s4">= </span><span class="s1">SandboxedFormatter</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+
+        <span class="s2">if </span><span class="s1">format_func </span><span class="s2">is not None and </span><span class="s1">format_func</span><span class="s4">.</span><span class="s1">__name__ </span><span class="s4">== </span><span class="s5">&quot;format_map&quot;</span><span class="s4">:</span>
+            <span class="s2">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">args</span><span class="s4">) != </span><span class="s6">1 </span><span class="s2">or </span><span class="s1">kwargs</span><span class="s4">:</span>
+                <span class="s2">raise </span><span class="s1">TypeError</span><span class="s4">(</span>
+                    <span class="s5">&quot;format_map() takes exactly one argument&quot;</span>
+                    <span class="s5">f&quot; </span><span class="s2">{</span><span class="s1">len</span><span class="s4">(</span><span class="s1">args</span><span class="s4">) + (</span><span class="s1">kwargs </span><span class="s2">is not None</span><span class="s4">)</span><span class="s2">} </span><span class="s5">given&quot;</span>
+                <span class="s4">)</span>
+
+            <span class="s1">kwargs </span><span class="s4">= </span><span class="s1">args</span><span class="s4">[</span><span class="s6">0</span><span class="s4">]</span>
+            <span class="s1">args </span><span class="s4">= ()</span>
+
+        <span class="s1">rv </span><span class="s4">= </span><span class="s1">formatter</span><span class="s4">.</span><span class="s1">vformat</span><span class="s4">(</span><span class="s1">s</span><span class="s4">, </span><span class="s1">args</span><span class="s4">, </span><span class="s1">kwargs</span><span class="s4">)</span>
+        <span class="s2">return </span><span class="s1">type</span><span class="s4">(</span><span class="s1">s</span><span class="s4">)(</span><span class="s1">rv</span><span class="s4">)</span>
+
+    <span class="s2">def </span><span class="s1">call</span><span class="s4">(</span>
+        <span class="s1">__self</span><span class="s4">,  </span><span class="s3"># noqa: B902</span>
+        <span class="s1">__context</span><span class="s4">: </span><span class="s1">Context</span><span class="s4">,</span>
+        <span class="s1">__obj</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">,</span>
+        <span class="s4">*</span><span class="s1">args</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">,</span>
+        <span class="s4">**</span><span class="s1">kwargs</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">:</span>
+        <span class="s0">&quot;&quot;&quot;Call an object from sandboxed code.&quot;&quot;&quot;</span>
+        <span class="s1">fmt </span><span class="s4">= </span><span class="s1">inspect_format_method</span><span class="s4">(</span><span class="s1">__obj</span><span class="s4">)</span>
+        <span class="s2">if </span><span class="s1">fmt </span><span class="s2">is not None</span><span class="s4">:</span>
+            <span class="s2">return </span><span class="s1">__self</span><span class="s4">.</span><span class="s1">format_string</span><span class="s4">(</span><span class="s1">fmt</span><span class="s4">, </span><span class="s1">args</span><span class="s4">, </span><span class="s1">kwargs</span><span class="s4">, </span><span class="s1">__obj</span><span class="s4">)</span>
+
+        <span class="s3"># the double prefixes are to avoid double keyword argument</span>
+        <span class="s3"># errors when proxying the call.</span>
+        <span class="s2">if not </span><span class="s1">__self</span><span class="s4">.</span><span class="s1">is_safe_callable</span><span class="s4">(</span><span class="s1">__obj</span><span class="s4">):</span>
+            <span class="s2">raise </span><span class="s1">SecurityError</span><span class="s4">(</span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">__obj</span><span class="s2">!r} </span><span class="s5">is not safely callable&quot;</span><span class="s4">)</span>
+        <span class="s2">return </span><span class="s1">__context</span><span class="s4">.</span><span class="s1">call</span><span class="s4">(</span><span class="s1">__obj</span><span class="s4">, *</span><span class="s1">args</span><span class="s4">, **</span><span class="s1">kwargs</span><span class="s4">)</span>
+
+
+<span class="s2">class </span><span class="s1">ImmutableSandboxedEnvironment</span><span class="s4">(</span><span class="s1">SandboxedEnvironment</span><span class="s4">):</span>
+    <span class="s0">&quot;&quot;&quot;Works exactly like the regular `SandboxedEnvironment` but does not 
+    permit modifications on the builtin mutable objects `list`, `set`, and 
+    `dict` by using the :func:`modifies_known_mutable` function. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">is_safe_attribute</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">: </span><span class="s1">str</span><span class="s4">, </span><span class="s1">value</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; bool</span><span class="s4">:</span>
+        <span class="s2">if not </span><span class="s1">super</span><span class="s4">().</span><span class="s1">is_safe_attribute</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">return not </span><span class="s1">modifies_known_mutable</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">)</span>
+
+
+<span class="s2">class </span><span class="s1">SandboxedFormatter</span><span class="s4">(</span><span class="s1">Formatter</span><span class="s4">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">env</span><span class="s4">: </span><span class="s1">Environment</span><span class="s4">, **</span><span class="s1">kwargs</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s4">:</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_env </span><span class="s4">= </span><span class="s1">env</span>
+        <span class="s1">super</span><span class="s4">().</span><span class="s1">__init__</span><span class="s4">(**</span><span class="s1">kwargs</span><span class="s4">)</span>
+
+    <span class="s2">def </span><span class="s1">get_field</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">field_name</span><span class="s4">: </span><span class="s1">str</span><span class="s4">, </span><span class="s1">args</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Sequence</span><span class="s4">[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">], </span><span class="s1">kwargs</span><span class="s4">: </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Mapping</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">]</span>
+    <span class="s4">) </span><span class="s1">-&gt; t</span><span class="s4">.</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">t</span><span class="s4">.</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">str</span><span class="s4">]:</span>
+        <span class="s1">first</span><span class="s4">, </span><span class="s1">rest </span><span class="s4">= </span><span class="s1">formatter_field_name_split</span><span class="s4">(</span><span class="s1">field_name</span><span class="s4">)</span>
+        <span class="s1">obj </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">get_value</span><span class="s4">(</span><span class="s1">first</span><span class="s4">, </span><span class="s1">args</span><span class="s4">, </span><span class="s1">kwargs</span><span class="s4">)</span>
+        <span class="s2">for </span><span class="s1">is_attr</span><span class="s4">, </span><span class="s1">i </span><span class="s2">in </span><span class="s1">rest</span><span class="s4">:</span>
+            <span class="s2">if </span><span class="s1">is_attr</span><span class="s4">:</span>
+                <span class="s1">obj </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_env</span><span class="s4">.</span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">i</span><span class="s4">)</span>
+            <span class="s2">else</span><span class="s4">:</span>
+                <span class="s1">obj </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_env</span><span class="s4">.</span><span class="s1">getitem</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">i</span><span class="s4">)</span>
+        <span class="s2">return </span><span class="s1">obj</span><span class="s4">, </span><span class="s1">first</span>
+
+
+<span class="s2">class </span><span class="s1">SandboxedEscapeFormatter</span><span class="s4">(</span><span class="s1">SandboxedFormatter</span><span class="s4">, </span><span class="s1">EscapeFormatter</span><span class="s4">):</span>
+    <span class="s2">pass</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,80 @@
+<html>
+<head>
+<title>symlink.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+symlink.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">from </span><span class="s1">stat </span><span class="s0">import </span><span class="s1">S_IREAD</span><span class="s2">, </span><span class="s1">S_IRGRP</span><span class="s2">, </span><span class="s1">S_IROTH</span>
+<span class="s0">from </span><span class="s1">subprocess </span><span class="s0">import </span><span class="s1">PIPE</span><span class="s2">, </span><span class="s1">Popen</span>
+
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">path </span><span class="s0">import </span><span class="s1">safe_delete</span><span class="s2">, </span><span class="s1">set_tree</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">base </span><span class="s0">import </span><span class="s1">PipInstall</span>
+
+
+<span class="s0">class </span><span class="s1">SymlinkPipInstall</span><span class="s2">(</span><span class="s1">PipInstall</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">_sync</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">src</span><span class="s2">, </span><span class="s1">dst</span><span class="s2">):</span>
+        <span class="s1">os</span><span class="s2">.</span><span class="s1">symlink</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">src</span><span class="s2">), </span><span class="s1">str</span><span class="s2">(</span><span class="s1">dst</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">_generate_new_files</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># create the pyc files, as the build image will be R/O</span>
+        <span class="s1">cmd </span><span class="s2">= [</span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_creator</span><span class="s2">.</span><span class="s1">exe</span><span class="s2">), </span><span class="s4">&quot;-m&quot;</span><span class="s2">, </span><span class="s4">&quot;compileall&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_image_dir</span><span class="s2">)]</span>
+        <span class="s1">process </span><span class="s2">= </span><span class="s1">Popen</span><span class="s2">(</span><span class="s1">cmd</span><span class="s2">, </span><span class="s1">stdout</span><span class="s2">=</span><span class="s1">PIPE</span><span class="s2">, </span><span class="s1">stderr</span><span class="s2">=</span><span class="s1">PIPE</span><span class="s2">)</span>
+        <span class="s1">process</span><span class="s2">.</span><span class="s1">communicate</span><span class="s2">()</span>
+        <span class="s3"># the root pyc is shared, so we'll not symlink that - but still add the pyc files to the RECORD for close</span>
+        <span class="s1">root_py_cache </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_image_dir </span><span class="s2">/ </span><span class="s4">&quot;__pycache__&quot;</span>
+        <span class="s1">new_files </span><span class="s2">= </span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">root_py_cache</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">():</span>
+            <span class="s1">new_files</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">root_py_cache</span><span class="s2">.</span><span class="s1">iterdir</span><span class="s2">())</span>
+            <span class="s1">new_files</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">root_py_cache</span><span class="s2">)</span>
+            <span class="s1">safe_delete</span><span class="s2">(</span><span class="s1">root_py_cache</span><span class="s2">)</span>
+        <span class="s1">core_new_files </span><span class="s2">= </span><span class="s1">super</span><span class="s2">().</span><span class="s1">_generate_new_files</span><span class="s2">()</span>
+        <span class="s3"># remove files that are within the image folder deeper than one level (as these will be not linked directly)</span>
+        <span class="s0">for </span><span class="s1">file </span><span class="s0">in </span><span class="s1">core_new_files</span><span class="s2">:</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">rel </span><span class="s2">= </span><span class="s1">file</span><span class="s2">.</span><span class="s1">relative_to</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_image_dir</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">rel</span><span class="s2">.</span><span class="s1">parts</span><span class="s2">) &gt; </span><span class="s5">1</span><span class="s2">:</span>
+                    <span class="s0">continue</span>
+            <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+                <span class="s0">pass</span>
+            <span class="s1">new_files</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">file</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">new_files</span>
+
+    <span class="s0">def </span><span class="s1">_fix_records</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">new_files</span><span class="s2">):</span>
+        <span class="s1">new_files</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">i </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_image_dir</span><span class="s2">.</span><span class="s1">iterdir</span><span class="s2">())</span>
+        <span class="s1">extra_record_data_str </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_records_text</span><span class="s2">(</span><span class="s1">sorted</span><span class="s2">(</span><span class="s1">new_files</span><span class="s2">, </span><span class="s1">key</span><span class="s2">=</span><span class="s1">str</span><span class="s2">))</span>
+        <span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_dist_info </span><span class="s2">/ </span><span class="s4">&quot;RECORD&quot;</span><span class="s2">).</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">extra_record_data_str</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s4">&quot;utf-8&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">build_image</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">build_image</span><span class="s2">()</span>
+        <span class="s3"># protect the image by making it read only</span>
+        <span class="s1">set_tree</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_image_dir</span><span class="s2">, </span><span class="s1">S_IREAD </span><span class="s2">| </span><span class="s1">S_IRGRP </span><span class="s2">| </span><span class="s1">S_IROTH</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">clear</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_image_dir</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">():</span>
+            <span class="s1">safe_delete</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_image_dir</span><span class="s2">)</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">clear</span><span class="s2">()</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s4">&quot;SymlinkPipInstall&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

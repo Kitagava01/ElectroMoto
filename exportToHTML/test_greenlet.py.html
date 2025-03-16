@@ -1,0 +1,1346 @@
+<html>
+<head>
+<title>test_greenlet.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_greenlet.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">gc</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">time</span>
+<span class="s0">import </span><span class="s1">threading</span>
+<span class="s0">import </span><span class="s1">unittest</span>
+
+<span class="s0">from </span><span class="s1">abc </span><span class="s0">import </span><span class="s1">ABCMeta</span>
+<span class="s0">from </span><span class="s1">abc </span><span class="s0">import </span><span class="s1">abstractmethod</span>
+
+<span class="s0">import </span><span class="s1">greenlet</span>
+<span class="s0">from </span><span class="s1">greenlet </span><span class="s0">import </span><span class="s1">greenlet </span><span class="s0">as </span><span class="s1">RawGreenlet</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">TestCase</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">RUNNING_ON_MANYLINUX</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">PY313</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">leakcheck </span><span class="s0">import </span><span class="s1">fails_leakcheck</span>
+
+
+<span class="s3"># We manually manage locks in many tests</span>
+<span class="s3"># pylint:disable=consider-using-with</span>
+<span class="s3"># pylint:disable=too-many-public-methods</span>
+<span class="s3"># This module is quite large.</span>
+<span class="s3"># TODO: Refactor into separate test files. For example,</span>
+<span class="s3"># put all the regression tests that used to produce</span>
+<span class="s3"># crashes in test_greenlet_no_crash; put tests that DO deliberately crash</span>
+<span class="s3"># the interpreter into test_greenlet_crash.</span>
+<span class="s3"># pylint:disable=too-many-lines</span>
+
+<span class="s0">class </span><span class="s1">SomeError</span><span class="s2">(</span><span class="s1">Exception</span><span class="s2">):</span>
+    <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">fmain</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">):</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+    <span class="s0">except</span><span class="s2">:</span>
+        <span class="s1">seen</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">exc_info</span><span class="s2">()[</span><span class="s4">0</span><span class="s2">])</span>
+        <span class="s0">raise</span>
+    <span class="s0">raise </span><span class="s1">SomeError</span>
+
+
+<span class="s0">def </span><span class="s1">send_exception</span><span class="s2">(</span><span class="s1">g</span><span class="s2">, </span><span class="s1">exc</span><span class="s2">):</span>
+    <span class="s3"># note: send_exception(g, exc)  can be now done with  g.throw(exc).</span>
+    <span class="s3"># the purpose of this test is to explicitly check the propagation rules.</span>
+    <span class="s0">def </span><span class="s1">crasher</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">exc</span>
+    <span class="s1">g1 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">crasher</span><span class="s2">, </span><span class="s1">parent</span><span class="s2">=</span><span class="s1">g</span><span class="s2">)</span>
+    <span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestGreenlet</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+
+    <span class="s0">def </span><span class="s1">_do_simple_test</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">lst </span><span class="s2">= []</span>
+
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s1">lst</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">1</span><span class="s2">)</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">lst</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">3</span><span class="s2">)</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+        <span class="s1">lst</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">0</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">lst</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">2</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">lst</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">4</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">lst</span><span class="s2">, </span><span class="s1">list</span><span class="s2">(</span><span class="s1">range</span><span class="s2">(</span><span class="s4">5</span><span class="s2">)))</span>
+
+    <span class="s0">def </span><span class="s1">test_simple</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_do_simple_test</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_switch_no_run_raises_AttributeError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">&quot;run&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_throw_no_run_raises_AttributeError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">(</span><span class="s1">SomeError</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">&quot;run&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_parent_equals_None</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">parent</span><span class="s2">=</span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNotNone</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIs</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">, </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">())</span>
+
+    <span class="s0">def </span><span class="s1">test_run_equals_None</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">run</span><span class="s2">=</span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNotNone</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">run</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_two_children</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">lst </span><span class="s2">= []</span>
+
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s1">lst</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">1</span><span class="s2">)</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">lst</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">([</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s2">])</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+        <span class="s1">h </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">lst</span><span class="s2">), </span><span class="s4">1</span><span class="s2">)</span>
+        <span class="s1">h</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">lst</span><span class="s2">), </span><span class="s4">2</span><span class="s2">)</span>
+        <span class="s1">h</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">lst</span><span class="s2">), </span><span class="s4">4</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">h</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">lst</span><span class="s2">), </span><span class="s4">6</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_two_recursive_children</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">lst </span><span class="s2">= []</span>
+
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s1">lst</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s5">'b'</span><span class="s2">)</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">g</span><span class="s2">():</span>
+            <span class="s1">lst</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s5">'a'</span><span class="s2">)</span>
+            <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">lst</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s5">'c'</span><span class="s2">)</span>
+
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getrefcount</span><span class="s2">(</span><span class="s1">g</span><span class="s2">), </span><span class="s4">2</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">lst</span><span class="s2">, [</span><span class="s5">'a'</span><span class="s2">, </span><span class="s5">'b'</span><span class="s2">, </span><span class="s5">'c'</span><span class="s2">])</span>
+        <span class="s3"># Just the one in this frame, plus the one on the stack we pass to the function</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getrefcount</span><span class="s2">(</span><span class="s1">g</span><span class="s2">), </span><span class="s4">2</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_threads</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">success </span><span class="s2">= []</span>
+
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_do_simple_test</span><span class="s2">()</span>
+            <span class="s1">success</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">ths </span><span class="s2">= [</span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">f</span><span class="s2">) </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)]</span>
+        <span class="s0">for </span><span class="s1">th </span><span class="s0">in </span><span class="s1">ths</span><span class="s2">:</span>
+            <span class="s1">th</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">th </span><span class="s0">in </span><span class="s1">ths</span><span class="s2">:</span>
+            <span class="s1">th</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">success</span><span class="s2">), </span><span class="s1">len</span><span class="s2">(</span><span class="s1">ths</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_exception</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">seen </span><span class="s2">= []</span>
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">fmain</span><span class="s2">)</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">fmain</span><span class="s2">)</span>
+        <span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">)</span>
+        <span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">)</span>
+        <span class="s1">g2</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">g1</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [])</span>
+        <span class="s3">#with self.assertRaises(SomeError):</span>
+        <span class="s3">#    p(&quot;***Switching back&quot;)</span>
+        <span class="s3">#    g2.switch()</span>
+        <span class="s3"># Creating this as a bound method can reveal bugs that</span>
+        <span class="s3"># are hidden on newer versions of Python that avoid creating</span>
+        <span class="s3"># bound methods for direct expressions; IOW, don't use the `with`</span>
+        <span class="s3"># form!</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">SomeError</span><span class="s2">, </span><span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s1">SomeError</span><span class="s2">])</span>
+
+        <span class="s1">value </span><span class="s2">= </span><span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, ())</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s1">SomeError</span><span class="s2">])</span>
+
+        <span class="s1">value </span><span class="s2">= </span><span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s4">25</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, </span><span class="s4">25</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s1">SomeError</span><span class="s2">])</span>
+
+
+    <span class="s0">def </span><span class="s1">test_send_exception</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">seen </span><span class="s2">= []</span>
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">fmain</span><span class="s2">)</span>
+        <span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">KeyError</span><span class="s2">, </span><span class="s1">send_exception</span><span class="s2">, </span><span class="s1">g1</span><span class="s2">, </span><span class="s1">KeyError</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s1">KeyError</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_dealloc</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">seen </span><span class="s2">= []</span>
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">fmain</span><span class="s2">)</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">fmain</span><span class="s2">)</span>
+        <span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">)</span>
+        <span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [])</span>
+        <span class="s0">del </span><span class="s1">g1</span>
+        <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">])</span>
+        <span class="s0">del </span><span class="s1">g2</span>
+        <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">, </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_dealloc_catches_GreenletExit_throws_other</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">run</span><span class="s2">():</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s0">except </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">SomeError </span><span class="s0">from None</span>
+
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">run</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s3"># Destroying the only reference to the greenlet causes it</span>
+        <span class="s3"># to get GreenletExit; when it in turn raises, even though we're the parent</span>
+        <span class="s3"># we don't get the exception, it just gets printed.</span>
+        <span class="s3"># When we run on 3.8 only, we can use sys.unraisablehook</span>
+        <span class="s1">oldstderr </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr</span>
+        <span class="s0">from </span><span class="s1">io </span><span class="s0">import </span><span class="s1">StringIO</span>
+        <span class="s1">stderr </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr </span><span class="s2">= </span><span class="s1">StringIO</span><span class="s2">()</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">del </span><span class="s1">g</span>
+        <span class="s0">finally</span><span class="s2">:</span>
+            <span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr </span><span class="s2">= </span><span class="s1">oldstderr</span>
+
+        <span class="s1">v </span><span class="s2">= </span><span class="s1">stderr</span><span class="s2">.</span><span class="s1">getvalue</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">&quot;Exception&quot;</span><span class="s2">, </span><span class="s1">v</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'ignored'</span><span class="s2">, </span><span class="s1">v</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">&quot;SomeError&quot;</span><span class="s2">, </span><span class="s1">v</span><span class="s2">)</span>
+
+
+    <span class="s2">@</span><span class="s1">unittest</span><span class="s2">.</span><span class="s1">skipIf</span><span class="s2">(</span>
+        <span class="s1">PY313 </span><span class="s0">and </span><span class="s1">RUNNING_ON_MANYLINUX</span><span class="s2">,</span>
+        <span class="s5">&quot;Sometimes flaky (getting one GreenletExit in the second list)&quot;</span>
+        <span class="s3"># Probably due to funky timing interactions?</span>
+        <span class="s3"># TODO: FIXME Make that work.</span>
+    <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dealloc_other_thread</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">seen </span><span class="s2">= []</span>
+        <span class="s1">someref </span><span class="s2">= []</span>
+
+        <span class="s1">bg_glet_created_running_and_no_longer_ref_in_bg </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">fg_ref_released </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">bg_should_be_clear </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">ok_to_exit_bg_thread </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s1">g1 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">fmain</span><span class="s2">)</span>
+            <span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">)</span>
+            <span class="s1">someref</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">g1</span><span class="s2">)</span>
+            <span class="s0">del </span><span class="s1">g1</span>
+            <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+
+            <span class="s1">bg_glet_created_running_and_no_longer_ref_in_bg</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s1">fg_ref_released</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">3</span><span class="s2">)</span>
+
+            <span class="s1">RawGreenlet</span><span class="s2">()   </span><span class="s3"># trigger release</span>
+            <span class="s1">bg_should_be_clear</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s1">ok_to_exit_bg_thread</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">3</span><span class="s2">)</span>
+            <span class="s1">RawGreenlet</span><span class="s2">() </span><span class="s3"># One more time</span>
+
+        <span class="s1">t </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">f</span><span class="s2">)</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s1">bg_glet_created_running_and_no_longer_ref_in_bg</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [])</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">someref</span><span class="s2">), </span><span class="s4">1</span><span class="s2">)</span>
+        <span class="s0">del </span><span class="s1">someref</span><span class="s2">[:]</span>
+        <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+        <span class="s3"># g1 is not released immediately because it's from another thread</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [])</span>
+        <span class="s1">fg_ref_released</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s1">bg_should_be_clear</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">3</span><span class="s2">)</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">])</span>
+        <span class="s0">finally</span><span class="s2">:</span>
+            <span class="s1">ok_to_exit_bg_thread</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s1">t</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+            <span class="s0">del </span><span class="s1">seen</span><span class="s2">[:]</span>
+            <span class="s0">del </span><span class="s1">someref</span><span class="s2">[:]</span>
+
+    <span class="s0">def </span><span class="s1">test_frame</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">f1</span><span class="s2">():</span>
+            <span class="s1">f </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">_getframe</span><span class="s2">(</span><span class="s4">0</span><span class="s2">) </span><span class="s3"># pylint:disable=protected-access</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">f</span><span class="s2">.</span><span class="s1">f_back</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s5">&quot;meaning of life&quot;</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">f1</span><span class="s2">)</span>
+        <span class="s1">frame </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">frame </span><span class="s0">is </span><span class="s1">g</span><span class="s2">.</span><span class="s1">gr_frame</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+
+        <span class="s1">from_g </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertFalse</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">from_g</span><span class="s2">, </span><span class="s5">'meaning of life'</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">gr_frame</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_thread_bug</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">runner</span><span class="s2">(</span><span class="s1">x</span><span class="s2">):</span>
+            <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">time</span><span class="s2">.</span><span class="s1">sleep</span><span class="s2">(</span><span class="s1">x</span><span class="s2">))</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">t1 </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">runner</span><span class="s2">, </span><span class="s1">args</span><span class="s2">=(</span><span class="s4">0.2</span><span class="s2">,))</span>
+        <span class="s1">t2 </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">runner</span><span class="s2">, </span><span class="s1">args</span><span class="s2">=(</span><span class="s4">0.3</span><span class="s2">,))</span>
+        <span class="s1">t1</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s1">t2</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s1">t1</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s1">t2</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_switch_kwargs</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">run</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s1">b</span><span class="s2">):</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">a</span><span class="s2">, </span><span class="s4">4</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">b</span><span class="s2">, </span><span class="s4">2</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s4">42</span>
+        <span class="s1">x </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">run</span><span class="s2">).</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">a</span><span class="s2">=</span><span class="s4">4</span><span class="s2">, </span><span class="s1">b</span><span class="s2">=</span><span class="s4">2</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_switch_kwargs_to_parent</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">run</span><span class="s2">(</span><span class="s1">x</span><span class="s2">):</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">x</span><span class="s2">=</span><span class="s1">x</span><span class="s2">)</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s4">2</span><span class="s2">, </span><span class="s1">x</span><span class="s2">=</span><span class="s4">3</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">x</span><span class="s2">, </span><span class="s1">x </span><span class="s2">** </span><span class="s4">2</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">run</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">({</span><span class="s5">'x'</span><span class="s2">: </span><span class="s4">3</span><span class="s2">}, </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s4">3</span><span class="s2">))</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(((</span><span class="s4">2</span><span class="s2">,), {</span><span class="s5">'x'</span><span class="s2">: </span><span class="s4">3</span><span class="s2">}), </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">())</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">((</span><span class="s4">3</span><span class="s2">, </span><span class="s4">9</span><span class="s2">), </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">())</span>
+
+    <span class="s0">def </span><span class="s1">test_switch_to_another_thread</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">data </span><span class="s2">= {}</span>
+        <span class="s1">created_event </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">done_event </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">run</span><span class="s2">():</span>
+            <span class="s1">data</span><span class="s2">[</span><span class="s5">'g'</span><span class="s2">] = </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+            <span class="s1">created_event</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s1">done_event</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s1">thread </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">run</span><span class="s2">)</span>
+        <span class="s1">thread</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s1">created_event</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">error</span><span class="s2">):</span>
+            <span class="s1">data</span><span class="s2">[</span><span class="s5">'g'</span><span class="s2">].</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">done_event</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s1">thread</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s3"># XXX: Should handle this automatically</span>
+        <span class="s1">data</span><span class="s2">.</span><span class="s1">clear</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_exc_state</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s5">'fun'</span><span class="s2">)</span>
+            <span class="s0">except</span><span class="s2">: </span><span class="s3"># pylint:disable=bare-except</span>
+                <span class="s1">exc_info </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">exc_info</span><span class="s2">()</span>
+                <span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">h</span><span class="s2">).</span><span class="s1">switch</span><span class="s2">()</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">exc_info</span><span class="s2">, </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">exc_info</span><span class="s2">())</span>
+
+        <span class="s0">def </span><span class="s1">h</span><span class="s2">():</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">exc_info</span><span class="s2">(), (</span><span class="s0">None</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, </span><span class="s0">None</span><span class="s2">))</span>
+
+        <span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">).</span><span class="s1">switch</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_instance_dict</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">test </span><span class="s2">= </span><span class="s4">42</span>
+        <span class="s0">def </span><span class="s1">deldict</span><span class="s2">(</span><span class="s1">g</span><span class="s2">):</span>
+            <span class="s0">del </span><span class="s1">g</span><span class="s2">.</span><span class="s1">__dict__</span>
+        <span class="s0">def </span><span class="s1">setdict</span><span class="s2">(</span><span class="s1">g</span><span class="s2">, </span><span class="s1">value</span><span class="s2">):</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">__dict__ </span><span class="s2">= </span><span class="s1">value</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">__dict__</span><span class="s2">, {})</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">test</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">__dict__</span><span class="s2">, {</span><span class="s5">'test'</span><span class="s2">: </span><span class="s4">42</span><span class="s2">})</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">__dict__ </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">__dict__</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">__dict__</span><span class="s2">, {</span><span class="s5">'test'</span><span class="s2">: </span><span class="s4">42</span><span class="s2">})</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">deldict</span><span class="s2">, </span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">setdict</span><span class="s2">, </span><span class="s1">g</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_running_greenlet_has_no_run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">has_run </span><span class="s2">= []</span>
+        <span class="s0">def </span><span class="s1">func</span><span class="s2">():</span>
+            <span class="s1">has_run</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span>
+                <span class="s1">hasattr</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">(), </span><span class="s5">'run'</span><span class="s2">)</span>
+            <span class="s2">)</span>
+
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">func</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">has_run</span><span class="s2">, [</span><span class="s0">False</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_deepcopy</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">import </span><span class="s1">copy</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">, </span><span class="s1">RawGreenlet</span><span class="s2">())</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">copy</span><span class="s2">.</span><span class="s1">deepcopy</span><span class="s2">, </span><span class="s1">RawGreenlet</span><span class="s2">())</span>
+
+    <span class="s0">def </span><span class="s1">test_parent_restored_on_kill</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">hub </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+        <span class="s1">result </span><span class="s2">= []</span>
+        <span class="s0">def </span><span class="s1">worker</span><span class="s2">():</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s3"># Wait to be killed by going back to the test.</span>
+                <span class="s1">main</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s0">except </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">:</span>
+                <span class="s3"># Resurrect and switch to parent</span>
+                <span class="s1">result</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">)</span>
+                <span class="s1">result</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">())</span>
+                <span class="s1">hub</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">worker</span><span class="s2">, </span><span class="s1">parent</span><span class="s2">=</span><span class="s1">hub</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s3"># delete the only reference, thereby raising GreenletExit</span>
+        <span class="s0">del </span><span class="s1">g</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">result</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIs</span><span class="s2">(</span><span class="s1">result</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s1">main</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIs</span><span class="s2">(</span><span class="s1">result</span><span class="s2">[</span><span class="s4">1</span><span class="s2">].</span><span class="s1">parent</span><span class="s2">, </span><span class="s1">hub</span><span class="s2">)</span>
+        <span class="s3"># Delete them, thereby breaking the cycle between the greenlet</span>
+        <span class="s3"># and the frame, which otherwise would never be collectable</span>
+        <span class="s3"># XXX: We should be able to automatically fix this.</span>
+        <span class="s0">del </span><span class="s1">result</span><span class="s2">[:]</span>
+        <span class="s1">hub </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">test_parent_return_failure</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># No run causes AttributeError on switch</span>
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">()</span>
+        <span class="s3"># Greenlet that implicitly switches to parent</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">, </span><span class="s1">parent</span><span class="s2">=</span><span class="s1">g1</span><span class="s2">)</span>
+        <span class="s3"># AttributeError should propagate to us, no fatal errors</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">):</span>
+            <span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_throw_exception_not_lost</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">mygreenlet</span><span class="s2">(</span><span class="s1">RawGreenlet</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">):</span>
+                <span class="s0">try</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">Exception </span><span class="s3"># pylint:disable=broad-exception-raised</span>
+                <span class="s0">except</span><span class="s2">: </span><span class="s3"># pylint:disable=bare-except</span>
+                    <span class="s0">pass</span>
+                <span class="s0">return </span><span class="s1">RawGreenlet</span><span class="s2">.</span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">mygreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">SomeError</span><span class="s2">, </span><span class="s1">g</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">, </span><span class="s1">SomeError</span><span class="s2">())</span>
+
+    <span class="s2">@</span><span class="s1">fails_leakcheck</span>
+    <span class="s0">def </span><span class="s1">_do_test_throw_to_dead_thread_doesnt_crash</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">wait_for_cleanup</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):</span>
+        <span class="s1">result </span><span class="s2">= []</span>
+        <span class="s0">def </span><span class="s1">worker</span><span class="s2">():</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">creator</span><span class="s2">():</span>
+            <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">worker</span><span class="s2">)</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">result</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">wait_for_cleanup</span><span class="s2">:</span>
+                <span class="s3"># Let this greenlet eventually be cleaned up.</span>
+                <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+        <span class="s1">t </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">creator</span><span class="s2">)</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s0">del </span><span class="s1">t</span>
+        <span class="s3"># But, depending on the operating system, the thread</span>
+        <span class="s3"># deallocator may not actually have run yet! So we can't be</span>
+        <span class="s3"># sure about the error message unless we wait.</span>
+        <span class="s0">if </span><span class="s1">wait_for_cleanup</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">wait_for_pending_cleanups</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">error</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">result</span><span class="s2">[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">throw</span><span class="s2">(</span><span class="s1">SomeError</span><span class="s2">)</span>
+
+        <span class="s0">if not </span><span class="s1">wait_for_cleanup</span><span class="s2">:</span>
+            <span class="s1">s </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span>
+                <span class="s1">s </span><span class="s2">== </span><span class="s5">&quot;cannot switch to a different thread (which happens to have exited)&quot;</span>
+                <span class="s0">or </span><span class="s5">'Cannot switch' </span><span class="s0">in </span><span class="s1">s</span>
+            <span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span>
+                <span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">),</span>
+                <span class="s5">&quot;cannot switch to a different thread (which happens to have exited)&quot;</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">result</span><span class="s2">[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">gr_frame</span><span class="s2">, </span><span class="s5">'clear'</span><span class="s2">):</span>
+            <span class="s3"># The frame is actually executing (it thinks), we can't clear it.</span>
+            <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">RuntimeError</span><span class="s2">):</span>
+                <span class="s1">result</span><span class="s2">[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">gr_frame</span><span class="s2">.</span><span class="s1">clear</span><span class="s2">()</span>
+        <span class="s3"># Unfortunately, this doesn't actually clear the references, they're in the</span>
+        <span class="s3"># fast local array.</span>
+        <span class="s0">if not </span><span class="s1">wait_for_cleanup</span><span class="s2">:</span>
+            <span class="s3"># f_locals has no clear method in Python 3.13</span>
+            <span class="s0">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">result</span><span class="s2">[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">gr_frame</span><span class="s2">.</span><span class="s1">f_locals</span><span class="s2">, </span><span class="s5">'clear'</span><span class="s2">):</span>
+                <span class="s1">result</span><span class="s2">[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">gr_frame</span><span class="s2">.</span><span class="s1">f_locals</span><span class="s2">.</span><span class="s1">clear</span><span class="s2">()</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">result</span><span class="s2">[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">gr_frame</span><span class="s2">)</span>
+
+        <span class="s0">del </span><span class="s1">creator</span>
+        <span class="s1">worker </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s0">del </span><span class="s1">result</span><span class="s2">[:]</span>
+        <span class="s3"># XXX: we ought to be able to automatically fix this.</span>
+        <span class="s3"># See issue 252</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">expect_greenlet_leak </span><span class="s2">= </span><span class="s0">True </span><span class="s3"># direct us not to wait for it to go away</span>
+
+    <span class="s2">@</span><span class="s1">fails_leakcheck</span>
+    <span class="s0">def </span><span class="s1">test_throw_to_dead_thread_doesnt_crash</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_do_test_throw_to_dead_thread_doesnt_crash</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_throw_to_dead_thread_doesnt_crash_wait</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_do_test_throw_to_dead_thread_doesnt_crash</span><span class="s2">(</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">fails_leakcheck</span>
+    <span class="s0">def </span><span class="s1">test_recursive_startup</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">convoluted</span><span class="s2">(</span><span class="s1">RawGreenlet</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s1">RawGreenlet</span><span class="s2">.</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">count </span><span class="s2">= </span><span class="s4">0</span>
+            <span class="s0">def </span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">name </span><span class="s2">== </span><span class="s5">'run' </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">count </span><span class="s2">== </span><span class="s4">0</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">count </span><span class="s2">= </span><span class="s4">1</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s4">43</span><span class="s2">)</span>
+                <span class="s0">return </span><span class="s1">RawGreenlet</span><span class="s2">.</span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+            <span class="s0">def </span><span class="s1">run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">):</span>
+                <span class="s0">while True</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">convoluted</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s4">42</span><span class="s2">), </span><span class="s4">43</span><span class="s2">)</span>
+        <span class="s3"># Exits the running greenlet, otherwise it leaks</span>
+        <span class="s3"># XXX: We should be able to automatically fix this</span>
+        <span class="s3">#g.throw(greenlet.GreenletExit)</span>
+        <span class="s3">#del g</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">expect_greenlet_leak </span><span class="s2">= </span><span class="s0">True</span>
+
+    <span class="s0">def </span><span class="s1">test_threaded_updatecurrent</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># released when main thread should execute</span>
+        <span class="s1">lock1 </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Lock</span><span class="s2">()</span>
+        <span class="s1">lock1</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">()</span>
+        <span class="s3"># released when another thread should execute</span>
+        <span class="s1">lock2 </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Lock</span><span class="s2">()</span>
+        <span class="s1">lock2</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">()</span>
+        <span class="s0">class </span><span class="s1">finalized</span><span class="s2">(</span><span class="s1">object</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">__del__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s3"># happens while in green_updatecurrent() in main greenlet</span>
+                <span class="s3"># should be very careful not to accidentally call it again</span>
+                <span class="s3"># at the same time we must make sure another thread executes</span>
+                <span class="s1">lock2</span><span class="s2">.</span><span class="s1">release</span><span class="s2">()</span>
+                <span class="s1">lock1</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">()</span>
+                <span class="s3"># now ts_current belongs to another thread</span>
+        <span class="s0">def </span><span class="s1">deallocator</span><span class="s2">():</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s0">def </span><span class="s1">fthread</span><span class="s2">():</span>
+            <span class="s1">lock2</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">()</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+            <span class="s0">del </span><span class="s1">g</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span>
+            <span class="s1">lock1</span><span class="s2">.</span><span class="s1">release</span><span class="s2">()</span>
+            <span class="s1">lock2</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">()</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+            <span class="s1">lock1</span><span class="s2">.</span><span class="s1">release</span><span class="s2">()</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+        <span class="s1">g </span><span class="s2">= [</span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">deallocator</span><span class="s2">)]</span>
+        <span class="s1">g</span><span class="s2">[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">bomb </span><span class="s2">= </span><span class="s1">finalized</span><span class="s2">()</span>
+        <span class="s1">g</span><span class="s2">[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">t </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">fthread</span><span class="s2">)</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s3"># let another thread grab ts_current and deallocate g[0]</span>
+        <span class="s1">lock2</span><span class="s2">.</span><span class="s1">release</span><span class="s2">()</span>
+        <span class="s1">lock1</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">()</span>
+        <span class="s3"># this is the corner stone</span>
+        <span class="s3"># getcurrent() will notice that ts_current belongs to another thread</span>
+        <span class="s3"># and start the update process, which would notice that g[0] should</span>
+        <span class="s3"># be deallocated, and that will execute an object's finalizer. Now,</span>
+        <span class="s3"># that object will let another thread run so it can grab ts_current</span>
+        <span class="s3"># again, which would likely crash the interpreter if there's no</span>
+        <span class="s3"># check for this case at the end of green_updatecurrent(). This test</span>
+        <span class="s3"># passes if getcurrent() returns correct result, but it's likely</span>
+        <span class="s3"># to randomly crash if it's not anyway.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">(), </span><span class="s1">main</span><span class="s2">)</span>
+        <span class="s3"># wait for another thread to complete, just in case</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dealloc_switch_args_not_lost</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">seen </span><span class="s2">= []</span>
+        <span class="s0">def </span><span class="s1">worker</span><span class="s2">():</span>
+            <span class="s3"># wait for the value</span>
+            <span class="s1">value </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s3"># delete all references to ourself</span>
+            <span class="s0">del </span><span class="s1">worker</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]</span>
+            <span class="s1">initiator</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span>
+            <span class="s3"># switch to main with the value, but because</span>
+            <span class="s3"># ts_current is the last reference to us we</span>
+            <span class="s3"># return here immediately, where we resurrect ourself.</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+            <span class="s0">finally</span><span class="s2">:</span>
+                <span class="s1">seen</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">())</span>
+        <span class="s0">def </span><span class="s1">initiator</span><span class="s2">():</span>
+            <span class="s0">return </span><span class="s4">42 </span><span class="s3"># implicitly falls thru to parent</span>
+
+        <span class="s1">worker </span><span class="s2">= [</span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">worker</span><span class="s2">)]</span>
+
+        <span class="s1">worker</span><span class="s2">[</span><span class="s4">0</span><span class="s2">].</span><span class="s1">switch</span><span class="s2">() </span><span class="s3"># prime worker</span>
+        <span class="s1">initiator </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">initiator</span><span class="s2">, </span><span class="s1">worker</span><span class="s2">[</span><span class="s4">0</span><span class="s2">])</span>
+        <span class="s1">value </span><span class="s2">= </span><span class="s1">initiator</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, </span><span class="s4">42</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_tuple_subclass</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># The point of this test is to see what happens when a custom</span>
+        <span class="s3"># tuple subclass is used as an object passed directly to the C</span>
+        <span class="s3"># function ``green_switch``; part of ``green_switch`` checks</span>
+        <span class="s3"># the ``len()`` of the ``args`` tuple, and that can call back</span>
+        <span class="s3"># into Python. Here, when it calls back into Python, we</span>
+        <span class="s3"># recursively enter ``green_switch`` again.</span>
+
+        <span class="s3"># This test is really only relevant on Python 2. The builtin</span>
+        <span class="s3"># `apply` function directly passes the given args tuple object</span>
+        <span class="s3"># to the underlying function, whereas the Python 3 version</span>
+        <span class="s3"># unpacks and repacks into an actual tuple. This could still</span>
+        <span class="s3"># happen using the C API on Python 3 though. We should write a</span>
+        <span class="s3"># builtin version of apply() ourself.</span>
+        <span class="s0">def </span><span class="s1">_apply</span><span class="s2">(</span><span class="s1">func</span><span class="s2">, </span><span class="s1">a</span><span class="s2">, </span><span class="s1">k</span><span class="s2">):</span>
+            <span class="s1">func</span><span class="s2">(*</span><span class="s1">a</span><span class="s2">, **</span><span class="s1">k</span><span class="s2">)</span>
+
+        <span class="s0">class </span><span class="s1">mytuple</span><span class="s2">(</span><span class="s1">tuple</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">__len__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">switch</span><span class="s2">()</span>
+                <span class="s0">return </span><span class="s1">tuple</span><span class="s2">.</span><span class="s1">__len__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+        <span class="s1">args </span><span class="s2">= </span><span class="s1">mytuple</span><span class="s2">()</span>
+        <span class="s1">kwargs </span><span class="s2">= </span><span class="s1">dict</span><span class="s2">(</span><span class="s1">a</span><span class="s2">=</span><span class="s4">42</span><span class="s2">)</span>
+        <span class="s0">def </span><span class="s1">switchapply</span><span class="s2">():</span>
+            <span class="s1">_apply</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">, </span><span class="s1">args</span><span class="s2">, </span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">switchapply</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(), </span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_abstract_subclasses</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">AbstractSubclass </span><span class="s2">= </span><span class="s1">ABCMeta</span><span class="s2">(</span>
+            <span class="s5">'AbstractSubclass'</span><span class="s2">,</span>
+            <span class="s2">(</span><span class="s1">RawGreenlet</span><span class="s2">,),</span>
+            <span class="s2">{</span><span class="s5">'run'</span><span class="s2">: </span><span class="s1">abstractmethod</span><span class="s2">(</span><span class="s0">lambda </span><span class="s1">self</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)})</span>
+
+        <span class="s0">class </span><span class="s1">BadSubclass</span><span class="s2">(</span><span class="s1">AbstractSubclass</span><span class="s2">):</span>
+            <span class="s0">pass</span>
+
+        <span class="s0">class </span><span class="s1">GoodSubclass</span><span class="s2">(</span><span class="s1">AbstractSubclass</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s0">pass</span>
+
+        <span class="s1">GoodSubclass</span><span class="s2">() </span><span class="s3"># should not raise</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">, </span><span class="s1">BadSubclass</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_implicit_parent_with_threads</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if not </span><span class="s1">gc</span><span class="s2">.</span><span class="s1">isenabled</span><span class="s2">():</span>
+            <span class="s0">return </span><span class="s3"># cannot test with disabled gc</span>
+        <span class="s1">N </span><span class="s2">= </span><span class="s1">gc</span><span class="s2">.</span><span class="s1">get_threshold</span><span class="s2">()[</span><span class="s4">0</span><span class="s2">]</span>
+        <span class="s0">if </span><span class="s1">N </span><span class="s2">&lt; </span><span class="s4">50</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s3"># cannot test with such a small N</span>
+        <span class="s0">def </span><span class="s1">attempt</span><span class="s2">():</span>
+            <span class="s1">lock1 </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Lock</span><span class="s2">()</span>
+            <span class="s1">lock1</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">()</span>
+            <span class="s1">lock2 </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Lock</span><span class="s2">()</span>
+            <span class="s1">lock2</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">()</span>
+            <span class="s1">recycled </span><span class="s2">= [</span><span class="s0">False</span><span class="s2">]</span>
+            <span class="s0">def </span><span class="s1">another_thread</span><span class="s2">():</span>
+                <span class="s1">lock1</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">() </span><span class="s3"># wait for gc</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">() </span><span class="s3"># update ts_current</span>
+                <span class="s1">lock2</span><span class="s2">.</span><span class="s1">release</span><span class="s2">() </span><span class="s3"># release gc</span>
+            <span class="s1">t </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">another_thread</span><span class="s2">)</span>
+            <span class="s1">t</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+            <span class="s0">class </span><span class="s1">gc_callback</span><span class="s2">(</span><span class="s1">object</span><span class="s2">):</span>
+                <span class="s0">def </span><span class="s1">__del__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                    <span class="s1">lock1</span><span class="s2">.</span><span class="s1">release</span><span class="s2">()</span>
+                    <span class="s1">lock2</span><span class="s2">.</span><span class="s1">acquire</span><span class="s2">()</span>
+                    <span class="s1">recycled</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] = </span><span class="s0">True</span>
+            <span class="s0">class </span><span class="s1">garbage</span><span class="s2">(</span><span class="s1">object</span><span class="s2">):</span>
+                <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">cycle </span><span class="s2">= </span><span class="s1">self</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">callback </span><span class="s2">= </span><span class="s1">gc_callback</span><span class="s2">()</span>
+            <span class="s1">l </span><span class="s2">= []</span>
+            <span class="s1">x </span><span class="s2">= </span><span class="s1">range</span><span class="s2">(</span><span class="s1">N</span><span class="s2">*</span><span class="s4">2</span><span class="s2">)</span>
+            <span class="s1">current </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+            <span class="s1">g </span><span class="s2">= </span><span class="s1">garbage</span><span class="s2">()</span>
+            <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">x</span><span class="s2">:</span>
+                <span class="s1">g </span><span class="s2">= </span><span class="s0">None </span><span class="s3"># lose reference to garbage</span>
+                <span class="s0">if </span><span class="s1">recycled</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]:</span>
+                    <span class="s3"># gc callback called prematurely</span>
+                    <span class="s1">t</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+                    <span class="s0">return False</span>
+                <span class="s1">last </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">()</span>
+                <span class="s0">if </span><span class="s1">recycled</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]:</span>
+                    <span class="s0">break </span><span class="s3"># yes! gc called in green_new</span>
+                <span class="s1">l</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">last</span><span class="s2">) </span><span class="s3"># increase allocation counter</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s3"># gc callback not called when expected</span>
+                <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+                <span class="s0">if </span><span class="s1">recycled</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]:</span>
+                    <span class="s1">t</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+                <span class="s0">return False</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">last</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">, </span><span class="s1">current</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">g </span><span class="s0">in </span><span class="s1">l</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">, </span><span class="s1">current</span><span class="s2">)</span>
+            <span class="s0">return True</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">5</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">attempt</span><span class="s2">():</span>
+                <span class="s0">break</span>
+
+    <span class="s0">def </span><span class="s1">test_issue_245_reference_counting_subclass_no_threads</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># https://github.com/python-greenlet/greenlet/issues/245</span>
+        <span class="s3"># Before the fix, this crashed pretty reliably on</span>
+        <span class="s3"># Python 3.10, at least on macOS; but much less reliably on other</span>
+        <span class="s3"># interpreters (memory layout must have changed).</span>
+        <span class="s3"># The threaded test crashed more reliably on more interpreters.</span>
+        <span class="s0">from </span><span class="s1">greenlet </span><span class="s0">import </span><span class="s1">getcurrent</span>
+        <span class="s0">from </span><span class="s1">greenlet </span><span class="s0">import </span><span class="s1">GreenletExit</span>
+
+        <span class="s0">class </span><span class="s1">Greenlet</span><span class="s2">(</span><span class="s1">RawGreenlet</span><span class="s2">):</span>
+            <span class="s0">pass</span>
+
+        <span class="s1">initial_refs </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getrefcount</span><span class="s2">(</span><span class="s1">Greenlet</span><span class="s2">)</span>
+        <span class="s3"># This has to be an instance variable because</span>
+        <span class="s3"># Python 2 raises a SyntaxError if we delete a local</span>
+        <span class="s3"># variable referenced in an inner scope.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">glets </span><span class="s2">= [] </span><span class="s3"># pylint:disable=attribute-defined-outside-init</span>
+
+        <span class="s0">def </span><span class="s1">greenlet_main</span><span class="s2">():</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s0">except </span><span class="s1">GreenletExit</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">glets</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">getcurrent</span><span class="s2">())</span>
+
+        <span class="s3"># Before the</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">10</span><span class="s2">):</span>
+            <span class="s1">Greenlet</span><span class="s2">(</span><span class="s1">greenlet_main</span><span class="s2">).</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s0">del </span><span class="s1">self</span><span class="s2">.</span><span class="s1">glets</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getrefcount</span><span class="s2">(</span><span class="s1">Greenlet</span><span class="s2">), </span><span class="s1">initial_refs</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">unittest</span><span class="s2">.</span><span class="s1">skipIf</span><span class="s2">(</span>
+        <span class="s1">PY313 </span><span class="s0">and </span><span class="s1">RUNNING_ON_MANYLINUX</span><span class="s2">,</span>
+        <span class="s5">&quot;The manylinux images appear to hang on this test on 3.13rc2&quot;</span>
+        <span class="s3"># Or perhaps I just got tired of waiting for the 450s timeout.</span>
+        <span class="s3"># Still, it shouldn't take anywhere near that long. Does not reproduce in</span>
+        <span class="s3"># Ubuntu images, on macOS or Windows.</span>
+    <span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_issue_245_reference_counting_subclass_threads</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># https://github.com/python-greenlet/greenlet/issues/245</span>
+        <span class="s0">from </span><span class="s1">threading </span><span class="s0">import </span><span class="s1">Thread</span>
+        <span class="s0">from </span><span class="s1">threading </span><span class="s0">import </span><span class="s1">Event</span>
+
+        <span class="s0">from </span><span class="s1">greenlet </span><span class="s0">import </span><span class="s1">getcurrent</span>
+
+        <span class="s0">class </span><span class="s1">MyGreenlet</span><span class="s2">(</span><span class="s1">RawGreenlet</span><span class="s2">):</span>
+            <span class="s0">pass</span>
+
+        <span class="s1">glets </span><span class="s2">= []</span>
+        <span class="s1">ref_cleared </span><span class="s2">= </span><span class="s1">Event</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">greenlet_main</span><span class="s2">():</span>
+            <span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">thread_main</span><span class="s2">(</span><span class="s1">greenlet_running_event</span><span class="s2">):</span>
+            <span class="s1">mine </span><span class="s2">= </span><span class="s1">MyGreenlet</span><span class="s2">(</span><span class="s1">greenlet_main</span><span class="s2">)</span>
+            <span class="s1">glets</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">mine</span><span class="s2">)</span>
+            <span class="s3"># The greenlets being deleted must be active</span>
+            <span class="s1">mine</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s3"># Don't keep any reference to it in this thread</span>
+            <span class="s0">del </span><span class="s1">mine</span>
+            <span class="s3"># Let main know we published our greenlet.</span>
+            <span class="s1">greenlet_running_event</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s3"># Wait for main to let us know the references are</span>
+            <span class="s3"># gone and the greenlet objects no longer reachable</span>
+            <span class="s1">ref_cleared</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+            <span class="s3"># The creating thread must call getcurrent() (or a few other</span>
+            <span class="s3"># greenlet APIs) because that's when the thread-local list of dead</span>
+            <span class="s3"># greenlets gets cleared.</span>
+            <span class="s1">getcurrent</span><span class="s2">()</span>
+
+        <span class="s3"># We start with 3 references to the subclass:</span>
+        <span class="s3"># - This module</span>
+        <span class="s3"># - Its __mro__</span>
+        <span class="s3"># - The __subclassess__ attribute of greenlet</span>
+        <span class="s3"># - (If we call gc.get_referents(), we find four entries, including</span>
+        <span class="s3">#   some other tuple ``(greenlet)`` that I'm not sure about but must be part</span>
+        <span class="s3">#   of the machinery.)</span>
+        <span class="s3">#</span>
+        <span class="s3"># On Python 3.10 it's often enough to just run 3 threads; on Python 2.7,</span>
+        <span class="s3"># more threads are needed, and the results are still</span>
+        <span class="s3"># non-deterministic. Presumably the memory layouts are different</span>
+        <span class="s1">initial_refs </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getrefcount</span><span class="s2">(</span><span class="s1">MyGreenlet</span><span class="s2">)</span>
+        <span class="s1">thread_ready_events </span><span class="s2">= []</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span>
+                <span class="s1">initial_refs </span><span class="s2">+ </span><span class="s4">45</span>
+        <span class="s2">):</span>
+            <span class="s1">event </span><span class="s2">= </span><span class="s1">Event</span><span class="s2">()</span>
+            <span class="s1">thread </span><span class="s2">= </span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">thread_main</span><span class="s2">, </span><span class="s1">args</span><span class="s2">=(</span><span class="s1">event</span><span class="s2">,))</span>
+            <span class="s1">thread_ready_events</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">event</span><span class="s2">)</span>
+            <span class="s1">thread</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+
+
+        <span class="s0">for </span><span class="s1">done_event </span><span class="s0">in </span><span class="s1">thread_ready_events</span><span class="s2">:</span>
+            <span class="s1">done_event</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+
+
+        <span class="s0">del </span><span class="s1">glets</span><span class="s2">[:]</span>
+        <span class="s1">ref_cleared</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s3"># Let any other thread run; it will crash the interpreter</span>
+        <span class="s3"># if not fixed (or silently corrupt memory and we possibly crash</span>
+        <span class="s3"># later).</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">wait_for_pending_cleanups</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getrefcount</span><span class="s2">(</span><span class="s1">MyGreenlet</span><span class="s2">), </span><span class="s1">initial_refs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_falling_off_end_switches_to_unstarted_parent_raises_error</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">no_args</span><span class="s2">():</span>
+            <span class="s0">return </span><span class="s4">13</span>
+
+        <span class="s1">parent_never_started </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">no_args</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">leaf</span><span class="s2">():</span>
+            <span class="s0">return </span><span class="s4">42</span>
+
+        <span class="s1">child </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">leaf</span><span class="s2">, </span><span class="s1">parent_never_started</span><span class="s2">)</span>
+
+        <span class="s3"># Because the run function takes to arguments</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">):</span>
+            <span class="s1">child</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_falling_off_end_switches_to_unstarted_parent_works</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">one_arg</span><span class="s2">(</span><span class="s1">x</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s4">24</span><span class="s2">)</span>
+
+        <span class="s1">parent_never_started </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">one_arg</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">leaf</span><span class="s2">():</span>
+            <span class="s0">return </span><span class="s4">42</span>
+
+        <span class="s1">child </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">leaf</span><span class="s2">, </span><span class="s1">parent_never_started</span><span class="s2">)</span>
+
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">child</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">result</span><span class="s2">, (</span><span class="s4">42</span><span class="s2">, </span><span class="s4">24</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_switch_to_dead_greenlet_with_unstarted_perverse_parent</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">Parent</span><span class="s2">(</span><span class="s1">RawGreenlet</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">name </span><span class="s2">== </span><span class="s5">'run'</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">SomeError</span>
+
+
+        <span class="s1">parent_never_started </span><span class="s2">= </span><span class="s1">Parent</span><span class="s2">()</span>
+        <span class="s1">seen </span><span class="s2">= []</span>
+        <span class="s1">child </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">seen</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">42</span><span class="s2">), </span><span class="s1">parent_never_started</span><span class="s2">)</span>
+        <span class="s3"># Because we automatically start the parent when the child is</span>
+        <span class="s3"># finished</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">SomeError</span><span class="s2">):</span>
+            <span class="s1">child</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s4">42</span><span class="s2">])</span>
+
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">SomeError</span><span class="s2">):</span>
+            <span class="s1">child</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s4">42</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_switch_to_dead_greenlet_reparent</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">seen </span><span class="s2">= []</span>
+        <span class="s1">parent_never_started </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">seen</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">24</span><span class="s2">))</span>
+        <span class="s1">child </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">seen</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">42</span><span class="s2">))</span>
+
+        <span class="s1">child</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s4">42</span><span class="s2">])</span>
+
+        <span class="s1">child</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">parent_never_started</span>
+        <span class="s3"># This actually is the same as switching to the parent.</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">child</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">result</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">, [</span><span class="s4">42</span><span class="s2">, </span><span class="s4">24</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_can_access_f_back_of_suspended_greenlet</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># This tests our frame rewriting to work around Python 3.12+ having</span>
+        <span class="s3"># some interpreter frames on the C stack. It will crash in the absence</span>
+        <span class="s3"># of that logic.</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">outer</span><span class="s2">():</span>
+            <span class="s1">inner</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">inner</span><span class="s2">():</span>
+            <span class="s1">main</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">_getframe</span><span class="s2">(</span><span class="s4">0</span><span class="s2">))</span>
+
+        <span class="s1">hub </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">outer</span><span class="s2">)</span>
+        <span class="s3"># start it</span>
+        <span class="s1">hub</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s3"># start another greenlet to make sure we aren't relying on</span>
+        <span class="s3"># anything in `hub` still being on the C stack</span>
+        <span class="s1">unrelated </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">unrelated</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s3"># now it is suspended</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNotNone</span><span class="s2">(</span><span class="s1">hub</span><span class="s2">.</span><span class="s1">gr_frame</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">hub</span><span class="s2">.</span><span class="s1">gr_frame</span><span class="s2">.</span><span class="s1">f_code</span><span class="s2">.</span><span class="s1">co_name</span><span class="s2">, </span><span class="s5">&quot;inner&quot;</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNotNone</span><span class="s2">(</span><span class="s1">hub</span><span class="s2">.</span><span class="s1">gr_frame</span><span class="s2">.</span><span class="s1">f_back</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">hub</span><span class="s2">.</span><span class="s1">gr_frame</span><span class="s2">.</span><span class="s1">f_back</span><span class="s2">.</span><span class="s1">f_code</span><span class="s2">.</span><span class="s1">co_name</span><span class="s2">, </span><span class="s5">&quot;outer&quot;</span><span class="s2">)</span>
+        <span class="s3"># The next line is what would crash</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">hub</span><span class="s2">.</span><span class="s1">gr_frame</span><span class="s2">.</span><span class="s1">f_back</span><span class="s2">.</span><span class="s1">f_back</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_get_stack_with_nested_c_calls</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">from </span><span class="s1">functools </span><span class="s0">import </span><span class="s1">partial</span>
+        <span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">_test_extension_cpp</span>
+
+        <span class="s0">def </span><span class="s1">recurse</span><span class="s2">(</span><span class="s1">v</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">v </span><span class="s2">&gt; </span><span class="s4">0</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">v </span><span class="s2">* </span><span class="s1">_test_extension_cpp</span><span class="s2">.</span><span class="s1">test_call</span><span class="s2">(</span><span class="s1">partial</span><span class="s2">(</span><span class="s1">recurse</span><span class="s2">, </span><span class="s1">v </span><span class="s2">- </span><span class="s4">1</span><span class="s2">))</span>
+            <span class="s0">return </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s1">gr </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">recurse</span><span class="s2">)</span>
+        <span class="s1">gr</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s1">frame </span><span class="s2">= </span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_frame</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">5</span><span class="s2">):</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_locals</span><span class="s2">[</span><span class="s5">&quot;v&quot;</span><span class="s2">], </span><span class="s1">i</span><span class="s2">)</span>
+            <span class="s1">frame </span><span class="s2">= </span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_back</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_locals</span><span class="s2">[</span><span class="s5">&quot;v&quot;</span><span class="s2">], </span><span class="s4">5</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_back</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s4">10</span><span class="s2">), </span><span class="s4">1200</span><span class="s2">)  </span><span class="s3"># 1200 = 5! * 10</span>
+
+    <span class="s0">def </span><span class="s1">test_frames_always_exposed</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># On Python 3.12 this will crash if we don't set the</span>
+        <span class="s3"># gr_frames_always_exposed attribute. More background:</span>
+        <span class="s3"># https://github.com/python-greenlet/greenlet/issues/388</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">outer</span><span class="s2">():</span>
+            <span class="s1">inner</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">_getframe</span><span class="s2">(</span><span class="s4">0</span><span class="s2">))</span>
+
+        <span class="s0">def </span><span class="s1">inner</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">):</span>
+            <span class="s1">main</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">)</span>
+
+        <span class="s1">gr </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">outer</span><span class="s2">)</span>
+        <span class="s1">frame </span><span class="s2">= </span><span class="s1">gr</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s3"># Do something else to clobber the part of the C stack used by `gr`,</span>
+        <span class="s3"># so we can't skate by on &quot;it just happened to still be there&quot;</span>
+        <span class="s1">unrelated </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">unrelated</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_code</span><span class="s2">.</span><span class="s1">co_name</span><span class="s2">, </span><span class="s5">&quot;outer&quot;</span><span class="s2">)</span>
+        <span class="s3"># The next line crashes on 3.12 if we haven't exposed the frames.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_back</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestGreenletSetParentErrors</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">test_threaded_reparent</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">data </span><span class="s2">= {}</span>
+        <span class="s1">created_event </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">done_event </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">run</span><span class="s2">():</span>
+            <span class="s1">data</span><span class="s2">[</span><span class="s5">'g'</span><span class="s2">] = </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+            <span class="s1">created_event</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s1">done_event</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">blank</span><span class="s2">():</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s1">thread </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">run</span><span class="s2">)</span>
+        <span class="s1">thread</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s1">created_event</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">blank</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">data</span><span class="s2">[</span><span class="s5">'g'</span><span class="s2">]</span>
+        <span class="s1">done_event</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s1">thread</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">), </span><span class="s5">&quot;parent cannot be on a different thread&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_unexpected_reparenting</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">another </span><span class="s2">= []</span>
+        <span class="s0">def </span><span class="s1">worker</span><span class="s2">():</span>
+            <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+            <span class="s1">another</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">t </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">worker</span><span class="s2">)</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s3"># The first time we switch (running g_initialstub(), which is</span>
+        <span class="s3"># when we look up the run attribute) we attempt to change the</span>
+        <span class="s3"># parent to one from another thread (which also happens to be</span>
+        <span class="s3"># dead). ``g_initialstub()`` should detect this and raise a</span>
+        <span class="s3"># greenlet error.</span>
+        <span class="s3">#</span>
+        <span class="s3"># EXCEPT: With the fix for #252, this is actually detected</span>
+        <span class="s3"># sooner, when setting the parent itself. Prior to that fix,</span>
+        <span class="s3"># the main greenlet from the background thread kept a valid</span>
+        <span class="s3"># value for ``run_info``, and appeared to be a valid parent</span>
+        <span class="s3"># until we actually started the greenlet. But now that it's</span>
+        <span class="s3"># cleared, this test is catching whether ``green_setparent``</span>
+        <span class="s3"># can detect the dead thread.</span>
+        <span class="s3">#</span>
+        <span class="s3"># Further refactoring once again changes this back to a greenlet.error</span>
+        <span class="s3">#</span>
+        <span class="s3"># We need to wait for the cleanup to happen, but we're</span>
+        <span class="s3"># deliberately leaking a main greenlet here.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">wait_for_pending_cleanups</span><span class="s2">(</span><span class="s1">initial_main_greenlets</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">main_greenlets_before_test </span><span class="s2">+ </span><span class="s4">1</span><span class="s2">)</span>
+
+        <span class="s0">class </span><span class="s1">convoluted</span><span class="s2">(</span><span class="s1">RawGreenlet</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">name </span><span class="s2">== </span><span class="s5">'run'</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">another</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] </span><span class="s3"># pylint:disable=attribute-defined-outside-init</span>
+                <span class="s0">return </span><span class="s1">RawGreenlet</span><span class="s2">.</span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">convoluted</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">error</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">),</span>
+                         <span class="s5">&quot;cannot switch to a different thread (which happens to have exited)&quot;</span><span class="s2">)</span>
+        <span class="s0">del </span><span class="s1">another</span><span class="s2">[:]</span>
+
+    <span class="s0">def </span><span class="s1">test_unexpected_reparenting_thread_running</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># Like ``test_unexpected_reparenting``, except the background thread is</span>
+        <span class="s3"># actually still alive.</span>
+        <span class="s1">another </span><span class="s2">= []</span>
+        <span class="s1">switched_to_greenlet </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">keep_main_alive </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s0">def </span><span class="s1">worker</span><span class="s2">():</span>
+            <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+            <span class="s1">another</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">switched_to_greenlet</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s1">keep_main_alive</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s0">class </span><span class="s1">convoluted</span><span class="s2">(</span><span class="s1">RawGreenlet</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">name </span><span class="s2">== </span><span class="s5">'run'</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">another</span><span class="s2">[</span><span class="s4">0</span><span class="s2">] </span><span class="s3"># pylint:disable=attribute-defined-outside-init</span>
+                <span class="s0">return </span><span class="s1">RawGreenlet</span><span class="s2">.</span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+
+        <span class="s1">t </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">worker</span><span class="s2">)</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+
+        <span class="s1">switched_to_greenlet</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">g </span><span class="s2">= </span><span class="s1">convoluted</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+
+            <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">error</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+                <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">&quot;Cannot switch to a different thread&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">))</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">&quot;Expected&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">))</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">&quot;Current&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">))</span>
+        <span class="s0">finally</span><span class="s2">:</span>
+            <span class="s1">keep_main_alive</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s1">t</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+            <span class="s3"># XXX: Should handle this automatically.</span>
+            <span class="s0">del </span><span class="s1">another</span><span class="s2">[:]</span>
+
+    <span class="s0">def </span><span class="s1">test_cannot_delete_parent</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">worker </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIs</span><span class="s2">(</span><span class="s1">worker</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">, </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">())</span>
+
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s0">del </span><span class="s1">worker</span><span class="s2">.</span><span class="s1">parent</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">), </span><span class="s5">&quot;can't delete attribute&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_cannot_delete_parent_of_main</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s0">del </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">), </span><span class="s5">&quot;can't delete attribute&quot;</span><span class="s2">)</span>
+
+
+    <span class="s0">def </span><span class="s1">test_main_greenlet_parent_is_none</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># assuming we're in a main greenlet here.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_set_parent_wrong_types</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">bg</span><span class="s2">():</span>
+            <span class="s3"># Go back to main.</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">check</span><span class="s2">(</span><span class="s1">glet</span><span class="s2">):</span>
+            <span class="s0">for </span><span class="s1">p </span><span class="s0">in None</span><span class="s2">, </span><span class="s4">1</span><span class="s2">, </span><span class="s1">self</span><span class="s2">, </span><span class="s5">&quot;42&quot;</span><span class="s2">:</span>
+                <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+                    <span class="s1">glet</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">p</span>
+
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span>
+                    <span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">),</span>
+                    <span class="s5">&quot;GreenletChecker: Expected any type of greenlet, not &quot; </span><span class="s2">+ </span><span class="s1">type</span><span class="s2">(</span><span class="s1">p</span><span class="s2">).</span><span class="s1">__name__</span><span class="s2">)</span>
+
+        <span class="s3"># First, not running</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">bg</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertFalse</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s1">check</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+
+        <span class="s3"># Then when running.</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s1">check</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+
+        <span class="s3"># Let it finish</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+
+    <span class="s0">def </span><span class="s1">test_trivial_cycle</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">glet </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">glet</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">glet</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">), </span><span class="s5">&quot;cyclic parent chain&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_trivial_cycle_main</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># This used to produce a ValueError, but we catch it earlier than that now.</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">), </span><span class="s5">&quot;cannot set the parent of a main greenlet&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_deeper_cycle</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">g3 </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+
+        <span class="s1">g1</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">g2</span>
+        <span class="s1">g2</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">g3</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">g3</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">g1</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">), </span><span class="s5">&quot;cyclic parent chain&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestRepr</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+
+    <span class="s0">def </span><span class="s1">assertEndsWith</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">got</span><span class="s2">, </span><span class="s1">suffix</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">got</span><span class="s2">.</span><span class="s1">endswith</span><span class="s2">(</span><span class="s1">suffix</span><span class="s2">), (</span><span class="s1">got</span><span class="s2">, </span><span class="s1">suffix</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_main_while_running</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">r </span><span class="s2">= </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">())</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEndsWith</span><span class="s2">(</span><span class="s1">r</span><span class="s2">, </span><span class="s5">&quot; current active started main&gt;&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_main_in_background</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+        <span class="s0">def </span><span class="s1">run</span><span class="s2">():</span>
+            <span class="s0">return </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">main</span><span class="s2">)</span>
+
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s1">run</span><span class="s2">)</span>
+        <span class="s1">r </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEndsWith</span><span class="s2">(</span><span class="s1">r</span><span class="s2">, </span><span class="s5">' suspended active started main&gt;'</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_initial</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">r </span><span class="s2">= </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">RawGreenlet</span><span class="s2">())</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEndsWith</span><span class="s2">(</span><span class="s1">r</span><span class="s2">, </span><span class="s5">' pending&gt;'</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_main_from_other_thread</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+
+        <span class="s0">class </span><span class="s1">T</span><span class="s2">(</span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">):</span>
+            <span class="s1">original_main </span><span class="s2">= </span><span class="s1">thread_main </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s1">main_glet </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s0">def </span><span class="s1">run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">original_main </span><span class="s2">= </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">main</span><span class="s2">)</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">main_glet </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">thread_main </span><span class="s2">= </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">main_glet</span><span class="s2">)</span>
+
+        <span class="s1">t </span><span class="s2">= </span><span class="s1">T</span><span class="s2">()</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s1">t</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s4">10</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEndsWith</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">original_main</span><span class="s2">, </span><span class="s5">' suspended active started main&gt;'</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEndsWith</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">thread_main</span><span class="s2">, </span><span class="s5">' current active started main&gt;'</span><span class="s2">)</span>
+        <span class="s3"># give the machinery time to notice the death of the thread,</span>
+        <span class="s3"># and clean it up. Note that we don't use</span>
+        <span class="s3"># ``expect_greenlet_leak`` or wait_for_pending_cleanups,</span>
+        <span class="s3"># because at this point we know we have an extra greenlet</span>
+        <span class="s3"># still reachable.</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">3</span><span class="s2">):</span>
+            <span class="s1">time</span><span class="s2">.</span><span class="s1">sleep</span><span class="s2">(</span><span class="s4">0.001</span><span class="s2">)</span>
+
+        <span class="s3"># In the past, main greenlets, even from dead threads, never</span>
+        <span class="s3"># really appear dead. We have fixed that, and we also report</span>
+        <span class="s3"># that the thread is dead in the repr. (Do this multiple times</span>
+        <span class="s3"># to make sure that we don't self-modify and forget our state</span>
+        <span class="s3"># in the C++ code).</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s4">3</span><span class="s2">):</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">main_glet</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">)</span>
+            <span class="s1">r </span><span class="s2">= </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">main_glet</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEndsWith</span><span class="s2">(</span><span class="s1">r</span><span class="s2">, </span><span class="s5">' (thread exited) dead&gt;'</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_dead</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEndsWith</span><span class="s2">(</span><span class="s1">repr</span><span class="s2">(</span><span class="s1">g</span><span class="s2">), </span><span class="s5">' dead&gt;'</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertNotIn</span><span class="s2">(</span><span class="s5">'suspended'</span><span class="s2">, </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">g</span><span class="s2">))</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertNotIn</span><span class="s2">(</span><span class="s5">'started'</span><span class="s2">, </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">g</span><span class="s2">))</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertNotIn</span><span class="s2">(</span><span class="s5">'active'</span><span class="s2">, </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">g</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_formatting_produces_native_str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># https://github.com/python-greenlet/greenlet/issues/218</span>
+        <span class="s3"># %s formatting on Python 2 was producing unicode, not str.</span>
+
+        <span class="s1">g_dead </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">g_not_started </span><span class="s2">= </span><span class="s1">RawGreenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">g_cur </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+
+        <span class="s0">for </span><span class="s1">g </span><span class="s0">in </span><span class="s1">g_dead</span><span class="s2">, </span><span class="s1">g_not_started</span><span class="s2">, </span><span class="s1">g_cur</span><span class="s2">:</span>
+
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsInstance</span><span class="s2">(</span>
+                <span class="s5">'%s' </span><span class="s2">% (</span><span class="s1">g</span><span class="s2">,),</span>
+                <span class="s1">str</span>
+            <span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsInstance</span><span class="s2">(</span>
+                <span class="s5">'%r' </span><span class="s2">% (</span><span class="s1">g</span><span class="s2">,),</span>
+                <span class="s1">str</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestMainGreenlet</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s3"># Tests some implementation details, and relies on some</span>
+    <span class="s3"># implementation details.</span>
+
+    <span class="s0">def </span><span class="s1">_check_current_is_main</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># implementation detail</span>
+        <span class="s0">assert </span><span class="s5">'main' </span><span class="s0">in </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">())</span>
+
+        <span class="s1">t </span><span class="s2">= </span><span class="s1">type</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">())</span>
+        <span class="s0">assert </span><span class="s5">'main' </span><span class="s0">not in </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">t</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">t</span>
+
+    <span class="s0">def </span><span class="s1">test_main_greenlet_type_can_be_subclassed</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">main_type </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_check_current_is_main</span><span class="s2">()</span>
+        <span class="s1">subclass </span><span class="s2">= </span><span class="s1">type</span><span class="s2">(</span><span class="s5">'subclass'</span><span class="s2">, (</span><span class="s1">main_type</span><span class="s2">,), {})</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNotNone</span><span class="s2">(</span><span class="s1">subclass</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_main_greenlet_is_greenlet</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_current_is_main</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsInstance</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">(), </span><span class="s1">RawGreenlet</span><span class="s2">)</span>
+
+
+
+<span class="s0">class </span><span class="s1">TestBrokenGreenlets</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s3"># Tests for things that used to, or still do, terminate the interpreter.</span>
+    <span class="s3"># This often means doing unsavory things.</span>
+
+    <span class="s0">def </span><span class="s1">test_failed_to_initialstub</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">func</span><span class="s2">():</span>
+            <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span><span class="s5">&quot;Never get here&quot;</span><span class="s2">)</span>
+
+
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">_greenlet</span><span class="s2">.</span><span class="s1">UnswitchableGreenlet</span><span class="s2">(</span><span class="s1">func</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">force_switch_error </span><span class="s2">= </span><span class="s0">True</span>
+
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaisesRegex</span><span class="s2">(</span><span class="s1">SystemError</span><span class="s2">,</span>
+                                    <span class="s5">&quot;Failed to switch stacks into a greenlet for the first time.&quot;</span><span class="s2">):</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_failed_to_switch_into_running</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">runs </span><span class="s2">= []</span>
+        <span class="s0">def </span><span class="s1">func</span><span class="s2">():</span>
+            <span class="s1">runs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">1</span><span class="s2">)</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">runs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">2</span><span class="s2">)</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">runs</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s4">3</span><span class="s2">) </span><span class="s3"># pragma: no cover</span>
+
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">_greenlet</span><span class="s2">.</span><span class="s1">UnswitchableGreenlet</span><span class="s2">(</span><span class="s1">func</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">runs</span><span class="s2">, [</span><span class="s4">1</span><span class="s2">])</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">runs</span><span class="s2">, [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">])</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">force_switch_error </span><span class="s2">= </span><span class="s0">True</span>
+
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaisesRegex</span><span class="s2">(</span><span class="s1">SystemError</span><span class="s2">,</span>
+                                    <span class="s5">&quot;Failed to switch stacks into a running greenlet.&quot;</span><span class="s2">):</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s3"># If we stopped here, we would fail the leakcheck, because we've left</span>
+        <span class="s3"># the ``inner_bootstrap()`` C frame and its descendents hanging around,</span>
+        <span class="s3"># which have a bunch of Python references. They'll never get cleaned up</span>
+        <span class="s3"># if we don't let the greenlet finish.</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">force_switch_error </span><span class="s2">= </span><span class="s0">False</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">runs</span><span class="s2">, [</span><span class="s4">1</span><span class="s2">, </span><span class="s4">2</span><span class="s2">, </span><span class="s4">3</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_failed_to_slp_switch_into_running</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">ex </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertScriptRaises</span><span class="s2">(</span><span class="s5">'fail_slp_switch.py'</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'fail_slp_switch is running'</span><span class="s2">, </span><span class="s1">ex</span><span class="s2">.</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s1">ex</span><span class="s2">.</span><span class="s1">returncode</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">get_expected_returncodes_for_aborted_process</span><span class="s2">())</span>
+
+    <span class="s0">def </span><span class="s1">test_reentrant_switch_two_greenlets</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># Before we started capturing the arguments in g_switch_finish, this could crash.</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">run_script</span><span class="s2">(</span><span class="s5">'fail_switch_two_greenlets.py'</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'In g1_run'</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'TRACE'</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'LEAVE TRACE'</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'Falling off end of main'</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'Falling off end of g1_run'</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'Falling off end of g2'</span><span class="s2">, </span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_reentrant_switch_three_greenlets</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># On debug builds of greenlet, this used to crash with an assertion error;</span>
+        <span class="s3"># on non-debug versions, it ran fine (which it should not do!).</span>
+        <span class="s3"># Now it always crashes correctly with a TypeError</span>
+        <span class="s1">ex </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertScriptRaises</span><span class="s2">(</span><span class="s5">'fail_switch_three_greenlets.py'</span><span class="s2">, </span><span class="s1">exitcodes</span><span class="s2">=(</span><span class="s4">1</span><span class="s2">,))</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'TypeError'</span><span class="s2">, </span><span class="s1">ex</span><span class="s2">.</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s5">'positional arguments'</span><span class="s2">, </span><span class="s1">ex</span><span class="s2">.</span><span class="s1">output</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_reentrant_switch_three_greenlets2</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># This actually passed on debug and non-debug builds. It</span>
+        <span class="s3"># should probably have been triggering some debug assertions</span>
+        <span class="s3"># but it didn't.</span>
+        <span class="s3">#</span>
+        <span class="s3"># I think the fixes for the above test also kicked in here.</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">run_script</span><span class="s2">(</span><span class="s5">'fail_switch_three_greenlets2.py'</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span>
+            <span class="s5">&quot;RESULTS: [('trace', 'switch'), &quot;</span>
+            <span class="s5">&quot;('trace', 'switch'), ('g2 arg', 'g2 from tracefunc'), &quot;</span>
+            <span class="s5">&quot;('trace', 'switch'), ('main g1', 'from g2_run'), ('trace', 'switch'), &quot;</span>
+            <span class="s5">&quot;('g1 arg', 'g1 from main'), ('trace', 'switch'), ('main g2', 'from g1_run'), &quot;</span>
+            <span class="s5">&quot;('trace', 'switch'), ('g1 from parent', 'g1 from main 2'), ('trace', 'switch'), &quot;</span>
+            <span class="s5">&quot;('main g1.2', 'g1 done'), ('trace', 'switch'), ('g2 from parent', ()), &quot;</span>
+            <span class="s5">&quot;('trace', 'switch'), ('main g2.2', 'g2 done')]&quot;</span><span class="s2">,</span>
+            <span class="s1">output</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_reentrant_switch_GreenletAlreadyStartedInPython</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">run_script</span><span class="s2">(</span><span class="s5">'fail_initialstub_already_started.py'</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span>
+            <span class="s5">&quot;RESULTS: ['Begin C', 'Switch to b from B.__getattribute__ in C', &quot;</span>
+            <span class="s5">&quot;('Begin B', ()), '_B_run switching to main', ('main from c', 'From B'), &quot;</span>
+            <span class="s5">&quot;'B.__getattribute__ back from main in C', ('Begin A', (None,)), &quot;</span>
+            <span class="s5">&quot;('A dead?', True, 'B dead?', True, 'C dead?', False), &quot;</span>
+            <span class="s5">&quot;'C done', ('main from c.2', None)]&quot;</span><span class="s2">,</span>
+            <span class="s1">output</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_reentrant_switch_run_callable_has_del</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">run_script</span><span class="s2">(</span><span class="s5">'fail_clearing_run_switches.py'</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span>
+             <span class="s5">&quot;RESULTS [&quot;</span>
+            <span class="s5">&quot;('G.__getattribute__', 'run'), ('RunCallable', '__del__'), &quot;</span>
+            <span class="s5">&quot;('main: g.switch()', 'from RunCallable'), ('run_func', 'enter')&quot;</span>
+            <span class="s5">&quot;]&quot;</span><span class="s2">,</span>
+            <span class="s1">output</span>
+        <span class="s2">)</span>
+
+<span class="s0">if </span><span class="s1">__name__ </span><span class="s2">== </span><span class="s5">'__main__'</span><span class="s2">:</span>
+    <span class="s1">unittest</span><span class="s2">.</span><span class="s1">main</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

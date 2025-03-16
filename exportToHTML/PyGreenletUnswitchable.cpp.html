@@ -1,0 +1,170 @@
+<html>
+<head>
+<title>PyGreenletUnswitchable.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #0da19e;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+PyGreenletUnswitchable.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">/* -*- indent-tabs-mode: nil; tab-width: 4; -*- */</span>
+<span class="s0">/** 
+   Implementation of the Python slots for PyGreenletUnswitchable_Type 
+*/</span>
+<span class="s2">#ifndef </span><span class="s1">PY_GREENLET_UNSWITCHABLE_CPP</span>
+<span class="s2">#define </span><span class="s1">PY_GREENLET_UNSWITCHABLE_CPP</span>
+
+
+
+<span class="s2">#define </span><span class="s1">PY_SSIZE_T_CLEAN</span>
+<span class="s2">#include </span><span class="s1">&lt;Python.h&gt;</span>
+<span class="s2">#include </span><span class="s3">&quot;structmember.h&quot; </span><span class="s0">// PyMemberDef</span>
+
+<span class="s2">#include </span><span class="s3">&quot;greenlet_internal.hpp&quot;</span>
+<span class="s0">// Code after this point can assume access to things declared in stdint.h,</span>
+<span class="s0">// including the fixed-width types. This goes for the platform-specific switch functions</span>
+<span class="s0">// as well.</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_refs.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_slp_switch.hpp&quot;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;greenlet_thread_support.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TGreenlet.hpp&quot;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;TGreenlet.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TGreenletGlobals.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TThreadStateDestroy.cpp&quot;</span>
+
+
+<span class="s4">using </span><span class="s1">greenlet::LockGuard;</span>
+<span class="s4">using </span><span class="s1">greenlet::LockInitError;</span>
+<span class="s4">using </span><span class="s1">greenlet::PyErrOccurred;</span>
+<span class="s4">using </span><span class="s1">greenlet::Require;</span>
+
+<span class="s4">using </span><span class="s1">greenlet::g_handle_exit;</span>
+<span class="s4">using </span><span class="s1">greenlet::single_result;</span>
+
+<span class="s4">using </span><span class="s1">greenlet::Greenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::UserGreenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::MainGreenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::BrokenGreenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::ThreadState;</span>
+<span class="s4">using </span><span class="s1">greenlet::PythonState;</span>
+
+
+<span class="s2">#include </span><span class="s3">&quot;PyGreenlet.hpp&quot;</span>
+
+<span class="s2">static </span><span class="s1">PyGreenlet*</span>
+<span class="s1">green_unswitchable_new(PyTypeObject* type, PyObject* UNUSED(args), PyObject* UNUSED(kwds))</span>
+<span class="s1">{</span>
+    <span class="s1">PyGreenlet* o =</span>
+        <span class="s1">(PyGreenlet*)PyBaseObject_Type.tp_new(type, mod_globs</span><span class="s5">-&gt;</span><span class="s1">empty_tuple, mod_globs</span><span class="s5">-&gt;</span><span class="s1">empty_dict);</span>
+    <span class="s2">if </span><span class="s1">(o) {</span>
+        <span class="s4">new </span><span class="s1">BrokenGreenlet(o, GET_THREAD_STATE().state().borrow_current());</span>
+        <span class="s1">assert(Py_REFCNT(o) == </span><span class="s6">1</span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s1">o;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s1">PyObject*</span>
+<span class="s1">green_unswitchable_getforce(PyGreenlet* self, </span><span class="s2">void</span><span class="s1">* UNUSED(context))</span>
+<span class="s1">{</span>
+    <span class="s1">BrokenGreenlet* broken = </span><span class="s4">dynamic_cast</span><span class="s1">&lt;BrokenGreenlet*&gt;(self</span><span class="s5">-&gt;</span><span class="s1">pimpl);</span>
+    <span class="s2">return </span><span class="s1">PyBool_FromLong(broken</span><span class="s5">-&gt;</span><span class="s1">_force_switch_error);</span>
+<span class="s1">}</span>
+
+<span class="s2">static int</span>
+<span class="s1">green_unswitchable_setforce(PyGreenlet* self, PyObject* nforce, </span><span class="s2">void</span><span class="s1">* UNUSED(context))</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(!nforce) {</span>
+        <span class="s1">PyErr_SetString(</span>
+            <span class="s1">PyExc_AttributeError,</span>
+            <span class="s3">&quot;Cannot delete force_switch_error&quot;</span>
+        <span class="s1">);</span>
+        <span class="s2">return </span><span class="s1">-</span><span class="s6">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s1">BrokenGreenlet* broken = </span><span class="s4">dynamic_cast</span><span class="s1">&lt;BrokenGreenlet*&gt;(self</span><span class="s5">-&gt;</span><span class="s1">pimpl);</span>
+    <span class="s2">int </span><span class="s1">is_true = PyObject_IsTrue(nforce);</span>
+    <span class="s2">if </span><span class="s1">(is_true == -</span><span class="s6">1</span><span class="s1">) {</span>
+        <span class="s2">return </span><span class="s1">-</span><span class="s6">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s1">broken</span><span class="s5">-&gt;</span><span class="s1">_force_switch_error = is_true;</span>
+    <span class="s2">return </span><span class="s6">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s1">PyObject*</span>
+<span class="s1">green_unswitchable_getforceslp(PyGreenlet* self, </span><span class="s2">void</span><span class="s1">* UNUSED(context))</span>
+<span class="s1">{</span>
+    <span class="s1">BrokenGreenlet* broken = </span><span class="s4">dynamic_cast</span><span class="s1">&lt;BrokenGreenlet*&gt;(self</span><span class="s5">-&gt;</span><span class="s1">pimpl);</span>
+    <span class="s2">return </span><span class="s1">PyBool_FromLong(broken</span><span class="s5">-&gt;</span><span class="s1">_force_slp_switch_error);</span>
+<span class="s1">}</span>
+
+<span class="s2">static int</span>
+<span class="s1">green_unswitchable_setforceslp(PyGreenlet* self, PyObject* nforce, </span><span class="s2">void</span><span class="s1">* UNUSED(context))</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(!nforce) {</span>
+        <span class="s1">PyErr_SetString(</span>
+            <span class="s1">PyExc_AttributeError,</span>
+            <span class="s3">&quot;Cannot delete force_slp_switch_error&quot;</span>
+        <span class="s1">);</span>
+        <span class="s2">return </span><span class="s1">-</span><span class="s6">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s1">BrokenGreenlet* broken = </span><span class="s4">dynamic_cast</span><span class="s1">&lt;BrokenGreenlet*&gt;(self</span><span class="s5">-&gt;</span><span class="s1">pimpl);</span>
+    <span class="s2">int </span><span class="s1">is_true = PyObject_IsTrue(nforce);</span>
+    <span class="s2">if </span><span class="s1">(is_true == -</span><span class="s6">1</span><span class="s1">) {</span>
+        <span class="s2">return </span><span class="s1">-</span><span class="s6">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s1">broken</span><span class="s5">-&gt;</span><span class="s1">_force_slp_switch_error = is_true;</span>
+    <span class="s2">return </span><span class="s6">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s1">PyGetSetDef green_unswitchable_getsets[] = {</span>
+    <span class="s0">/* name, getter, setter, doc, closure (context pointer) */</span>
+    <span class="s1">{</span>
+      <span class="s1">.name=</span><span class="s3">&quot;force_switch_error&quot;</span><span class="s1">,</span>
+      <span class="s1">.get=(getter)green_unswitchable_getforce,</span>
+      <span class="s1">.set=(setter)green_unswitchable_setforce,</span>
+      <span class="s1">.doc=NULL</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span>
+      <span class="s1">.name=</span><span class="s3">&quot;force_slp_switch_error&quot;</span><span class="s1">,</span>
+      <span class="s1">.get=(getter)green_unswitchable_getforceslp,</span>
+      <span class="s1">.set=(setter)green_unswitchable_setforceslp,</span>
+      <span class="s1">.doc=nullptr</span>
+    <span class="s1">},</span>
+    <span class="s1">{.name=nullptr}</span>
+<span class="s1">};</span>
+
+<span class="s1">PyTypeObject PyGreenletUnswitchable_Type = {</span>
+    <span class="s1">.ob_base=PyVarObject_HEAD_INIT(NULL, </span><span class="s6">0</span><span class="s1">)</span>
+    <span class="s1">.tp_name=</span><span class="s3">&quot;greenlet._greenlet.UnswitchableGreenlet&quot;</span><span class="s1">,</span>
+    <span class="s1">.tp_dealloc= (destructor)green_dealloc, </span><span class="s0">/* tp_dealloc */</span>
+    <span class="s1">.tp_flags=G_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, </span><span class="s0">/* tp_flags */</span>
+    <span class="s1">.tp_doc=</span><span class="s3">&quot;Undocumented internal class&quot;</span><span class="s1">,                        </span><span class="s0">/* tp_doc */</span>
+    <span class="s1">.tp_traverse=(traverseproc)green_traverse, </span><span class="s0">/* tp_traverse */</span>
+    <span class="s1">.tp_clear=(inquiry)green_clear,         </span><span class="s0">/* tp_clear */</span>
+
+    <span class="s1">.tp_getset=green_unswitchable_getsets,                      </span><span class="s0">/* tp_getset */</span>
+    <span class="s1">.tp_base=&amp;PyGreenlet_Type,                                  </span><span class="s0">/* tp_base */</span>
+    <span class="s1">.tp_init=(initproc)green_init,               </span><span class="s0">/* tp_init */</span>
+    <span class="s1">.tp_alloc=PyType_GenericAlloc,                  </span><span class="s0">/* tp_alloc */</span>
+    <span class="s1">.tp_new=(newfunc)green_unswitchable_new,                          </span><span class="s0">/* tp_new */</span>
+    <span class="s1">.tp_free=PyObject_GC_Del,                   </span><span class="s0">/* tp_free */</span>
+    <span class="s1">.tp_is_gc=(inquiry)green_is_gc,         </span><span class="s0">/* tp_is_gc */</span>
+<span class="s1">};</span>
+
+
+<span class="s2">#endif</span>
+</pre>
+</body>
+</html>

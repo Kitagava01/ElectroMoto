@@ -1,0 +1,51 @@
+<html>
+<head>
+<title>_permission.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_permission.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">from </span><span class="s1">stat </span><span class="s0">import </span><span class="s1">S_IXGRP</span><span class="s2">, </span><span class="s1">S_IXOTH</span><span class="s2">, </span><span class="s1">S_IXUSR</span>
+
+
+<span class="s0">def </span><span class="s1">make_exe</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">):</span>
+    <span class="s1">original_mode </span><span class="s2">= </span><span class="s1">filename</span><span class="s2">.</span><span class="s1">stat</span><span class="s2">().</span><span class="s1">st_mode</span>
+    <span class="s1">levels </span><span class="s2">= [</span><span class="s1">S_IXUSR</span><span class="s2">, </span><span class="s1">S_IXGRP</span><span class="s2">, </span><span class="s1">S_IXOTH</span><span class="s2">]</span>
+    <span class="s0">for </span><span class="s1">at </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">levels</span><span class="s2">), </span><span class="s3">0</span><span class="s2">, -</span><span class="s3">1</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">mode </span><span class="s2">= </span><span class="s1">original_mode</span>
+            <span class="s0">for </span><span class="s1">level </span><span class="s0">in </span><span class="s1">levels</span><span class="s2">[:</span><span class="s1">at</span><span class="s2">]:</span>
+                <span class="s1">mode </span><span class="s2">|= </span><span class="s1">level</span>
+            <span class="s1">filename</span><span class="s2">.</span><span class="s1">chmod</span><span class="s2">(</span><span class="s1">mode</span><span class="s2">)</span>
+            <span class="s0">break</span>
+        <span class="s0">except </span><span class="s1">OSError</span><span class="s2">:</span>
+            <span class="s0">continue</span>
+
+
+<span class="s0">def </span><span class="s1">set_tree</span><span class="s2">(</span><span class="s1">folder</span><span class="s2">, </span><span class="s1">stat</span><span class="s2">):</span>
+    <span class="s0">for </span><span class="s1">root</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">files </span><span class="s0">in </span><span class="s1">os</span><span class="s2">.</span><span class="s1">walk</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">folder</span><span class="s2">)):</span>
+        <span class="s0">for </span><span class="s1">filename </span><span class="s0">in </span><span class="s1">files</span><span class="s2">:</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">chmod</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">root</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">), </span><span class="s1">stat</span><span class="s2">)</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= (</span>
+    <span class="s4">&quot;make_exe&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;set_tree&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+</pre>
+</body>
+</html>

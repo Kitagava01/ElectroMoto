@@ -1,0 +1,169 @@
+<html>
+<head>
+<title>file.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+file.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">abc</span>
+
+<span class="s0">from </span><span class="s1">werkzeug</span><span class="s2">.</span><span class="s1">datastructures </span><span class="s0">import </span><span class="s1">FileStorage</span>
+<span class="s0">from </span><span class="s1">wtforms </span><span class="s0">import </span><span class="s1">FileField </span><span class="s0">as </span><span class="s1">_FileField</span>
+<span class="s0">from </span><span class="s1">wtforms </span><span class="s0">import </span><span class="s1">MultipleFileField </span><span class="s0">as </span><span class="s1">_MultipleFileField</span>
+<span class="s0">from </span><span class="s1">wtforms</span><span class="s2">.</span><span class="s1">validators </span><span class="s0">import </span><span class="s1">DataRequired</span>
+<span class="s0">from </span><span class="s1">wtforms</span><span class="s2">.</span><span class="s1">validators </span><span class="s0">import </span><span class="s1">StopValidation</span>
+<span class="s0">from </span><span class="s1">wtforms</span><span class="s2">.</span><span class="s1">validators </span><span class="s0">import </span><span class="s1">ValidationError</span>
+
+
+<span class="s0">class </span><span class="s1">FileField</span><span class="s2">(</span><span class="s1">_FileField</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Werkzeug-aware subclass of :class:`wtforms.fields.FileField`.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">process_formdata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">valuelist</span><span class="s2">):</span>
+        <span class="s1">valuelist </span><span class="s2">= (</span><span class="s1">x </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">valuelist </span><span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">FileStorage</span><span class="s2">) </span><span class="s0">and </span><span class="s1">x</span><span class="s2">)</span>
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">next</span><span class="s2">(</span><span class="s1">valuelist</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">data </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">data</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data </span><span class="s2">= ()</span>
+
+
+<span class="s0">class </span><span class="s1">MultipleFileField</span><span class="s2">(</span><span class="s1">_MultipleFileField</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Werkzeug-aware subclass of :class:`wtforms.fields.MultipleFileField`. 
+ 
+    .. versionadded:: 1.2.0 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">process_formdata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">valuelist</span><span class="s2">):</span>
+        <span class="s1">valuelist </span><span class="s2">= (</span><span class="s1">x </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">valuelist </span><span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">FileStorage</span><span class="s2">) </span><span class="s0">and </span><span class="s1">x</span><span class="s2">)</span>
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">valuelist</span><span class="s2">) </span><span class="s0">or None</span>
+
+        <span class="s0">if </span><span class="s1">data </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">data</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data </span><span class="s2">= ()</span>
+
+
+<span class="s0">class </span><span class="s1">FileRequired</span><span class="s2">(</span><span class="s1">DataRequired</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Validates that the uploaded files(s) is a Werkzeug 
+    :class:`~werkzeug.datastructures.FileStorage` object. 
+ 
+    :param message: error message 
+ 
+    You can also use the synonym ``file_required``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__call__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">form</span><span class="s2">, </span><span class="s1">field</span><span class="s2">):</span>
+        <span class="s1">field_data </span><span class="s2">= [</span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span><span class="s2">] </span><span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s1">list</span><span class="s2">) </span><span class="s0">else </span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span>
+        <span class="s0">if not </span><span class="s2">(</span>
+            <span class="s1">all</span><span class="s2">(</span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">FileStorage</span><span class="s2">) </span><span class="s0">and </span><span class="s1">x </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">field_data</span><span class="s2">) </span><span class="s0">and </span><span class="s1">field_data</span>
+        <span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">StopValidation</span><span class="s2">(</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">message </span><span class="s0">or </span><span class="s1">field</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span><span class="s4">&quot;This field is required.&quot;</span><span class="s2">)</span>
+            <span class="s2">)</span>
+
+
+<span class="s1">file_required </span><span class="s2">= </span><span class="s1">FileRequired</span>
+
+
+<span class="s0">class </span><span class="s1">FileAllowed</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Validates that the uploaded file(s) is allowed by a given list of 
+    extensions or a Flask-Uploads :class:`~flaskext.uploads.UploadSet`. 
+ 
+    :param upload_set: A list of extensions or an 
+        :class:`~flaskext.uploads.UploadSet` 
+    :param message: error message 
+ 
+    You can also use the synonym ``file_allowed``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">upload_set</span><span class="s2">, </span><span class="s1">message</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">upload_set </span><span class="s2">= </span><span class="s1">upload_set</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">message </span><span class="s2">= </span><span class="s1">message</span>
+
+    <span class="s0">def </span><span class="s1">__call__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">form</span><span class="s2">, </span><span class="s1">field</span><span class="s2">):</span>
+        <span class="s1">field_data </span><span class="s2">= [</span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span><span class="s2">] </span><span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s1">list</span><span class="s2">) </span><span class="s0">else </span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span>
+        <span class="s0">if not </span><span class="s2">(</span>
+            <span class="s1">all</span><span class="s2">(</span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">FileStorage</span><span class="s2">) </span><span class="s0">and </span><span class="s1">x </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">field_data</span><span class="s2">) </span><span class="s0">and </span><span class="s1">field_data</span>
+        <span class="s2">):</span>
+            <span class="s0">return</span>
+
+        <span class="s1">filenames </span><span class="s2">= [</span><span class="s1">f</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">() </span><span class="s0">for </span><span class="s1">f </span><span class="s0">in </span><span class="s1">field_data</span><span class="s2">]</span>
+
+        <span class="s0">for </span><span class="s1">filename </span><span class="s0">in </span><span class="s1">filenames</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">upload_set</span><span class="s2">, </span><span class="s1">abc</span><span class="s2">.</span><span class="s1">Iterable</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">any</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">.</span><span class="s1">endswith</span><span class="s2">(</span><span class="s4">&quot;.&quot; </span><span class="s2">+ </span><span class="s1">x</span><span class="s2">) </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">upload_set</span><span class="s2">):</span>
+                    <span class="s0">continue</span>
+
+                <span class="s0">raise </span><span class="s1">StopValidation</span><span class="s2">(</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">message</span>
+                    <span class="s0">or </span><span class="s1">field</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span>
+                        <span class="s4">&quot;File does not have an approved extension: {extensions}&quot;</span>
+                    <span class="s2">).</span><span class="s1">format</span><span class="s2">(</span><span class="s1">extensions</span><span class="s2">=</span><span class="s4">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">upload_set</span><span class="s2">))</span>
+                <span class="s2">)</span>
+
+            <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">upload_set</span><span class="s2">.</span><span class="s1">file_allowed</span><span class="s2">(</span><span class="s1">field_data</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">):</span>
+                <span class="s0">raise </span><span class="s1">StopValidation</span><span class="s2">(</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">message</span>
+                    <span class="s0">or </span><span class="s1">field</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span><span class="s4">&quot;File does not have an approved extension.&quot;</span><span class="s2">)</span>
+                <span class="s2">)</span>
+
+
+<span class="s1">file_allowed </span><span class="s2">= </span><span class="s1">FileAllowed</span>
+
+
+<span class="s0">class </span><span class="s1">FileSize</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Validates that the uploaded file(s) is within a minimum and maximum 
+    file size (set in bytes). 
+ 
+    :param min_size: minimum allowed file size (in bytes). Defaults to 0 bytes. 
+    :param max_size: maximum allowed file size (in bytes). 
+    :param message: error message 
+ 
+    You can also use the synonym ``file_size``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">max_size</span><span class="s2">, </span><span class="s1">min_size</span><span class="s2">=</span><span class="s5">0</span><span class="s2">, </span><span class="s1">message</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">min_size </span><span class="s2">= </span><span class="s1">min_size</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">max_size </span><span class="s2">= </span><span class="s1">max_size</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">message </span><span class="s2">= </span><span class="s1">message</span>
+
+    <span class="s0">def </span><span class="s1">__call__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">form</span><span class="s2">, </span><span class="s1">field</span><span class="s2">):</span>
+        <span class="s1">field_data </span><span class="s2">= [</span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span><span class="s2">] </span><span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s1">list</span><span class="s2">) </span><span class="s0">else </span><span class="s1">field</span><span class="s2">.</span><span class="s1">data</span>
+        <span class="s0">if not </span><span class="s2">(</span>
+            <span class="s1">all</span><span class="s2">(</span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">FileStorage</span><span class="s2">) </span><span class="s0">and </span><span class="s1">x </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">field_data</span><span class="s2">) </span><span class="s0">and </span><span class="s1">field_data</span>
+        <span class="s2">):</span>
+            <span class="s0">return</span>
+
+        <span class="s0">for </span><span class="s1">f </span><span class="s0">in </span><span class="s1">field_data</span><span class="s2">:</span>
+            <span class="s1">file_size </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">f</span><span class="s2">.</span><span class="s1">read</span><span class="s2">())</span>
+            <span class="s1">f</span><span class="s2">.</span><span class="s1">seek</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)  </span><span class="s6"># reset cursor position to beginning of file</span>
+
+            <span class="s0">if </span><span class="s2">(</span><span class="s1">file_size </span><span class="s2">&lt; </span><span class="s1">self</span><span class="s2">.</span><span class="s1">min_size</span><span class="s2">) </span><span class="s0">or </span><span class="s2">(</span><span class="s1">file_size </span><span class="s2">&gt; </span><span class="s1">self</span><span class="s2">.</span><span class="s1">max_size</span><span class="s2">):</span>
+                <span class="s6"># the file is too small or too big =&gt; validation failure</span>
+                <span class="s0">raise </span><span class="s1">ValidationError</span><span class="s2">(</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">message</span>
+                    <span class="s0">or </span><span class="s1">field</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span>
+                        <span class="s4">f&quot;File must be between </span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">min_size</span><span class="s0">}</span><span class="s4">&quot;</span>
+                        <span class="s4">f&quot; and </span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">max_size</span><span class="s0">} </span><span class="s4">bytes.&quot;</span>
+                    <span class="s2">)</span>
+                <span class="s2">)</span>
+
+
+<span class="s1">file_size </span><span class="s2">= </span><span class="s1">FileSize</span>
+</pre>
+</body>
+</html>

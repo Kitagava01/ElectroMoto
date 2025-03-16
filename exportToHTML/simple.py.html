@@ -1,0 +1,196 @@
+<html>
+<head>
+<title>simple.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+simple.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s2">.. </span><span class="s0">import </span><span class="s1">widgets</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">core </span><span class="s0">import </span><span class="s1">Field</span>
+
+<span class="s1">__all__ </span><span class="s2">= (</span>
+    <span class="s3">&quot;BooleanField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;TextAreaField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;PasswordField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;FileField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;MultipleFileField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;HiddenField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;SearchField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;SubmitField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;StringField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;TelField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;URLField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;EmailField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;ColorField&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">BooleanField</span><span class="s2">(</span><span class="s1">Field</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents an ``&lt;input type=&quot;checkbox&quot;&gt;``. Set the ``checked``-status by using the 
+    ``default``-option. Any value for ``default``, e.g. ``default=&quot;checked&quot;`` puts 
+    ``checked`` into the html-element and sets the ``data`` to ``True`` 
+ 
+    :param false_values: 
+        If provided, a sequence of strings each of which is an exact match 
+        string of what is considered a &quot;false&quot; value. Defaults to the tuple 
+        ``(False, &quot;false&quot;, &quot;&quot;)`` 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">CheckboxInput</span><span class="s2">()</span>
+    <span class="s1">false_values </span><span class="s2">= (</span><span class="s0">False</span><span class="s2">, </span><span class="s3">&quot;false&quot;</span><span class="s2">, </span><span class="s3">&quot;&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">label</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">validators</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">false_values</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">label</span><span class="s2">, </span><span class="s1">validators</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">false_values </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">false_values </span><span class="s2">= </span><span class="s1">false_values</span>
+
+    <span class="s0">def </span><span class="s1">process_data</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">bool</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">process_formdata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">valuelist</span><span class="s2">):</span>
+        <span class="s0">if not </span><span class="s1">valuelist </span><span class="s0">or </span><span class="s1">valuelist</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">false_values</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s0">False</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s0">True</span>
+
+    <span class="s0">def </span><span class="s1">_value</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data</span><span class="s2">[</span><span class="s5">0</span><span class="s2">])</span>
+        <span class="s0">return </span><span class="s3">&quot;y&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">StringField</span><span class="s2">(</span><span class="s1">Field</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    This field is the base for most of the more complicated fields, and 
+    represents an ``&lt;input type=&quot;text&quot;&gt;``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">TextInput</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">process_formdata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">valuelist</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">valuelist</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">valuelist</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">_value</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">) </span><span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s0">is not None else </span><span class="s3">&quot;&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">TextAreaField</span><span class="s2">(</span><span class="s1">StringField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    This field represents an HTML ``&lt;textarea&gt;`` and can be used to take 
+    multi-line input. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">TextArea</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">PasswordField</span><span class="s2">(</span><span class="s1">StringField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    A StringField, except renders an ``&lt;input type=&quot;password&quot;&gt;``. 
+ 
+    Also, whatever value is accepted by this field is not rendered back 
+    to the browser like normal fields. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">PasswordInput</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">FileField</span><span class="s2">(</span><span class="s1">Field</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;Renders a file upload field. 
+ 
+    By default, the value will be the filename sent in the form data. 
+    WTForms **does not** deal with frameworks' file handling capabilities. 
+    A WTForms extension for a framework may replace the filename value 
+    with an object representing the uploaded data. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">FileInput</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">_value</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s6"># browser ignores value of file input for security</span>
+        <span class="s0">return False</span>
+
+
+<span class="s0">class </span><span class="s1">MultipleFileField</span><span class="s2">(</span><span class="s1">FileField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;A :class:`FileField` that allows choosing multiple files.&quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">FileInput</span><span class="s2">(</span><span class="s1">multiple</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">process_formdata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">valuelist</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">valuelist</span>
+
+
+<span class="s0">class </span><span class="s1">HiddenField</span><span class="s2">(</span><span class="s1">StringField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    HiddenField is a convenience for a StringField with a HiddenInput widget. 
+ 
+    It will render as an ``&lt;input type=&quot;hidden&quot;&gt;`` but otherwise coerce to a string. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">HiddenInput</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">SubmitField</span><span class="s2">(</span><span class="s1">BooleanField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents an ``&lt;input type=&quot;submit&quot;&gt;``.  This allows checking if a given 
+    submit button has been pressed. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">SubmitInput</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">SearchField</span><span class="s2">(</span><span class="s1">StringField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents an ``&lt;input type=&quot;search&quot;&gt;``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">SearchInput</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">TelField</span><span class="s2">(</span><span class="s1">StringField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents an ``&lt;input type=&quot;tel&quot;&gt;``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">TelInput</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">URLField</span><span class="s2">(</span><span class="s1">StringField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents an ``&lt;input type=&quot;url&quot;&gt;``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">URLInput</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">EmailField</span><span class="s2">(</span><span class="s1">StringField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents an ``&lt;input type=&quot;email&quot;&gt;``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">EmailInput</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">ColorField</span><span class="s2">(</span><span class="s1">StringField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents an ``&lt;input type=&quot;color&quot;&gt;``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">ColorInput</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

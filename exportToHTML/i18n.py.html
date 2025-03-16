@@ -1,0 +1,70 @@
+<html>
+<head>
+<title>i18n.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+i18n.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">babel </span><span class="s0">import </span><span class="s1">support</span>
+<span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">current_app</span>
+<span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">request</span>
+<span class="s0">from </span><span class="s1">flask_babel </span><span class="s0">import </span><span class="s1">get_locale</span>
+<span class="s0">from </span><span class="s1">wtforms</span><span class="s2">.</span><span class="s1">i18n </span><span class="s0">import </span><span class="s1">messages_path</span>
+
+<span class="s1">__all__ </span><span class="s2">= (</span><span class="s3">&quot;Translations&quot;</span><span class="s2">, </span><span class="s3">&quot;translations&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_get_translations</span><span class="s2">():</span>
+    <span class="s4">&quot;&quot;&quot;Returns the correct gettext translations. 
+    Copy from flask-babel with some modifications. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">if not </span><span class="s1">request</span><span class="s2">:</span>
+        <span class="s0">return None</span>
+
+    <span class="s5"># babel should be in extensions for get_locale</span>
+    <span class="s0">if </span><span class="s3">&quot;babel&quot; </span><span class="s0">not in </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">extensions</span><span class="s2">:</span>
+        <span class="s0">return None</span>
+
+    <span class="s1">translations </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">request</span><span class="s2">, </span><span class="s3">&quot;wtforms_translations&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">translations </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">translations </span><span class="s2">= </span><span class="s1">support</span><span class="s2">.</span><span class="s1">Translations</span><span class="s2">.</span><span class="s1">load</span><span class="s2">(</span>
+            <span class="s1">messages_path</span><span class="s2">(), [</span><span class="s1">get_locale</span><span class="s2">()], </span><span class="s1">domain</span><span class="s2">=</span><span class="s3">&quot;wtforms&quot;</span>
+        <span class="s2">)</span>
+        <span class="s1">request</span><span class="s2">.</span><span class="s1">wtforms_translations </span><span class="s2">= </span><span class="s1">translations</span>
+
+    <span class="s0">return </span><span class="s1">translations</span>
+
+
+<span class="s0">class </span><span class="s1">Translations</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">gettext</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">string</span><span class="s2">):</span>
+        <span class="s1">t </span><span class="s2">= </span><span class="s1">_get_translations</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s1">string </span><span class="s0">if </span><span class="s1">t </span><span class="s0">is None else </span><span class="s1">t</span><span class="s2">.</span><span class="s1">ugettext</span><span class="s2">(</span><span class="s1">string</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">ngettext</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">singular</span><span class="s2">, </span><span class="s1">plural</span><span class="s2">, </span><span class="s1">n</span><span class="s2">):</span>
+        <span class="s1">t </span><span class="s2">= </span><span class="s1">_get_translations</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">t </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">singular </span><span class="s0">if </span><span class="s1">n </span><span class="s2">== </span><span class="s6">1 </span><span class="s0">else </span><span class="s1">plural</span>
+
+        <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">ungettext</span><span class="s2">(</span><span class="s1">singular</span><span class="s2">, </span><span class="s1">plural</span><span class="s2">, </span><span class="s1">n</span><span class="s2">)</span>
+
+
+<span class="s1">translations </span><span class="s2">= </span><span class="s1">Translations</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

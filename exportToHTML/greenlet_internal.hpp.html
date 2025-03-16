@@ -1,0 +1,129 @@
+<html>
+<head>
+<title>greenlet_internal.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+greenlet_internal.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">/* -*- indent-tabs-mode: nil; tab-width: 4; -*- */</span>
+<span class="s2">#ifndef </span><span class="s1">GREENLET_INTERNAL_H</span>
+<span class="s2">#define </span><span class="s1">GREENLET_INTERNAL_H</span>
+<span class="s2">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic push</span>
+<span class="s1">#    pragma clang diagnostic ignored </span><span class="s3">&quot;-Wunused-function&quot;</span>
+<span class="s2">#endif</span>
+
+<span class="s0">/** 
+ * Implementation helpers. 
+ * 
+ * C++ templates and inline functions should go here. 
+ */</span>
+<span class="s2">#define </span><span class="s1">PY_SSIZE_T_CLEAN</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_compiler_compat.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_cpython_compat.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_exceptions.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TGreenlet.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_allocator.hpp&quot;</span>
+
+<span class="s2">#include </span><span class="s1">&lt;vector&gt;</span>
+<span class="s2">#include </span><span class="s1">&lt;string&gt;</span>
+
+<span class="s2">#define </span><span class="s1">GREENLET_MODULE</span>
+<span class="s2">struct </span><span class="s1">_greenlet;</span>
+<span class="s2">typedef struct </span><span class="s1">_greenlet PyGreenlet;</span>
+<span class="s4">namespace </span><span class="s1">greenlet {</span>
+
+    <span class="s4">class </span><span class="s1">ThreadState;</span>
+    <span class="s0">// We can't use the PythonAllocator for this, because we push to it</span>
+    <span class="s0">// from the thread state destructor, which doesn't have the GIL,</span>
+    <span class="s0">// and Python's allocators can only be called with the GIL.</span>
+    <span class="s2">typedef </span><span class="s1">std::vector&lt;ThreadState*&gt; cleanup_queue_t;</span>
+
+<span class="s1">};</span>
+
+
+<span class="s2">#define </span><span class="s1">implementation_ptr_t greenlet::Greenlet*</span>
+
+
+<span class="s2">#include </span><span class="s3">&quot;greenlet.h&quot;</span>
+
+<span class="s2">void</span>
+<span class="s1">greenlet::refs::MainGreenletExactChecker(</span><span class="s2">void </span><span class="s1">*p)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(!p) {</span>
+        <span class="s2">return</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s0">// We control the class of the main greenlet exactly.</span>
+    <span class="s2">if </span><span class="s1">(Py_TYPE(p) != &amp;PyGreenlet_Type) {</span>
+        <span class="s1">std::string err(</span><span class="s3">&quot;MainGreenlet: Expected exactly a greenlet, not a &quot;</span><span class="s1">);</span>
+        <span class="s1">err += Py_TYPE(p)</span><span class="s5">-&gt;</span><span class="s1">tp_name;</span>
+        <span class="s4">throw </span><span class="s1">greenlet::TypeError(err);</span>
+    <span class="s1">}</span>
+
+    <span class="s0">// Greenlets from dead threads no longer respond to main() with a</span>
+    <span class="s0">// true value; so in that case we need to perform an additional</span>
+    <span class="s0">// check.</span>
+    <span class="s1">Greenlet* g = </span><span class="s4">static_cast</span><span class="s1">&lt;PyGreenlet*&gt;(p)</span><span class="s5">-&gt;</span><span class="s1">pimpl;</span>
+    <span class="s2">if </span><span class="s1">(g</span><span class="s5">-&gt;</span><span class="s1">main()) {</span>
+        <span class="s2">return</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s2">if </span><span class="s1">(!</span><span class="s4">dynamic_cast</span><span class="s1">&lt;MainGreenlet*&gt;(g)) {</span>
+        <span class="s1">std::string err(</span><span class="s3">&quot;MainGreenlet: Expected exactly a main greenlet, not a &quot;</span><span class="s1">);</span>
+        <span class="s1">err += Py_TYPE(p)</span><span class="s5">-&gt;</span><span class="s1">tp_name;</span>
+        <span class="s4">throw </span><span class="s1">greenlet::TypeError(err);</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+
+
+
+<span class="s1">template &lt;</span><span class="s4">typename </span><span class="s1">T, greenlet::refs::TypeChecker TC&gt;</span>
+<span class="s4">inline </span><span class="s1">greenlet::Greenlet* greenlet::refs::_OwnedGreenlet&lt;T, TC&gt;::</span><span class="s4">operator</span><span class="s5">-&gt;</span><span class="s1">() </span><span class="s2">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyGreenlet*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p)</span><span class="s5">-&gt;</span><span class="s1">pimpl;</span>
+<span class="s1">}</span>
+
+<span class="s1">template &lt;</span><span class="s4">typename </span><span class="s1">T, greenlet::refs::TypeChecker TC&gt;</span>
+<span class="s4">inline </span><span class="s1">greenlet::Greenlet* greenlet::refs::_BorrowedGreenlet&lt;T, TC&gt;::</span><span class="s4">operator</span><span class="s5">-&gt;</span><span class="s1">() </span><span class="s2">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyGreenlet*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p)</span><span class="s5">-&gt;</span><span class="s1">pimpl;</span>
+<span class="s1">}</span>
+
+<span class="s2">#include </span><span class="s1">&lt;memory&gt;</span>
+<span class="s2">#include </span><span class="s1">&lt;stdexcept&gt;</span>
+
+
+<span class="s2">extern </span><span class="s1">PyTypeObject PyGreenlet_Type;</span>
+
+
+
+<span class="s0">/** 
+  * Forward declarations needed in multiple files. 
+  */</span>
+<span class="s2">static </span><span class="s1">PyObject* green_switch(PyGreenlet* self, PyObject* args, PyObject* kwargs);</span>
+
+
+<span class="s2">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic pop</span>
+<span class="s2">#endif</span>
+
+
+<span class="s2">#endif</span>
+
+<span class="s0">// Local Variables:</span>
+<span class="s0">// flycheck-clang-include-path: (&quot;../../include&quot; &quot;/opt/local/Library/Frameworks/Python.framework/Versions/3.10/include/python3.10&quot;)</span>
+<span class="s0">// End:</span>
+</pre>
+</body>
+</html>

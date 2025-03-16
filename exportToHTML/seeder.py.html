@@ -1,0 +1,64 @@
+<html>
+<head>
+<title>seeder.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+seeder.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">abc </span><span class="s0">import </span><span class="s1">ABC</span><span class="s2">, </span><span class="s1">abstractmethod</span>
+
+
+<span class="s0">class </span><span class="s1">Seeder</span><span class="s2">(</span><span class="s1">ABC</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;A seeder will install some seed packages into a virtual environment.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">options</span><span class="s2">, </span><span class="s1">enabled</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Create. 
+ 
+        :param options: the parsed options as defined within :meth:`add_parser_arguments` 
+        :param enabled: a flag weather the seeder is enabled or not 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">enabled </span><span class="s2">= </span><span class="s1">enabled</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">env </span><span class="s2">= </span><span class="s1">options</span><span class="s2">.</span><span class="s1">env</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">add_parser_arguments</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">parser</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">, </span><span class="s1">app_data</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Add CLI arguments for this seed mechanisms. 
+ 
+        :param parser: the CLI parser 
+        :param app_data: the CLI parser 
+        :param interpreter: the interpreter this virtual environment is based of 
+        &quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s2">@</span><span class="s1">abstractmethod</span>
+    <span class="s0">def </span><span class="s1">run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">creator</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Perform the seed operation. 
+ 
+        :param creator: the creator (based of :class:`virtualenv.create.creator.Creator`) we used to create this \ 
+        virtual environment 
+        &quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s4">&quot;Seeder&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

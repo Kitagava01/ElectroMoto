@@ -1,0 +1,200 @@
+<html>
+<head>
+<title>cached_py_info.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #6aab73;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cached_py_info.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+ 
+We acquire the python information by running an interrogation script via subprocess trigger. This operation is not 
+cheap, especially not on Windows. To not have to pay this hefty cost every time we apply multiple levels of 
+caching. 
+&quot;&quot;&quot;  </span><span class="s2"># noqa: D205</span>
+
+<span class="s3">from </span><span class="s1">__future__ </span><span class="s3">import </span><span class="s1">annotations</span>
+
+<span class="s3">import </span><span class="s1">logging</span>
+<span class="s3">import </span><span class="s1">os</span>
+<span class="s3">import </span><span class="s1">random</span>
+<span class="s3">import </span><span class="s1">sys</span>
+<span class="s3">from </span><span class="s1">collections </span><span class="s3">import </span><span class="s1">OrderedDict</span>
+<span class="s3">from </span><span class="s1">pathlib </span><span class="s3">import </span><span class="s1">Path</span>
+<span class="s3">from </span><span class="s1">shlex </span><span class="s3">import </span><span class="s1">quote</span>
+<span class="s3">from </span><span class="s1">string </span><span class="s3">import </span><span class="s1">ascii_lowercase</span><span class="s4">, </span><span class="s1">ascii_uppercase</span><span class="s4">, </span><span class="s1">digits</span>
+<span class="s3">from </span><span class="s1">subprocess </span><span class="s3">import </span><span class="s1">Popen</span>
+
+<span class="s3">from </span><span class="s1">virtualenv</span><span class="s4">.</span><span class="s1">app_data </span><span class="s3">import </span><span class="s1">AppDataDisabled</span>
+<span class="s3">from </span><span class="s1">virtualenv</span><span class="s4">.</span><span class="s1">discovery</span><span class="s4">.</span><span class="s1">py_info </span><span class="s3">import </span><span class="s1">PythonInfo</span>
+<span class="s3">from </span><span class="s1">virtualenv</span><span class="s4">.</span><span class="s1">util</span><span class="s4">.</span><span class="s1">subprocess </span><span class="s3">import </span><span class="s1">subprocess</span>
+
+<span class="s1">_CACHE </span><span class="s4">= </span><span class="s1">OrderedDict</span><span class="s4">()</span>
+<span class="s1">_CACHE</span><span class="s4">[</span><span class="s1">Path</span><span class="s4">(</span><span class="s1">sys</span><span class="s4">.</span><span class="s1">executable</span><span class="s4">)] = </span><span class="s1">PythonInfo</span><span class="s4">()</span>
+
+
+<span class="s3">def </span><span class="s1">from_exe</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">app_data</span><span class="s4">, </span><span class="s1">exe</span><span class="s4">, </span><span class="s1">env</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">raise_on_error</span><span class="s4">=</span><span class="s3">True</span><span class="s4">, </span><span class="s1">ignore_cache</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):  </span><span class="s2"># noqa: FBT002, PLR0913</span>
+    <span class="s1">env </span><span class="s4">= </span><span class="s1">os</span><span class="s4">.</span><span class="s1">environ </span><span class="s3">if </span><span class="s1">env </span><span class="s3">is None else </span><span class="s1">env</span>
+    <span class="s1">result </span><span class="s4">= </span><span class="s1">_get_from_cache</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">app_data</span><span class="s4">, </span><span class="s1">exe</span><span class="s4">, </span><span class="s1">env</span><span class="s4">, </span><span class="s1">ignore_cache</span><span class="s4">=</span><span class="s1">ignore_cache</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">result</span><span class="s4">, </span><span class="s1">Exception</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">raise_on_error</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">result</span>
+        <span class="s1">logging</span><span class="s4">.</span><span class="s1">info</span><span class="s4">(</span><span class="s0">&quot;%s&quot;</span><span class="s4">, </span><span class="s1">result</span><span class="s4">)</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s3">None</span>
+    <span class="s3">return </span><span class="s1">result</span>
+
+
+<span class="s3">def </span><span class="s1">_get_from_cache</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">app_data</span><span class="s4">, </span><span class="s1">exe</span><span class="s4">, </span><span class="s1">env</span><span class="s4">, </span><span class="s1">ignore_cache</span><span class="s4">=</span><span class="s3">True</span><span class="s4">):  </span><span class="s2"># noqa: FBT002</span>
+    <span class="s2"># note here we cannot resolve symlinks, as the symlink may trigger different prefix information if there's a</span>
+    <span class="s2"># pyenv.cfg somewhere alongside on python3.5+</span>
+    <span class="s1">exe_path </span><span class="s4">= </span><span class="s1">Path</span><span class="s4">(</span><span class="s1">exe</span><span class="s4">)</span>
+    <span class="s3">if not </span><span class="s1">ignore_cache </span><span class="s3">and </span><span class="s1">exe_path </span><span class="s3">in </span><span class="s1">_CACHE</span><span class="s4">:  </span><span class="s2"># check in the in-memory cache</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s1">_CACHE</span><span class="s4">[</span><span class="s1">exe_path</span><span class="s4">]</span>
+    <span class="s3">else</span><span class="s4">:  </span><span class="s2"># otherwise go through the app data cache</span>
+        <span class="s1">py_info </span><span class="s4">= </span><span class="s1">_get_via_file_cache</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">app_data</span><span class="s4">, </span><span class="s1">exe_path</span><span class="s4">, </span><span class="s1">exe</span><span class="s4">, </span><span class="s1">env</span><span class="s4">)</span>
+        <span class="s1">result </span><span class="s4">= </span><span class="s1">_CACHE</span><span class="s4">[</span><span class="s1">exe_path</span><span class="s4">] = </span><span class="s1">py_info</span>
+    <span class="s2"># independent if it was from the file or in-memory cache fix the original executable location</span>
+    <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">result</span><span class="s4">, </span><span class="s1">PythonInfo</span><span class="s4">):</span>
+        <span class="s1">result</span><span class="s4">.</span><span class="s1">executable </span><span class="s4">= </span><span class="s1">exe</span>
+    <span class="s3">return </span><span class="s1">result</span>
+
+
+<span class="s3">def </span><span class="s1">_get_via_file_cache</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">app_data</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">exe</span><span class="s4">, </span><span class="s1">env</span><span class="s4">):</span>
+    <span class="s1">path_text </span><span class="s4">= </span><span class="s1">str</span><span class="s4">(</span><span class="s1">path</span><span class="s4">)</span>
+    <span class="s3">try</span><span class="s4">:</span>
+        <span class="s1">path_modified </span><span class="s4">= </span><span class="s1">path</span><span class="s4">.</span><span class="s1">stat</span><span class="s4">().</span><span class="s1">st_mtime</span>
+    <span class="s3">except </span><span class="s1">OSError</span><span class="s4">:</span>
+        <span class="s1">path_modified </span><span class="s4">= -</span><span class="s5">1</span>
+    <span class="s3">if </span><span class="s1">app_data </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s1">app_data </span><span class="s4">= </span><span class="s1">AppDataDisabled</span><span class="s4">()</span>
+    <span class="s1">py_info</span><span class="s4">, </span><span class="s1">py_info_store </span><span class="s4">= </span><span class="s3">None</span><span class="s4">, </span><span class="s1">app_data</span><span class="s4">.</span><span class="s1">py_info</span><span class="s4">(</span><span class="s1">path</span><span class="s4">)</span>
+    <span class="s3">with </span><span class="s1">py_info_store</span><span class="s4">.</span><span class="s1">locked</span><span class="s4">():</span>
+        <span class="s3">if </span><span class="s1">py_info_store</span><span class="s4">.</span><span class="s1">exists</span><span class="s4">():  </span><span class="s2"># if exists and matches load</span>
+            <span class="s1">data </span><span class="s4">= </span><span class="s1">py_info_store</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()</span>
+            <span class="s1">of_path</span><span class="s4">, </span><span class="s1">of_st_mtime</span><span class="s4">, </span><span class="s1">of_content </span><span class="s4">= </span><span class="s1">data</span><span class="s4">[</span><span class="s0">&quot;path&quot;</span><span class="s4">], </span><span class="s1">data</span><span class="s4">[</span><span class="s0">&quot;st_mtime&quot;</span><span class="s4">], </span><span class="s1">data</span><span class="s4">[</span><span class="s0">&quot;content&quot;</span><span class="s4">]</span>
+            <span class="s3">if </span><span class="s1">of_path </span><span class="s4">== </span><span class="s1">path_text </span><span class="s3">and </span><span class="s1">of_st_mtime </span><span class="s4">== </span><span class="s1">path_modified</span><span class="s4">:</span>
+                <span class="s1">py_info </span><span class="s4">= </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">_from_dict</span><span class="s4">(</span><span class="s1">of_content</span><span class="s4">.</span><span class="s1">copy</span><span class="s4">())</span>
+                <span class="s1">sys_exe </span><span class="s4">= </span><span class="s1">py_info</span><span class="s4">.</span><span class="s1">system_executable</span>
+                <span class="s3">if </span><span class="s1">sys_exe </span><span class="s3">is not None and not </span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">exists</span><span class="s4">(</span><span class="s1">sys_exe</span><span class="s4">):</span>
+                    <span class="s1">py_info_store</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">()</span>
+                    <span class="s1">py_info </span><span class="s4">= </span><span class="s3">None</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">py_info_store</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">()</span>
+        <span class="s3">if </span><span class="s1">py_info </span><span class="s3">is None</span><span class="s4">:  </span><span class="s2"># if not loaded run and save</span>
+            <span class="s1">failure</span><span class="s4">, </span><span class="s1">py_info </span><span class="s4">= </span><span class="s1">_run_subprocess</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">exe</span><span class="s4">, </span><span class="s1">app_data</span><span class="s4">, </span><span class="s1">env</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">failure </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s1">data </span><span class="s4">= {</span><span class="s0">&quot;st_mtime&quot;</span><span class="s4">: </span><span class="s1">path_modified</span><span class="s4">, </span><span class="s0">&quot;path&quot;</span><span class="s4">: </span><span class="s1">path_text</span><span class="s4">, </span><span class="s0">&quot;content&quot;</span><span class="s4">: </span><span class="s1">py_info</span><span class="s4">.</span><span class="s1">_to_dict</span><span class="s4">()}  </span><span class="s2"># noqa: SLF001</span>
+                <span class="s1">py_info_store</span><span class="s4">.</span><span class="s1">write</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">py_info </span><span class="s4">= </span><span class="s1">failure</span>
+    <span class="s3">return </span><span class="s1">py_info</span>
+
+
+<span class="s1">COOKIE_LENGTH</span><span class="s4">: </span><span class="s1">int </span><span class="s4">= </span><span class="s5">32</span>
+
+
+<span class="s3">def </span><span class="s1">gen_cookie</span><span class="s4">():</span>
+    <span class="s3">return </span><span class="s0">&quot;&quot;</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span>
+        <span class="s1">random</span><span class="s4">.</span><span class="s1">choice</span><span class="s4">(</span><span class="s0">f&quot;</span><span class="s3">{</span><span class="s1">ascii_lowercase</span><span class="s3">}{</span><span class="s1">ascii_uppercase</span><span class="s3">}{</span><span class="s1">digits</span><span class="s3">}</span><span class="s0">&quot;</span><span class="s4">)  </span><span class="s2"># noqa: S311</span>
+        <span class="s3">for </span><span class="s1">_ </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">COOKIE_LENGTH</span><span class="s4">)</span>
+    <span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_run_subprocess</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">exe</span><span class="s4">, </span><span class="s1">app_data</span><span class="s4">, </span><span class="s1">env</span><span class="s4">):</span>
+    <span class="s1">py_info_script </span><span class="s4">= </span><span class="s1">Path</span><span class="s4">(</span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">abspath</span><span class="s4">(</span><span class="s1">__file__</span><span class="s4">)).</span><span class="s1">parent </span><span class="s4">/ </span><span class="s0">&quot;py_info.py&quot;</span>
+    <span class="s2"># Cookies allow to split the serialized stdout output generated by the script collecting the info from the output</span>
+    <span class="s2"># generated by something else. The right way to deal with it is to create an anonymous pipe and pass its descriptor</span>
+    <span class="s2"># to the child and output to it. But AFAIK all of them are either not cross-platform or too big to implement and are</span>
+    <span class="s2"># not in the stdlib. So the easiest and the shortest way I could mind is just using the cookies.</span>
+    <span class="s2"># We generate pseudorandom cookies because it easy to implement and avoids breakage from outputting modules source</span>
+    <span class="s2"># code, i.e. by debug output libraries. We reverse the cookies to avoid breakages resulting from variable values</span>
+    <span class="s2"># appearing in debug output.</span>
+
+    <span class="s1">start_cookie </span><span class="s4">= </span><span class="s1">gen_cookie</span><span class="s4">()</span>
+    <span class="s1">end_cookie </span><span class="s4">= </span><span class="s1">gen_cookie</span><span class="s4">()</span>
+    <span class="s3">with </span><span class="s1">app_data</span><span class="s4">.</span><span class="s1">ensure_extracted</span><span class="s4">(</span><span class="s1">py_info_script</span><span class="s4">) </span><span class="s3">as </span><span class="s1">py_info_script</span><span class="s4">:</span>
+        <span class="s1">cmd </span><span class="s4">= [</span><span class="s1">exe</span><span class="s4">, </span><span class="s1">str</span><span class="s4">(</span><span class="s1">py_info_script</span><span class="s4">), </span><span class="s1">start_cookie</span><span class="s4">, </span><span class="s1">end_cookie</span><span class="s4">]</span>
+        <span class="s2"># prevent sys.prefix from leaking into the child process - see https://bugs.python.org/issue22490</span>
+        <span class="s1">env </span><span class="s4">= </span><span class="s1">env</span><span class="s4">.</span><span class="s1">copy</span><span class="s4">()</span>
+        <span class="s1">env</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">(</span><span class="s0">&quot;__PYVENV_LAUNCHER__&quot;</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+        <span class="s1">logging</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s0">&quot;get interpreter info via cmd: %s&quot;</span><span class="s4">, </span><span class="s1">LogCmd</span><span class="s4">(</span><span class="s1">cmd</span><span class="s4">))</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">process </span><span class="s4">= </span><span class="s1">Popen</span><span class="s4">(</span>
+                <span class="s1">cmd</span><span class="s4">,</span>
+                <span class="s1">universal_newlines</span><span class="s4">=</span><span class="s3">True</span><span class="s4">,</span>
+                <span class="s1">stdin</span><span class="s4">=</span><span class="s1">subprocess</span><span class="s4">.</span><span class="s1">PIPE</span><span class="s4">,</span>
+                <span class="s1">stderr</span><span class="s4">=</span><span class="s1">subprocess</span><span class="s4">.</span><span class="s1">PIPE</span><span class="s4">,</span>
+                <span class="s1">stdout</span><span class="s4">=</span><span class="s1">subprocess</span><span class="s4">.</span><span class="s1">PIPE</span><span class="s4">,</span>
+                <span class="s1">env</span><span class="s4">=</span><span class="s1">env</span><span class="s4">,</span>
+                <span class="s1">encoding</span><span class="s4">=</span><span class="s0">&quot;utf-8&quot;</span><span class="s4">,</span>
+            <span class="s4">)</span>
+            <span class="s1">out</span><span class="s4">, </span><span class="s1">err </span><span class="s4">= </span><span class="s1">process</span><span class="s4">.</span><span class="s1">communicate</span><span class="s4">()</span>
+            <span class="s1">code </span><span class="s4">= </span><span class="s1">process</span><span class="s4">.</span><span class="s1">returncode</span>
+        <span class="s3">except </span><span class="s1">OSError </span><span class="s3">as </span><span class="s1">os_error</span><span class="s4">:</span>
+            <span class="s1">out</span><span class="s4">, </span><span class="s1">err</span><span class="s4">, </span><span class="s1">code </span><span class="s4">= </span><span class="s0">&quot;&quot;</span><span class="s4">, </span><span class="s1">os_error</span><span class="s4">.</span><span class="s1">strerror</span><span class="s4">, </span><span class="s1">os_error</span><span class="s4">.</span><span class="s1">errno</span>
+    <span class="s1">result</span><span class="s4">, </span><span class="s1">failure </span><span class="s4">= </span><span class="s3">None</span><span class="s4">, </span><span class="s3">None</span>
+    <span class="s3">if </span><span class="s1">code </span><span class="s4">== </span><span class="s5">0</span><span class="s4">:</span>
+        <span class="s1">out_starts </span><span class="s4">= </span><span class="s1">out</span><span class="s4">.</span><span class="s1">find</span><span class="s4">(</span><span class="s1">start_cookie</span><span class="s4">[::-</span><span class="s5">1</span><span class="s4">])</span>
+
+        <span class="s3">if </span><span class="s1">out_starts </span><span class="s4">&gt; -</span><span class="s5">1</span><span class="s4">:</span>
+            <span class="s1">pre_cookie </span><span class="s4">= </span><span class="s1">out</span><span class="s4">[:</span><span class="s1">out_starts</span><span class="s4">]</span>
+
+            <span class="s3">if </span><span class="s1">pre_cookie</span><span class="s4">:</span>
+                <span class="s1">sys</span><span class="s4">.</span><span class="s1">stdout</span><span class="s4">.</span><span class="s1">write</span><span class="s4">(</span><span class="s1">pre_cookie</span><span class="s4">)</span>
+
+            <span class="s1">out </span><span class="s4">= </span><span class="s1">out</span><span class="s4">[</span><span class="s1">out_starts </span><span class="s4">+ </span><span class="s1">COOKIE_LENGTH </span><span class="s4">:]</span>
+
+        <span class="s1">out_ends </span><span class="s4">= </span><span class="s1">out</span><span class="s4">.</span><span class="s1">find</span><span class="s4">(</span><span class="s1">end_cookie</span><span class="s4">[::-</span><span class="s5">1</span><span class="s4">])</span>
+
+        <span class="s3">if </span><span class="s1">out_ends </span><span class="s4">&gt; -</span><span class="s5">1</span><span class="s4">:</span>
+            <span class="s1">post_cookie </span><span class="s4">= </span><span class="s1">out</span><span class="s4">[</span><span class="s1">out_ends </span><span class="s4">+ </span><span class="s1">COOKIE_LENGTH </span><span class="s4">:]</span>
+
+            <span class="s3">if </span><span class="s1">post_cookie</span><span class="s4">:</span>
+                <span class="s1">sys</span><span class="s4">.</span><span class="s1">stdout</span><span class="s4">.</span><span class="s1">write</span><span class="s4">(</span><span class="s1">post_cookie</span><span class="s4">)</span>
+
+            <span class="s1">out </span><span class="s4">= </span><span class="s1">out</span><span class="s4">[:</span><span class="s1">out_ends</span><span class="s4">]</span>
+
+        <span class="s1">result </span><span class="s4">= </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">_from_json</span><span class="s4">(</span><span class="s1">out</span><span class="s4">)</span>
+        <span class="s1">result</span><span class="s4">.</span><span class="s1">executable </span><span class="s4">= </span><span class="s1">exe  </span><span class="s2"># keep original executable as this may contain initialization code</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">msg </span><span class="s4">= </span><span class="s0">f&quot;</span><span class="s3">{</span><span class="s1">exe</span><span class="s3">} </span><span class="s0">with code </span><span class="s3">{</span><span class="s1">code</span><span class="s3">}{</span><span class="s0">f' out: </span><span class="s3">{</span><span class="s1">out</span><span class="s3">!r}</span><span class="s0">' </span><span class="s3">if </span><span class="s1">out </span><span class="s3">else </span><span class="s0">''</span><span class="s3">}{</span><span class="s0">f' err: </span><span class="s3">{</span><span class="s1">err</span><span class="s3">!r}</span><span class="s0">' </span><span class="s3">if </span><span class="s1">err </span><span class="s3">else </span><span class="s0">''</span><span class="s3">}</span><span class="s0">&quot;</span>
+        <span class="s1">failure </span><span class="s4">= </span><span class="s1">RuntimeError</span><span class="s4">(</span><span class="s0">f&quot;failed to query </span><span class="s3">{</span><span class="s1">msg</span><span class="s3">}</span><span class="s0">&quot;</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">failure</span><span class="s4">, </span><span class="s1">result</span>
+
+
+<span class="s3">class </span><span class="s1">LogCmd</span><span class="s4">:</span>
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">cmd</span><span class="s4">, </span><span class="s1">env</span><span class="s4">=</span><span class="s3">None</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">cmd </span><span class="s4">= </span><span class="s1">cmd</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">env </span><span class="s4">= </span><span class="s1">env</span>
+
+    <span class="s3">def </span><span class="s1">__repr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; str</span><span class="s4">:</span>
+        <span class="s1">cmd_repr </span><span class="s4">= </span><span class="s0">&quot; &quot;</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">quote</span><span class="s4">(</span><span class="s1">str</span><span class="s4">(</span><span class="s1">c</span><span class="s4">)) </span><span class="s3">for </span><span class="s1">c </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">cmd</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">env </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s1">cmd_repr </span><span class="s4">= </span><span class="s0">f&quot;</span><span class="s3">{</span><span class="s1">cmd_repr</span><span class="s3">} </span><span class="s0">env of </span><span class="s3">{</span><span class="s1">self</span><span class="s4">.</span><span class="s1">env</span><span class="s3">!r}</span><span class="s0">&quot;</span>
+        <span class="s3">return </span><span class="s1">cmd_repr</span>
+
+
+<span class="s3">def </span><span class="s1">clear</span><span class="s4">(</span><span class="s1">app_data</span><span class="s4">):</span>
+    <span class="s1">app_data</span><span class="s4">.</span><span class="s1">py_info_clear</span><span class="s4">()</span>
+    <span class="s1">_CACHE</span><span class="s4">.</span><span class="s1">clear</span><span class="s4">()</span>
+
+
+<span class="s1">___all___ </span><span class="s4">= [</span>
+    <span class="s0">&quot;from_exe&quot;</span><span class="s4">,</span>
+    <span class="s0">&quot;clear&quot;</span><span class="s4">,</span>
+    <span class="s0">&quot;LogCmd&quot;</span><span class="s4">,</span>
+<span class="s4">]</span>
+</pre>
+</body>
+</html>

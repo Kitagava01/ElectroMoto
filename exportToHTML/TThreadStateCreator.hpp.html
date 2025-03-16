@@ -1,0 +1,125 @@
+<html>
+<head>
+<title>TThreadStateCreator.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #6aab73;}
+.s3 { color: #c77dbb;}
+.s4 { color: #7a7e85;}
+.s5 { color: #0da19e;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TThreadStateCreator.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_THREAD_STATE_CREATOR_HPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_THREAD_STATE_CREATOR_HPP</span>
+
+<span class="s0">#include </span><span class="s1">&lt;ctime&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;stdexcept&gt;</span>
+
+<span class="s0">#include </span><span class="s2">&quot;greenlet_internal.hpp&quot;</span>
+<span class="s0">#include </span><span class="s2">&quot;greenlet_refs.hpp&quot;</span>
+<span class="s0">#include </span><span class="s2">&quot;greenlet_thread_support.hpp&quot;</span>
+
+<span class="s0">#include </span><span class="s2">&quot;TThreadState.hpp&quot;</span>
+
+<span class="s3">namespace </span><span class="s1">greenlet {</span>
+
+
+<span class="s0">typedef void </span><span class="s1">(*ThreadStateDestructor)(ThreadState* </span><span class="s0">const</span><span class="s1">);</span>
+
+<span class="s1">template&lt;ThreadStateDestructor Destructor&gt;</span>
+<span class="s3">class </span><span class="s1">ThreadStateCreator</span>
+<span class="s1">{</span>
+<span class="s3">private</span><span class="s1">:</span>
+    <span class="s4">// Initialized to 1, and, if still 1, created on access.</span>
+    <span class="s4">// Set to 0 on destruction.</span>
+    <span class="s1">ThreadState* _state;</span>
+    <span class="s1">G_NO_COPIES_OF_CLS(ThreadStateCreator);</span>
+
+    <span class="s3">inline </span><span class="s0">bool </span><span class="s1">has_initialized_state() </span><span class="s0">const </span><span class="s1">noexcept</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">_state != (ThreadState*)</span><span class="s6">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s3">inline </span><span class="s0">bool </span><span class="s1">has_state() </span><span class="s0">const </span><span class="s1">noexcept</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">has_initialized_state() &amp;&amp; </span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">_state != nullptr;</span>
+    <span class="s1">}</span>
+
+<span class="s3">public</span><span class="s1">:</span>
+
+    <span class="s4">// Only one of these, auto created per thread.</span>
+    <span class="s4">// Constructing the state constructs the MainGreenlet.</span>
+    <span class="s1">ThreadStateCreator() :</span>
+        <span class="s1">_state((ThreadState*)</span><span class="s6">1</span><span class="s1">)</span>
+    <span class="s1">{</span>
+    <span class="s1">}</span>
+
+    <span class="s1">~ThreadStateCreator()</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(</span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">has_state()) {</span>
+            <span class="s1">Destructor(</span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">_state);</span>
+        <span class="s1">}</span>
+
+        <span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">_state = nullptr;</span>
+    <span class="s1">}</span>
+
+    <span class="s3">inline </span><span class="s1">ThreadState&amp; state()</span>
+    <span class="s1">{</span>
+        <span class="s4">// The main greenlet will own this pointer when it is created,</span>
+        <span class="s4">// which will be right after this. The plan is to give every</span>
+        <span class="s4">// greenlet a pointer to the main greenlet for the thread it</span>
+        <span class="s4">// runs in; if we are doing something cross-thread, we need to</span>
+        <span class="s4">// access the pointer from the main greenlet. Deleting the</span>
+        <span class="s4">// thread, and hence the thread-local storage, will delete the</span>
+        <span class="s4">// state pointer in the main greenlet.</span>
+        <span class="s0">if </span><span class="s1">(!</span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">has_initialized_state()) {</span>
+            <span class="s4">// XXX: Assuming allocation never fails</span>
+            <span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">_state = </span><span class="s3">new </span><span class="s1">ThreadState;</span>
+            <span class="s4">// For non-standard threading, we need to store an object</span>
+            <span class="s4">// in the Python thread state dictionary so that it can be</span>
+            <span class="s4">// DECREF'd when the thread ends (ideally; the dict could</span>
+            <span class="s4">// last longer) and clean this object up.</span>
+        <span class="s1">}</span>
+        <span class="s0">if </span><span class="s1">(!</span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">_state) {</span>
+            <span class="s3">throw </span><span class="s1">std::runtime_error(</span><span class="s2">&quot;Accessing state after destruction.&quot;</span><span class="s1">);</span>
+        <span class="s1">}</span>
+        <span class="s0">return </span><span class="s1">*</span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">_state;</span>
+    <span class="s1">}</span>
+
+    <span class="s3">operator </span><span class="s1">ThreadState&amp;()</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">state();</span>
+    <span class="s1">}</span>
+
+    <span class="s3">operator </span><span class="s1">ThreadState*()</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s1">&amp;</span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">state();</span>
+    <span class="s1">}</span>
+
+    <span class="s3">inline </span><span class="s0">int </span><span class="s1">tp_traverse(visitproc visit, </span><span class="s0">void</span><span class="s1">* arg)</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(</span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">has_state()) {</span>
+            <span class="s0">return </span><span class="s3">this</span><span class="s5">-&gt;</span><span class="s1">_state</span><span class="s5">-&gt;</span><span class="s1">tp_traverse(visit, arg);</span>
+        <span class="s1">}</span>
+        <span class="s0">return </span><span class="s6">0</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+<span class="s1">};</span>
+
+
+
+<span class="s1">}; </span><span class="s4">// namespace greenlet</span>
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

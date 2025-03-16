@@ -1,0 +1,343 @@
+<html>
+<head>
+<title>greenlet.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #0da19e;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+greenlet.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">/* -*- indent-tabs-mode: nil; tab-width: 4; -*- */</span>
+<span class="s0">/* Format with: 
+ *  clang-format -i --style=file src/greenlet/greenlet.c 
+ * 
+ * 
+ * Fix missing braces with: 
+ *   clang-tidy src/greenlet/greenlet.c -fix -checks=&quot;readability-braces-around-statements&quot; 
+*/</span>
+<span class="s2">#include </span><span class="s1">&lt;cstdlib&gt;</span>
+<span class="s2">#include </span><span class="s1">&lt;string&gt;</span>
+<span class="s2">#include </span><span class="s1">&lt;algorithm&gt;</span>
+<span class="s2">#include </span><span class="s1">&lt;exception&gt;</span>
+
+
+<span class="s2">#define </span><span class="s1">PY_SSIZE_T_CLEAN</span>
+<span class="s2">#include </span><span class="s1">&lt;Python.h&gt;</span>
+<span class="s2">#include </span><span class="s3">&quot;structmember.h&quot; </span><span class="s0">// PyMemberDef</span>
+
+<span class="s2">#include </span><span class="s3">&quot;greenlet_internal.hpp&quot;</span>
+<span class="s0">// Code after this point can assume access to things declared in stdint.h,</span>
+<span class="s0">// including the fixed-width types. This goes for the platform-specific switch functions</span>
+<span class="s0">// as well.</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_refs.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_slp_switch.hpp&quot;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;greenlet_thread_support.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TGreenlet.hpp&quot;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;TGreenletGlobals.cpp&quot;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;TGreenlet.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TMainGreenlet.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TUserGreenlet.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TBrokenGreenlet.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TExceptionState.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TPythonState.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TStackState.cpp&quot;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;TThreadState.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TThreadStateCreator.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TThreadStateDestroy.cpp&quot;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;PyGreenlet.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;PyGreenletUnswitchable.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;CObjects.cpp&quot;</span>
+
+<span class="s4">using </span><span class="s1">greenlet::LockGuard;</span>
+<span class="s4">using </span><span class="s1">greenlet::LockInitError;</span>
+<span class="s4">using </span><span class="s1">greenlet::PyErrOccurred;</span>
+<span class="s4">using </span><span class="s1">greenlet::Require;</span>
+
+<span class="s4">using </span><span class="s1">greenlet::g_handle_exit;</span>
+<span class="s4">using </span><span class="s1">greenlet::single_result;</span>
+
+<span class="s4">using </span><span class="s1">greenlet::Greenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::UserGreenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::MainGreenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::BrokenGreenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::ThreadState;</span>
+<span class="s4">using </span><span class="s1">greenlet::PythonState;</span>
+
+
+
+<span class="s0">// ******* Implementation of things from included files</span>
+<span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, greenlet::refs::TypeChecker TC&gt;</span>
+<span class="s1">greenlet::refs::_BorrowedGreenlet&lt;T, TC&gt;&amp; greenlet::refs::_BorrowedGreenlet&lt;T, TC&gt;::</span><span class="s4">operator</span><span class="s1">=(</span><span class="s2">const </span><span class="s1">greenlet::refs::BorrowedObject&amp; other)</span>
+<span class="s1">{</span>
+    <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">_set_raw_pointer(</span><span class="s4">static_cast</span><span class="s1">&lt;PyObject*&gt;(other));</span>
+    <span class="s2">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s1">template &lt;</span><span class="s4">typename </span><span class="s1">T, greenlet::refs::TypeChecker TC&gt;</span>
+<span class="s4">inline </span><span class="s1">greenlet::refs::_BorrowedGreenlet&lt;T, TC&gt;::</span><span class="s4">operator </span><span class="s1">Greenlet*() </span><span class="s2">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(!</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p) {</span>
+        <span class="s2">return </span><span class="s1">nullptr;</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyGreenlet*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p)</span><span class="s5">-&gt;</span><span class="s1">pimpl;</span>
+<span class="s1">}</span>
+
+<span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, greenlet::refs::TypeChecker TC&gt;</span>
+<span class="s1">greenlet::refs::_BorrowedGreenlet&lt;T, TC&gt;::_BorrowedGreenlet(</span><span class="s2">const </span><span class="s1">BorrowedObject&amp; p)</span>
+    <span class="s1">: BorrowedReference&lt;T, TC&gt;(nullptr)</span>
+<span class="s1">{</span>
+
+    <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">_set_raw_pointer(p.borrow());</span>
+<span class="s1">}</span>
+
+<span class="s1">template &lt;</span><span class="s4">typename </span><span class="s1">T, greenlet::refs::TypeChecker TC&gt;</span>
+<span class="s4">inline </span><span class="s1">greenlet::refs::_OwnedGreenlet&lt;T, TC&gt;::</span><span class="s4">operator </span><span class="s1">Greenlet*() </span><span class="s2">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(!</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p) {</span>
+        <span class="s2">return </span><span class="s1">nullptr;</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyGreenlet*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p)</span><span class="s5">-&gt;</span><span class="s1">pimpl;</span>
+<span class="s1">}</span>
+
+
+
+<span class="s2">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic push</span>
+<span class="s1">#    pragma clang diagnostic ignored </span><span class="s3">&quot;-Wmissing-field-initializers&quot;</span>
+<span class="s1">#    pragma clang diagnostic ignored </span><span class="s3">&quot;-Wwritable-strings&quot;</span>
+<span class="s1">#elif defined(__GNUC__)</span>
+<span class="s1">#    pragma GCC diagnostic push</span>
+<span class="s0">//  warning: ISO C++ forbids converting a string constant to ‘char*’</span>
+<span class="s0">// (The python APIs aren't const correct and accept writable char*)</span>
+<span class="s1">#    pragma GCC diagnostic ignored </span><span class="s3">&quot;-Wwrite-strings&quot;</span>
+<span class="s2">#endif</span>
+
+
+<span class="s0">/*********************************************************** 
+ 
+A PyGreenlet is a range of C stack addresses that must be 
+saved and restored in such a way that the full range of the 
+stack contains valid data when we switch to it. 
+ 
+Stack layout for a greenlet: 
+ 
+               |     ^^^       | 
+               |  older data   | 
+               |               | 
+  stack_stop . |_______________| 
+        .      |               | 
+        .      | greenlet data | 
+        .      |   in stack    | 
+        .    * |_______________| . .  _____________  stack_copy + stack_saved 
+        .      |               |     |             | 
+        .      |     data      |     |greenlet data| 
+        .      |   unrelated   |     |    saved    | 
+        .      |      to       |     |   in heap   | 
+ stack_start . |     this      | . . |_____________| stack_copy 
+               |   greenlet    | 
+               |               | 
+               |  newer data   | 
+               |     vvv       | 
+ 
+ 
+Note that a greenlet's stack data is typically partly at its correct 
+place in the stack, and partly saved away in the heap, but always in 
+the above configuration: two blocks, the more recent one in the heap 
+and the older one still in the stack (either block may be empty). 
+ 
+Greenlets are chained: each points to the previous greenlet, which is 
+the one that owns the data currently in the C stack above my 
+stack_stop.  The currently running greenlet is the first element of 
+this chain.  The main (initial) greenlet is the last one.  Greenlets 
+whose stack is entirely in the heap can be skipped from the chain. 
+ 
+The chain is not related to execution order, but only to the order 
+in which bits of C stack happen to belong to greenlets at a particular 
+point in time. 
+ 
+The main greenlet doesn't have a stack_stop: it is responsible for the 
+complete rest of the C stack, and we don't know where it begins.  We 
+use (char*) -1, the largest possible address. 
+ 
+States: 
+  stack_stop == NULL &amp;&amp; stack_start == NULL:  did not start yet 
+  stack_stop != NULL &amp;&amp; stack_start == NULL:  already finished 
+  stack_stop != NULL &amp;&amp; stack_start != NULL:  active 
+ 
+The running greenlet's stack_start is undefined but not NULL. 
+ 
+ ***********************************************************/</span>
+
+
+
+
+<span class="s0">/***********************************************************/</span>
+
+<span class="s0">/* Some functions must not be inlined: 
+   * slp_restore_state, when inlined into slp_switch might cause 
+     it to restore stack over its own local variables 
+   * slp_save_state, when inlined would add its own local 
+     variables to the saved stack, wasting space 
+   * slp_switch, cannot be inlined for obvious reasons 
+   * g_initialstub, when inlined would receive a pointer into its 
+     own stack frame, leading to incomplete stack save/restore 
+ 
+g_initialstub is a member function and declared virtual so that the 
+compiler always calls it through a vtable. 
+ 
+slp_save_state and slp_restore_state are also member functions. They 
+are called from trampoline functions that themselves are declared as 
+not eligible for inlining. 
+*/</span>
+
+<span class="s2">extern </span><span class="s3">&quot;C&quot; </span><span class="s1">{</span>
+<span class="s2">static int </span><span class="s1">GREENLET_NOINLINE(slp_save_state_trampoline)(</span><span class="s2">char</span><span class="s1">* stackref)</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">switching_thread_state</span><span class="s5">-&gt;</span><span class="s1">slp_save_state(stackref);</span>
+<span class="s1">}</span>
+<span class="s2">static void </span><span class="s1">GREENLET_NOINLINE(slp_restore_state_trampoline)()</span>
+<span class="s1">{</span>
+    <span class="s1">switching_thread_state</span><span class="s5">-&gt;</span><span class="s1">slp_restore_state();</span>
+<span class="s1">}</span>
+<span class="s1">}</span>
+
+
+<span class="s0">/***********************************************************/</span>
+
+
+<span class="s2">#include </span><span class="s3">&quot;PyModule.cpp&quot;</span>
+
+
+
+<span class="s2">static </span><span class="s1">PyObject*</span>
+<span class="s1">greenlet_internal_mod_init() noexcept</span>
+<span class="s1">{</span>
+    <span class="s2">static void</span><span class="s1">* _PyGreenlet_API[PyGreenlet_API_pointers];</span>
+
+    <span class="s4">try </span><span class="s1">{</span>
+        <span class="s1">CreatedModule m(greenlet_module_def);</span>
+
+        <span class="s1">Require(PyType_Ready(&amp;PyGreenlet_Type));</span>
+        <span class="s1">Require(PyType_Ready(&amp;PyGreenletUnswitchable_Type));</span>
+
+        <span class="s1">mod_globs = </span><span class="s4">new </span><span class="s1">greenlet::GreenletGlobals;</span>
+        <span class="s1">ThreadState::init();</span>
+
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;greenlet&quot;</span><span class="s1">, PyGreenlet_Type);</span>
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;UnswitchableGreenlet&quot;</span><span class="s1">, PyGreenletUnswitchable_Type);</span>
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;error&quot;</span><span class="s1">, mod_globs</span><span class="s5">-&gt;</span><span class="s1">PyExc_GreenletError);</span>
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;GreenletExit&quot;</span><span class="s1">, mod_globs</span><span class="s5">-&gt;</span><span class="s1">PyExc_GreenletExit);</span>
+
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;GREENLET_USE_GC&quot;</span><span class="s1">, </span><span class="s6">1</span><span class="s1">);</span>
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;GREENLET_USE_TRACING&quot;</span><span class="s1">, </span><span class="s6">1</span><span class="s1">);</span>
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;GREENLET_USE_CONTEXT_VARS&quot;</span><span class="s1">, </span><span class="s6">1</span><span class="s1">L);</span>
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;GREENLET_USE_STANDARD_THREADING&quot;</span><span class="s1">, </span><span class="s6">1</span><span class="s1">L);</span>
+
+        <span class="s1">OwnedObject clocks_per_sec = OwnedObject::consuming(PyLong_FromSsize_t(CLOCKS_PER_SEC));</span>
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;CLOCKS_PER_SEC&quot;</span><span class="s1">, clocks_per_sec);</span>
+
+        <span class="s0">/* also publish module-level data as attributes of the greentype. */</span>
+        <span class="s0">// XXX: This is weird, and enables a strange pattern of</span>
+        <span class="s0">// confusing the class greenlet with the module greenlet; with</span>
+        <span class="s0">// the exception of (possibly) ``getcurrent()``, this</span>
+        <span class="s0">// shouldn't be encouraged so don't add new items here.</span>
+        <span class="s2">for </span><span class="s1">(</span><span class="s2">const char</span><span class="s1">* </span><span class="s2">const</span><span class="s1">* p = copy_on_greentype; *p; p++) {</span>
+            <span class="s1">OwnedObject o = m.PyRequireAttr(*p);</span>
+            <span class="s1">PyDict_SetItemString(PyGreenlet_Type.tp_dict, *p, o.borrow());</span>
+        <span class="s1">}</span>
+
+        <span class="s0">/* 
+         * Expose C API 
+         */</span>
+
+        <span class="s0">/* types */</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_Type_NUM] = (</span><span class="s2">void</span><span class="s1">*)&amp;PyGreenlet_Type;</span>
+
+        <span class="s0">/* exceptions */</span>
+        <span class="s1">_PyGreenlet_API[PyExc_GreenletError_NUM] = (</span><span class="s2">void</span><span class="s1">*)mod_globs</span><span class="s5">-&gt;</span><span class="s1">PyExc_GreenletError;</span>
+        <span class="s1">_PyGreenlet_API[PyExc_GreenletExit_NUM] = (</span><span class="s2">void</span><span class="s1">*)mod_globs</span><span class="s5">-&gt;</span><span class="s1">PyExc_GreenletExit;</span>
+
+        <span class="s0">/* methods */</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_New_NUM] = (</span><span class="s2">void</span><span class="s1">*)PyGreenlet_New;</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_GetCurrent_NUM] = (</span><span class="s2">void</span><span class="s1">*)PyGreenlet_GetCurrent;</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_Throw_NUM] = (</span><span class="s2">void</span><span class="s1">*)PyGreenlet_Throw;</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_Switch_NUM] = (</span><span class="s2">void</span><span class="s1">*)PyGreenlet_Switch;</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_SetParent_NUM] = (</span><span class="s2">void</span><span class="s1">*)PyGreenlet_SetParent;</span>
+
+        <span class="s0">/* Previously macros, but now need to be functions externally. */</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_MAIN_NUM] = (</span><span class="s2">void</span><span class="s1">*)Extern_PyGreenlet_MAIN;</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_STARTED_NUM] = (</span><span class="s2">void</span><span class="s1">*)Extern_PyGreenlet_STARTED;</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_ACTIVE_NUM] = (</span><span class="s2">void</span><span class="s1">*)Extern_PyGreenlet_ACTIVE;</span>
+        <span class="s1">_PyGreenlet_API[PyGreenlet_GET_PARENT_NUM] = (</span><span class="s2">void</span><span class="s1">*)Extern_PyGreenlet_GET_PARENT;</span>
+
+        <span class="s0">/* XXX: Note that our module name is ``greenlet._greenlet``, but for 
+           backwards compatibility with existing C code, we need the _C_API to 
+           be directly in greenlet. 
+        */</span>
+        <span class="s2">const </span><span class="s1">NewReference c_api_object(Require(</span>
+                                           <span class="s1">PyCapsule_New(</span>
+                                               <span class="s1">(</span><span class="s2">void</span><span class="s1">*)_PyGreenlet_API,</span>
+                                               <span class="s3">&quot;greenlet._C_API&quot;</span><span class="s1">,</span>
+                                               <span class="s1">NULL)));</span>
+        <span class="s1">m.PyAddObject(</span><span class="s3">&quot;_C_API&quot;</span><span class="s1">, c_api_object);</span>
+        <span class="s1">assert(c_api_object.REFCNT() == </span><span class="s6">2</span><span class="s1">);</span>
+
+        <span class="s0">// cerr &lt;&lt; &quot;Sizes:&quot;</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tGreenlet       : &quot; &lt;&lt; sizeof(Greenlet)</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tUserGreenlet   : &quot; &lt;&lt; sizeof(UserGreenlet)</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tMainGreenlet   : &quot; &lt;&lt; sizeof(MainGreenlet)</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tExceptionState : &quot; &lt;&lt; sizeof(greenlet::ExceptionState)</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tPythonState    : &quot; &lt;&lt; sizeof(greenlet::PythonState)</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tStackState     : &quot; &lt;&lt; sizeof(greenlet::StackState)</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tSwitchingArgs  : &quot; &lt;&lt; sizeof(greenlet::SwitchingArgs)</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tOwnedObject    : &quot; &lt;&lt; sizeof(greenlet::refs::OwnedObject)</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tBorrowedObject : &quot; &lt;&lt; sizeof(greenlet::refs::BorrowedObject)</span>
+        <span class="s0">//      &lt;&lt; &quot;\n\tPyGreenlet     : &quot; &lt;&lt; sizeof(PyGreenlet)</span>
+        <span class="s0">//      &lt;&lt; endl;</span>
+
+        <span class="s2">return </span><span class="s1">m.borrow(); </span><span class="s0">// But really it's the main reference.</span>
+    <span class="s1">}</span>
+    <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">LockInitError&amp; e) {</span>
+        <span class="s1">PyErr_SetString(PyExc_MemoryError, e.what());</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">PyErrOccurred&amp;) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+
+<span class="s1">}</span>
+
+<span class="s2">extern </span><span class="s3">&quot;C&quot; </span><span class="s1">{</span>
+
+<span class="s1">PyMODINIT_FUNC</span>
+<span class="s1">PyInit__greenlet(</span><span class="s2">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">greenlet_internal_mod_init();</span>
+<span class="s1">}</span>
+
+<span class="s1">}; </span><span class="s0">// extern C</span>
+
+<span class="s2">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic pop</span>
+<span class="s1">#elif defined(__GNUC__)</span>
+<span class="s1">#    pragma GCC diagnostic pop</span>
+<span class="s2">#endif</span>
+</pre>
+</body>
+</html>

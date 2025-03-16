@@ -1,0 +1,315 @@
+<html>
+<head>
+<title>PyModule.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #6aab73;}
+.s3 { color: #c77dbb;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+.s6 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+PyModule.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">PY_MODULE_CPP</span>
+<span class="s0">#define </span><span class="s1">PY_MODULE_CPP</span>
+
+<span class="s0">#include </span><span class="s2">&quot;greenlet_internal.hpp&quot;</span>
+
+
+<span class="s0">#include </span><span class="s2">&quot;TGreenletGlobals.cpp&quot;</span>
+<span class="s0">#include </span><span class="s2">&quot;TMainGreenlet.cpp&quot;</span>
+<span class="s0">#include </span><span class="s2">&quot;TThreadStateDestroy.cpp&quot;</span>
+
+<span class="s3">using </span><span class="s1">greenlet::LockGuard;</span>
+<span class="s3">using </span><span class="s1">greenlet::ThreadState;</span>
+
+<span class="s0">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic push</span>
+<span class="s1">#    pragma clang diagnostic ignored </span><span class="s2">&quot;-Wunused-function&quot;</span>
+<span class="s1">#    pragma clang diagnostic ignored </span><span class="s2">&quot;-Wunused-variable&quot;</span>
+<span class="s0">#endif</span>
+
+<span class="s1">PyDoc_STRVAR(mod_getcurrent_doc,</span>
+             <span class="s2">&quot;getcurrent() -&gt; greenlet</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Returns the current greenlet (i.e. the one which called this &quot;</span>
+             <span class="s2">&quot;function).</span><span class="s0">\n</span><span class="s2">&quot;</span><span class="s1">);</span>
+
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">mod_getcurrent(PyObject* UNUSED(module))</span>
+<span class="s1">{</span>
+    <span class="s0">return </span><span class="s1">GET_THREAD_STATE().state().get_current().relinquish_ownership_o();</span>
+<span class="s1">}</span>
+
+<span class="s1">PyDoc_STRVAR(mod_settrace_doc,</span>
+             <span class="s2">&quot;settrace(callback) -&gt; object</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Sets a new tracing function and returns the previous one.</span><span class="s0">\n</span><span class="s2">&quot;</span><span class="s1">);</span>
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">mod_settrace(PyObject* UNUSED(module), PyObject* args)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArgParseParam tracefunc;</span>
+    <span class="s0">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s2">&quot;O&quot;</span><span class="s1">, &amp;tracefunc)) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s1">ThreadState&amp; state = GET_THREAD_STATE();</span>
+    <span class="s1">OwnedObject previous = state.get_tracefunc();</span>
+    <span class="s0">if </span><span class="s1">(!previous) {</span>
+        <span class="s1">previous = Py_None;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">state.set_tracefunc(tracefunc);</span>
+
+    <span class="s0">return </span><span class="s1">previous.relinquish_ownership();</span>
+<span class="s1">}</span>
+
+<span class="s1">PyDoc_STRVAR(mod_gettrace_doc,</span>
+             <span class="s2">&quot;gettrace() -&gt; object</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Returns the currently set tracing function, or None.</span><span class="s0">\n</span><span class="s2">&quot;</span><span class="s1">);</span>
+
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">mod_gettrace(PyObject* UNUSED(module))</span>
+<span class="s1">{</span>
+    <span class="s1">OwnedObject tracefunc = GET_THREAD_STATE().state().get_tracefunc();</span>
+    <span class="s0">if </span><span class="s1">(!tracefunc) {</span>
+        <span class="s1">tracefunc = Py_None;</span>
+    <span class="s1">}</span>
+    <span class="s0">return </span><span class="s1">tracefunc.relinquish_ownership();</span>
+<span class="s1">}</span>
+
+
+
+<span class="s1">PyDoc_STRVAR(mod_set_thread_local_doc,</span>
+             <span class="s2">&quot;set_thread_local(key, value) -&gt; None</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Set a value in the current thread-local dictionary. Debugging only.</span><span class="s0">\n</span><span class="s2">&quot;</span><span class="s1">);</span>
+
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">mod_set_thread_local(PyObject* UNUSED(module), PyObject* args)</span>
+<span class="s1">{</span>
+    <span class="s1">PyArgParseParam key;</span>
+    <span class="s1">PyArgParseParam value;</span>
+    <span class="s1">PyObject* result = NULL;</span>
+
+    <span class="s0">if </span><span class="s1">(PyArg_UnpackTuple(args, </span><span class="s2">&quot;set_thread_local&quot;</span><span class="s1">, </span><span class="s4">2</span><span class="s1">, </span><span class="s4">2</span><span class="s1">, &amp;key, &amp;value)) {</span>
+        <span class="s0">if</span><span class="s1">(PyDict_SetItem(</span>
+                          <span class="s1">PyThreadState_GetDict(), </span><span class="s5">// borrow</span>
+                          <span class="s1">key,</span>
+                          <span class="s1">value) == </span><span class="s4">0 </span><span class="s1">) {</span>
+            <span class="s5">// success</span>
+            <span class="s1">Py_INCREF(Py_None);</span>
+            <span class="s1">result = Py_None;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+    <span class="s0">return </span><span class="s1">result;</span>
+<span class="s1">}</span>
+
+<span class="s1">PyDoc_STRVAR(mod_get_pending_cleanup_count_doc,</span>
+             <span class="s2">&quot;get_pending_cleanup_count() -&gt; Integer</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Get the number of greenlet cleanup operations pending. Testing only.</span><span class="s0">\n</span><span class="s2">&quot;</span><span class="s1">);</span>
+
+
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">mod_get_pending_cleanup_count(PyObject* UNUSED(module))</span>
+<span class="s1">{</span>
+    <span class="s1">LockGuard cleanup_lock(*mod_globs</span><span class="s6">-&gt;</span><span class="s1">thread_states_to_destroy_lock);</span>
+    <span class="s0">return </span><span class="s1">PyLong_FromSize_t(mod_globs</span><span class="s6">-&gt;</span><span class="s1">thread_states_to_destroy.size());</span>
+<span class="s1">}</span>
+
+<span class="s1">PyDoc_STRVAR(mod_get_total_main_greenlets_doc,</span>
+             <span class="s2">&quot;get_total_main_greenlets() -&gt; Integer</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Quickly return the number of main greenlets that exist. Testing only.</span><span class="s0">\n</span><span class="s2">&quot;</span><span class="s1">);</span>
+
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">mod_get_total_main_greenlets(PyObject* UNUSED(module))</span>
+<span class="s1">{</span>
+    <span class="s0">return </span><span class="s1">PyLong_FromSize_t(G_TOTAL_MAIN_GREENLETS);</span>
+<span class="s1">}</span>
+
+
+
+<span class="s1">PyDoc_STRVAR(mod_get_clocks_used_doing_optional_cleanup_doc,</span>
+             <span class="s2">&quot;get_clocks_used_doing_optional_cleanup() -&gt; Integer</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Get the number of clock ticks the program has used doing optional &quot;</span>
+             <span class="s2">&quot;greenlet cleanup.</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Beginning in greenlet 2.0, greenlet tries to find and dispose of greenlets</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;that leaked after a thread exited. This requires invoking Python's garbage collector,</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;which may have a performance cost proportional to the number of live objects.</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;This function returns the amount of processor time</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;greenlet has used to do this. In programs that run with very large amounts of live</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;objects, this metric can be used to decide whether the cost of doing this cleanup</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;is worth the memory leak being corrected. If not, you can disable the cleanup</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;using ``enable_optional_cleanup(False)``.</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;The units are arbitrary and can only be compared to themselves (similarly to ``time.clock()``);</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;for example, to see how it scales with your heap. You can attempt to convert them into seconds</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;by dividing by the value of CLOCKS_PER_SEC.&quot;</span>
+             <span class="s2">&quot;If cleanup has been disabled, returns None.&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;This is an implementation specific, provisional API. It may be changed or removed</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;in the future.</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;.. versionadded:: 2.0&quot;</span>
+             <span class="s1">);</span>
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">mod_get_clocks_used_doing_optional_cleanup(PyObject* UNUSED(module))</span>
+<span class="s1">{</span>
+    <span class="s1">std::clock_t&amp; clocks = ThreadState::clocks_used_doing_gc();</span>
+
+    <span class="s0">if </span><span class="s1">(clocks == std::clock_t(-</span><span class="s4">1</span><span class="s1">)) {</span>
+        <span class="s1">Py_RETURN_NONE;</span>
+    <span class="s1">}</span>
+    <span class="s5">// This might not actually work on some implementations; clock_t</span>
+    <span class="s5">// is an opaque type.</span>
+    <span class="s0">return </span><span class="s1">PyLong_FromSsize_t(clocks);</span>
+<span class="s1">}</span>
+
+<span class="s1">PyDoc_STRVAR(mod_enable_optional_cleanup_doc,</span>
+             <span class="s2">&quot;mod_enable_optional_cleanup(bool) -&gt; None</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Enable or disable optional cleanup operations.</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;See ``get_clocks_used_doing_optional_cleanup()`` for details.</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s1">);</span>
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">mod_enable_optional_cleanup(PyObject* UNUSED(module), PyObject* flag)</span>
+<span class="s1">{</span>
+    <span class="s0">int </span><span class="s1">is_true = PyObject_IsTrue(flag);</span>
+    <span class="s0">if </span><span class="s1">(is_true == -</span><span class="s4">1</span><span class="s1">) {</span>
+        <span class="s0">return </span><span class="s1">nullptr;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">std::clock_t&amp; clocks = ThreadState::clocks_used_doing_gc();</span>
+    <span class="s0">if </span><span class="s1">(is_true) {</span>
+        <span class="s5">// If we already have a value, we don't want to lose it.</span>
+        <span class="s0">if </span><span class="s1">(clocks == std::clock_t(-</span><span class="s4">1</span><span class="s1">)) {</span>
+            <span class="s1">clocks = </span><span class="s4">0</span><span class="s1">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+    <span class="s0">else </span><span class="s1">{</span>
+        <span class="s1">clocks = std::clock_t(-</span><span class="s4">1</span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s1">Py_RETURN_NONE;</span>
+<span class="s1">}</span>
+
+
+
+
+<span class="s0">#if </span><span class="s1">!GREENLET_PY313</span>
+<span class="s1">PyDoc_STRVAR(mod_get_tstate_trash_delete_nesting_doc,</span>
+             <span class="s2">&quot;get_tstate_trash_delete_nesting() -&gt; Integer</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;</span><span class="s0">\n</span><span class="s2">&quot;</span>
+             <span class="s2">&quot;Return the 'trash can' nesting level. Testing only.</span><span class="s0">\n</span><span class="s2">&quot;</span><span class="s1">);</span>
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">mod_get_tstate_trash_delete_nesting(PyObject* UNUSED(module))</span>
+<span class="s1">{</span>
+    <span class="s1">PyThreadState* tstate = PyThreadState_GET();</span>
+
+<span class="s0">#if </span><span class="s1">GREENLET_PY312</span>
+    <span class="s0">return </span><span class="s1">PyLong_FromLong(tstate</span><span class="s6">-&gt;</span><span class="s1">trash.delete_nesting);</span>
+<span class="s0">#else</span>
+    <span class="s0">return </span><span class="s1">PyLong_FromLong(tstate</span><span class="s6">-&gt;</span><span class="s1">trash_delete_nesting);</span>
+<span class="s0">#endif</span>
+<span class="s1">}</span>
+<span class="s0">#endif</span>
+
+
+
+
+<span class="s0">static </span><span class="s1">PyMethodDef GreenMethods[] = {</span>
+    <span class="s1">{</span>
+      <span class="s1">.ml_name=</span><span class="s2">&quot;getcurrent&quot;</span><span class="s1">,</span>
+      <span class="s1">.ml_meth=(PyCFunction)mod_getcurrent,</span>
+      <span class="s1">.ml_flags=METH_NOARGS,</span>
+      <span class="s1">.ml_doc=mod_getcurrent_doc</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span>
+      <span class="s1">.ml_name=</span><span class="s2">&quot;settrace&quot;</span><span class="s1">,</span>
+      <span class="s1">.ml_meth=(PyCFunction)mod_settrace,</span>
+      <span class="s1">.ml_flags=METH_VARARGS,</span>
+      <span class="s1">.ml_doc=mod_settrace_doc</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span>
+      <span class="s1">.ml_name=</span><span class="s2">&quot;gettrace&quot;</span><span class="s1">,</span>
+      <span class="s1">.ml_meth=(PyCFunction)mod_gettrace,</span>
+      <span class="s1">.ml_flags=METH_NOARGS,</span>
+      <span class="s1">.ml_doc=mod_gettrace_doc</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span>
+      <span class="s1">.ml_name=</span><span class="s2">&quot;set_thread_local&quot;</span><span class="s1">,</span>
+      <span class="s1">.ml_meth=(PyCFunction)mod_set_thread_local,</span>
+      <span class="s1">.ml_flags=METH_VARARGS,</span>
+      <span class="s1">.ml_doc=mod_set_thread_local_doc</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span>
+      <span class="s1">.ml_name=</span><span class="s2">&quot;get_pending_cleanup_count&quot;</span><span class="s1">,</span>
+      <span class="s1">.ml_meth=(PyCFunction)mod_get_pending_cleanup_count,</span>
+      <span class="s1">.ml_flags=METH_NOARGS,</span>
+      <span class="s1">.ml_doc=mod_get_pending_cleanup_count_doc</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span>
+      <span class="s1">.ml_name=</span><span class="s2">&quot;get_total_main_greenlets&quot;</span><span class="s1">,</span>
+      <span class="s1">.ml_meth=(PyCFunction)mod_get_total_main_greenlets,</span>
+      <span class="s1">.ml_flags=METH_NOARGS,</span>
+      <span class="s1">.ml_doc=mod_get_total_main_greenlets_doc</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span>
+      <span class="s1">.ml_name=</span><span class="s2">&quot;get_clocks_used_doing_optional_cleanup&quot;</span><span class="s1">,</span>
+      <span class="s1">.ml_meth=(PyCFunction)mod_get_clocks_used_doing_optional_cleanup,</span>
+      <span class="s1">.ml_flags=METH_NOARGS,</span>
+      <span class="s1">.ml_doc=mod_get_clocks_used_doing_optional_cleanup_doc</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span>
+      <span class="s1">.ml_name=</span><span class="s2">&quot;enable_optional_cleanup&quot;</span><span class="s1">,</span>
+      <span class="s1">.ml_meth=(PyCFunction)mod_enable_optional_cleanup,</span>
+      <span class="s1">.ml_flags=METH_O,</span>
+      <span class="s1">.ml_doc=mod_enable_optional_cleanup_doc</span>
+    <span class="s1">},</span>
+<span class="s0">#if </span><span class="s1">!GREENLET_PY313</span>
+    <span class="s1">{</span>
+      <span class="s1">.ml_name=</span><span class="s2">&quot;get_tstate_trash_delete_nesting&quot;</span><span class="s1">,</span>
+      <span class="s1">.ml_meth=(PyCFunction)mod_get_tstate_trash_delete_nesting,</span>
+      <span class="s1">.ml_flags=METH_NOARGS,</span>
+      <span class="s1">.ml_doc=mod_get_tstate_trash_delete_nesting_doc</span>
+    <span class="s1">},</span>
+<span class="s0">#endif</span>
+    <span class="s1">{.ml_name=NULL, .ml_meth=NULL} </span><span class="s5">/* Sentinel */</span>
+<span class="s1">};</span>
+
+<span class="s0">static const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">copy_on_greentype[] = {</span>
+    <span class="s2">&quot;getcurrent&quot;</span><span class="s1">,</span>
+    <span class="s2">&quot;error&quot;</span><span class="s1">,</span>
+    <span class="s2">&quot;GreenletExit&quot;</span><span class="s1">,</span>
+    <span class="s2">&quot;settrace&quot;</span><span class="s1">,</span>
+    <span class="s2">&quot;gettrace&quot;</span><span class="s1">,</span>
+    <span class="s1">NULL</span>
+<span class="s1">};</span>
+
+<span class="s0">static struct </span><span class="s1">PyModuleDef greenlet_module_def = {</span>
+    <span class="s1">.m_base=PyModuleDef_HEAD_INIT,</span>
+    <span class="s1">.m_name=</span><span class="s2">&quot;greenlet._greenlet&quot;</span><span class="s1">,</span>
+    <span class="s1">.m_doc=NULL,</span>
+    <span class="s1">.m_size=-</span><span class="s4">1</span><span class="s1">,</span>
+    <span class="s1">.m_methods=GreenMethods,</span>
+<span class="s1">};</span>
+
+
+<span class="s0">#endif</span>
+
+<span class="s0">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic pop</span>
+<span class="s1">#elif defined(__GNUC__)</span>
+<span class="s1">#    pragma GCC diagnostic pop</span>
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

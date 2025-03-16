@@ -1,0 +1,52 @@
+<html>
+<head>
+<title>greenlet_thread_support.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+greenlet_thread_support.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_THREAD_SUPPORT_HPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_THREAD_SUPPORT_HPP</span>
+
+<span class="s2">/** 
+ * Defines various utility functions to help greenlet integrate well 
+ * with threads. This used to be needed when we supported Python 
+ * 2.7 on Windows, which used a very old compiler. We wrote an 
+ * alternative implementation using Python APIs and POSIX or Windows 
+ * APIs, but that's no longer needed. So this file is a shadow of its 
+ * former self --- but may be needed in the future. 
+ */</span>
+
+<span class="s0">#include </span><span class="s1">&lt;stdexcept&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;thread&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;mutex&gt;</span>
+
+<span class="s0">#include </span><span class="s3">&quot;greenlet_compiler_compat.hpp&quot;</span>
+
+<span class="s4">namespace </span><span class="s1">greenlet {</span>
+    <span class="s0">typedef </span><span class="s1">std::mutex Mutex;</span>
+    <span class="s0">typedef </span><span class="s1">std::lock_guard&lt;Mutex&gt; LockGuard;</span>
+    <span class="s4">class </span><span class="s1">LockInitError : </span><span class="s4">public </span><span class="s1">std::runtime_error</span>
+    <span class="s1">{</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">LockInitError(</span><span class="s0">const char</span><span class="s1">* what) : std::runtime_error(what)</span>
+        <span class="s1">{};</span>
+    <span class="s1">};</span>
+<span class="s1">};</span>
+
+
+<span class="s0">#endif </span><span class="s2">/* GREENLET_THREAD_SUPPORT_HPP */</span>
+</pre>
+</body>
+</html>

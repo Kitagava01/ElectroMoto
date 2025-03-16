@@ -1,0 +1,85 @@
+<html>
+<head>
+<title>TExceptionState.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #6aab73;}
+.s3 { color: #c77dbb;}
+.s4 { color: #0da19e;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TExceptionState.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_EXCEPTION_STATE_CPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_EXCEPTION_STATE_CPP</span>
+
+<span class="s0">#include </span><span class="s1">&lt;Python.h&gt;</span>
+<span class="s0">#include </span><span class="s2">&quot;TGreenlet.hpp&quot;</span>
+
+<span class="s3">namespace </span><span class="s1">greenlet {</span>
+
+
+<span class="s1">ExceptionState::ExceptionState()</span>
+<span class="s1">{</span>
+    <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">clear();</span>
+<span class="s1">}</span>
+
+<span class="s0">void </span><span class="s1">ExceptionState::</span><span class="s3">operator</span><span class="s1">&lt;&lt;(</span><span class="s0">const </span><span class="s1">PyThreadState *</span><span class="s0">const </span><span class="s1">tstate) noexcept</span>
+<span class="s1">{</span>
+    <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_info = tstate</span><span class="s4">-&gt;</span><span class="s1">exc_info;</span>
+    <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state = tstate</span><span class="s4">-&gt;</span><span class="s1">exc_state;</span>
+<span class="s1">}</span>
+
+<span class="s0">void </span><span class="s1">ExceptionState::</span><span class="s3">operator</span><span class="s1">&gt;&gt;(PyThreadState *</span><span class="s0">const </span><span class="s1">tstate) noexcept</span>
+<span class="s1">{</span>
+    <span class="s1">tstate</span><span class="s4">-&gt;</span><span class="s1">exc_state = </span><span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state;</span>
+    <span class="s1">tstate</span><span class="s4">-&gt;</span><span class="s1">exc_info =</span>
+        <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_info ? </span><span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_info : &amp;tstate</span><span class="s4">-&gt;</span><span class="s1">exc_state;</span>
+    <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">clear();</span>
+<span class="s1">}</span>
+
+<span class="s0">void </span><span class="s1">ExceptionState::clear() noexcept</span>
+<span class="s1">{</span>
+    <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_info = nullptr;</span>
+    <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.exc_value = nullptr;</span>
+<span class="s0">#if </span><span class="s1">!GREENLET_PY311</span>
+    <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.exc_type = nullptr;</span>
+    <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.exc_traceback = nullptr;</span>
+<span class="s0">#endif</span>
+    <span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.previous_item = nullptr;</span>
+<span class="s1">}</span>
+
+<span class="s0">int </span><span class="s1">ExceptionState::tp_traverse(visitproc visit, </span><span class="s0">void</span><span class="s1">* arg) noexcept</span>
+<span class="s1">{</span>
+    <span class="s1">Py_VISIT(</span><span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.exc_value);</span>
+<span class="s0">#if </span><span class="s1">!GREENLET_PY311</span>
+    <span class="s1">Py_VISIT(</span><span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.exc_type);</span>
+    <span class="s1">Py_VISIT(</span><span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.exc_traceback);</span>
+<span class="s0">#endif</span>
+    <span class="s0">return </span><span class="s5">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s0">void </span><span class="s1">ExceptionState::tp_clear() noexcept</span>
+<span class="s1">{</span>
+    <span class="s1">Py_CLEAR(</span><span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.exc_value);</span>
+<span class="s0">#if </span><span class="s1">!GREENLET_PY311</span>
+    <span class="s1">Py_CLEAR(</span><span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.exc_type);</span>
+    <span class="s1">Py_CLEAR(</span><span class="s3">this</span><span class="s4">-&gt;</span><span class="s1">exc_state.exc_traceback);</span>
+<span class="s0">#endif</span>
+<span class="s1">}</span>
+
+
+<span class="s1">}; </span><span class="s6">// namespace greenlet</span>
+
+<span class="s0">#endif </span><span class="s6">// GREENLET_EXCEPTION_STATE_CPP</span>
+</pre>
+</body>
+</html>

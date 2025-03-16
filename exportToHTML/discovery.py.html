@@ -1,0 +1,63 @@
+<html>
+<head>
+<title>discovery.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+discovery.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">base </span><span class="s0">import </span><span class="s1">PluginLoader</span>
+
+
+<span class="s0">class </span><span class="s1">Discovery</span><span class="s2">(</span><span class="s1">PluginLoader</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Discovery plugins.&quot;&quot;&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">get_discover</span><span class="s2">(</span><span class="s1">parser</span><span class="s2">, </span><span class="s1">args</span><span class="s2">):</span>
+    <span class="s1">discover_types </span><span class="s2">= </span><span class="s1">Discovery</span><span class="s2">.</span><span class="s1">entry_points_for</span><span class="s2">(</span><span class="s4">&quot;virtualenv.discovery&quot;</span><span class="s2">)</span>
+    <span class="s1">discovery_parser </span><span class="s2">= </span><span class="s1">parser</span><span class="s2">.</span><span class="s1">add_argument_group</span><span class="s2">(</span>
+        <span class="s1">title</span><span class="s2">=</span><span class="s4">&quot;discovery&quot;</span><span class="s2">,</span>
+        <span class="s1">description</span><span class="s2">=</span><span class="s4">&quot;discover and provide a target interpreter&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+    <span class="s1">choices </span><span class="s2">= </span><span class="s1">_get_default_discovery</span><span class="s2">(</span><span class="s1">discover_types</span><span class="s2">)</span>
+    <span class="s5"># prefer the builtin if present, otherwise fallback to first defined type</span>
+    <span class="s1">choices </span><span class="s2">= </span><span class="s1">sorted</span><span class="s2">(</span><span class="s1">choices</span><span class="s2">, </span><span class="s1">key</span><span class="s2">=</span><span class="s0">lambda </span><span class="s1">a</span><span class="s2">: </span><span class="s6">0 </span><span class="s0">if </span><span class="s1">a </span><span class="s2">== </span><span class="s4">&quot;builtin&quot; </span><span class="s0">else </span><span class="s6">1</span><span class="s2">)</span>
+    <span class="s1">discovery_parser</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+        <span class="s4">&quot;--discovery&quot;</span><span class="s2">,</span>
+        <span class="s1">choices</span><span class="s2">=</span><span class="s1">choices</span><span class="s2">,</span>
+        <span class="s1">default</span><span class="s2">=</span><span class="s1">next</span><span class="s2">(</span><span class="s1">iter</span><span class="s2">(</span><span class="s1">choices</span><span class="s2">)),</span>
+        <span class="s1">required</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+        <span class="s1">help</span><span class="s2">=</span><span class="s4">&quot;interpreter discovery method&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+    <span class="s1">options</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">parser</span><span class="s2">.</span><span class="s1">parse_known_args</span><span class="s2">(</span><span class="s1">args</span><span class="s2">)</span>
+    <span class="s1">discover_class </span><span class="s2">= </span><span class="s1">discover_types</span><span class="s2">[</span><span class="s1">options</span><span class="s2">.</span><span class="s1">discovery</span><span class="s2">]</span>
+    <span class="s1">discover_class</span><span class="s2">.</span><span class="s1">add_parser_arguments</span><span class="s2">(</span><span class="s1">discovery_parser</span><span class="s2">)</span>
+    <span class="s1">options</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">parser</span><span class="s2">.</span><span class="s1">parse_known_args</span><span class="s2">(</span><span class="s1">args</span><span class="s2">, </span><span class="s1">namespace</span><span class="s2">=</span><span class="s1">options</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">discover_class</span><span class="s2">(</span><span class="s1">options</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_get_default_discovery</span><span class="s2">(</span><span class="s1">discover_types</span><span class="s2">):</span>
+    <span class="s0">return </span><span class="s1">list</span><span class="s2">(</span><span class="s1">discover_types</span><span class="s2">.</span><span class="s1">keys</span><span class="s2">())</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s4">&quot;Discovery&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;get_discover&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<html>
+<head>
+<title>test_tutorial.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_tutorial.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s2">.</span><span class="s1">lib </span><span class="s0">import </span><span class="s1">TestBase</span>
+
+
+<span class="s0">class </span><span class="s1">TestTutorial</span><span class="s2">(</span><span class="s1">TestBase</span><span class="s2">):</span>
+
+    <span class="s0">def </span><span class="s1">test_example</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># Memory Managers</span>
+        <span class="s3">##################</span>
+        <span class="s0">import </span><span class="s1">smmap</span>
+        <span class="s3"># This instance should be globally available in your application</span>
+        <span class="s3"># It is configured to be well suitable for 32-bit or 64 bit applications.</span>
+        <span class="s1">mman </span><span class="s2">= </span><span class="s1">smmap</span><span class="s2">.</span><span class="s1">SlidingWindowMapManager</span><span class="s2">()</span>
+
+        <span class="s3"># the manager provides much useful information about its current state</span>
+        <span class="s3"># like the amount of open file handles or the amount of mapped memory</span>
+        <span class="s0">assert </span><span class="s1">mman</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s4">0</span>
+        <span class="s0">assert </span><span class="s1">mman</span><span class="s2">.</span><span class="s1">mapped_memory_size</span><span class="s2">() == </span><span class="s4">0</span>
+        <span class="s3"># and many more ...</span>
+
+        <span class="s3"># Cursors</span>
+        <span class="s3">##########</span>
+        <span class="s0">import </span><span class="s1">smmap</span><span class="s2">.</span><span class="s1">test</span><span class="s2">.</span><span class="s1">lib</span>
+        <span class="s0">with </span><span class="s1">smmap</span><span class="s2">.</span><span class="s1">test</span><span class="s2">.</span><span class="s1">lib</span><span class="s2">.</span><span class="s1">FileCreator</span><span class="s2">(</span><span class="s4">1024 </span><span class="s2">* </span><span class="s4">1024 </span><span class="s2">* </span><span class="s4">8</span><span class="s2">, </span><span class="s5">&quot;test_file&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fc</span><span class="s2">:</span>
+            <span class="s3"># obtain a cursor to access some file.</span>
+            <span class="s1">c </span><span class="s2">= </span><span class="s1">mman</span><span class="s2">.</span><span class="s1">make_cursor</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+
+            <span class="s3"># the cursor is now associated with the file, but not yet usable</span>
+            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">is_associated</span><span class="s2">()</span>
+            <span class="s0">assert not </span><span class="s1">c</span><span class="s2">.</span><span class="s1">is_valid</span><span class="s2">()</span>
+
+            <span class="s3"># before you can use the cursor, you have to specify a window you want to</span>
+            <span class="s3"># access. The following just says you want as much data as possible starting</span>
+            <span class="s3"># from offset 0.</span>
+            <span class="s3"># To be sure your region could be mapped, query for validity</span>
+            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">use_region</span><span class="s2">().</span><span class="s1">is_valid</span><span class="s2">()        </span><span class="s3"># use_region returns self</span>
+
+            <span class="s3"># once a region was mapped, you must query its dimension regularly</span>
+            <span class="s3"># to assure you don't try to access its buffer out of its bounds</span>
+            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">()[</span><span class="s4">0</span><span class="s2">]           </span><span class="s3"># first byte</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">()[</span><span class="s4">1</span><span class="s2">:</span><span class="s4">10</span><span class="s2">]            </span><span class="s3"># first 9 bytes</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">()[</span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() - </span><span class="s4">1</span><span class="s2">]  </span><span class="s3"># last byte</span>
+
+            <span class="s3"># you can query absolute offsets, and check whether an offset is included</span>
+            <span class="s3"># in the cursor's data.</span>
+            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() &lt; </span><span class="s1">c</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">includes_ofs</span><span class="s2">(</span><span class="s4">100</span><span class="s2">)</span>
+
+            <span class="s3"># If you are over out of bounds with one of your region requests, the</span>
+            <span class="s3"># cursor will be come invalid. It cannot be used in that state</span>
+            <span class="s0">assert not </span><span class="s1">c</span><span class="s2">.</span><span class="s1">use_region</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span><span class="s2">, </span><span class="s4">100</span><span class="s2">).</span><span class="s1">is_valid</span><span class="s2">()</span>
+            <span class="s3"># map as much as possible after skipping the first 100 bytes</span>
+            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">use_region</span><span class="s2">(</span><span class="s4">100</span><span class="s2">).</span><span class="s1">is_valid</span><span class="s2">()</span>
+
+            <span class="s3"># You can explicitly free cursor resources by unusing the cursor's region</span>
+            <span class="s1">c</span><span class="s2">.</span><span class="s1">unuse_region</span><span class="s2">()</span>
+            <span class="s0">assert not </span><span class="s1">c</span><span class="s2">.</span><span class="s1">is_valid</span><span class="s2">()</span>
+
+            <span class="s3"># Buffers</span>
+            <span class="s3">#########</span>
+            <span class="s3"># Create a default buffer which can operate on the whole file</span>
+            <span class="s1">buf </span><span class="s2">= </span><span class="s1">smmap</span><span class="s2">.</span><span class="s1">SlidingWindowMapBuffer</span><span class="s2">(</span><span class="s1">mman</span><span class="s2">.</span><span class="s1">make_cursor</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">))</span>
+
+            <span class="s3"># you can use it right away</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">cursor</span><span class="s2">().</span><span class="s1">is_valid</span><span class="s2">()</span>
+
+            <span class="s1">buf</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]  </span><span class="s3"># access the first byte</span>
+            <span class="s1">buf</span><span class="s2">[-</span><span class="s4">1</span><span class="s2">]  </span><span class="s3"># access the last ten bytes on the file</span>
+            <span class="s1">buf</span><span class="s2">[-</span><span class="s4">10</span><span class="s2">:]  </span><span class="s3"># access the last ten bytes</span>
+
+            <span class="s3"># If you want to keep the instance between different accesses, use the</span>
+            <span class="s3"># dedicated methods</span>
+            <span class="s1">buf</span><span class="s2">.</span><span class="s1">end_access</span><span class="s2">()</span>
+            <span class="s0">assert not </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">cursor</span><span class="s2">().</span><span class="s1">is_valid</span><span class="s2">()  </span><span class="s3"># you cannot use the buffer anymore</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">begin_access</span><span class="s2">(</span><span class="s1">offset</span><span class="s2">=</span><span class="s4">10</span><span class="s2">)  </span><span class="s3"># start using the buffer at an offset</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,193 @@
+<html>
+<head>
+<title>greenlet_cpython_add_pending.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #2aacb8;}
+.s3 { color: #7a7e85;}
+.s4 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+greenlet_cpython_add_pending.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_CPYTHON_ADD_PENDING_HPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_CPYTHON_ADD_PENDING_HPP</span>
+
+<span class="s0">#if </span><span class="s1">(PY_VERSION_HEX &gt;= </span><span class="s2">0x30800A0 </span><span class="s1">&amp;&amp; PY_VERSION_HEX &lt; </span><span class="s2">0x3090000</span><span class="s1">) &amp;&amp; !(defined(_WIN32) || defined(WIN32))</span>
+<span class="s3">// XXX: From Python 3.8a3 [1] up until Python 3.9a6 [2][3],</span>
+<span class="s3">// ``Py_AddPendingCall`` would try to produce a Python exception if</span>
+<span class="s3">// the interpreter was in the beginning of shutting down when this</span>
+<span class="s3">// function is called. However, ``Py_AddPendingCall`` doesn't require</span>
+<span class="s3">// the GIL, and we are absolutely not holding it when we make that</span>
+<span class="s3">// call. That means that trying to create the Python exception is</span>
+<span class="s3">// using the C API in an undefined state; here the C API detects this</span>
+<span class="s3">// and aborts the process with an error (&quot;Fatal Python error: Python</span>
+<span class="s3">// memory allocator called without holding the GIL&quot;: Add -&gt;</span>
+<span class="s3">// PyErr_SetString -&gt; PyUnicode_New -&gt; PyObject_Malloc). This arises</span>
+<span class="s3">// (obviously) in multi-threaded programs and happens if one thread is</span>
+<span class="s3">// exiting and cleaning up its thread-local data while the other</span>
+<span class="s3">// thread is trying to shut down the interpreter. A crash on shutdown</span>
+<span class="s3">// is still a crash and could result in data loss (e.g., daemon</span>
+<span class="s3">// threads are still running, pending signal handlers may be present,</span>
+<span class="s3">// buffers may not be flushed, there may be __del__ that need run,</span>
+<span class="s3">// etc), so we have to work around it.</span>
+<span class="s3">//</span>
+<span class="s3">// Of course, we can (and do) check for whether the interpreter is</span>
+<span class="s3">// shutting down before calling ``Py_AddPendingCall``, but that's a</span>
+<span class="s3">// race condition since we don't hold the GIL, and so we may not</span>
+<span class="s3">// actually get the right answer. Plus, ``Py_FinalizeEx`` actually</span>
+<span class="s3">// calls ``_Py_FinishPendingCalls`` (which sets the pending-&gt;finishing</span>
+<span class="s3">// flag, which is used to gate creating the exceptioen) *before*</span>
+<span class="s3">// publishing any other data that would let us detect the shutdown</span>
+<span class="s3">// (such as runtime-&gt;finalizing). So that point is moot.</span>
+<span class="s3">//</span>
+<span class="s3">// Our solution for those versions is to inline the same code, without</span>
+<span class="s3">// the problematic bit that sets the exception. Unfortunately, all of</span>
+<span class="s3">// the structure definitions are private/opaque, *and* we can't</span>
+<span class="s3">// actually count on being able to include their definitions from</span>
+<span class="s3">// ``internal/pycore_*``, because on some platforms those header files</span>
+<span class="s3">// are incomplete (i.e., on macOS with macports 3.8, the includes are</span>
+<span class="s3">// fine, but on Ubuntu jammy with 3.8 from ppa:deadsnakes or GitHub</span>
+<span class="s3">// Actions 3.8 (I think it's Ubuntu 18.04), they con't be used; at</span>
+<span class="s3">// least, I couldn't get them to work). So we need to define the</span>
+<span class="s3">// structures and _PyRuntime data member ourself. Yet more</span>
+<span class="s3">// unfortunately, _PyRuntime  won't link on Windows, so we can only do</span>
+<span class="s3">// this on other platforms.</span>
+<span class="s3">//</span>
+<span class="s3">// [1] https://github.com/python/cpython/commit/842a2f07f2f08a935ef470bfdaeef40f87490cfc</span>
+<span class="s3">// [2] https://github.com/python/cpython/commit/cfc3c2f8b34d3864717ab584c5b6c260014ba55a</span>
+<span class="s3">// [3] https://github.com/python/cpython/issues/81308</span>
+<span class="s1"># define GREENLET_BROKEN_PY_ADD_PENDING </span><span class="s2">1</span>
+
+<span class="s3">// When defining these structures, the important thing is to get</span>
+<span class="s3">// binary compatibility, i.e., structure layout. For that, we only</span>
+<span class="s3">// need to define fields up to the ones we use; after that they're</span>
+<span class="s3">// irrelevant UNLESS the structure is included in another structure</span>
+<span class="s3">// *before* the structure we're interested in --- in that case, it</span>
+<span class="s3">// must be complete. Ellipsis indicate elided trailing members.</span>
+<span class="s3">// Pointer types are changed to void* to keep from having to define</span>
+<span class="s3">// more structures.</span>
+
+<span class="s3">// From &quot;internal/pycore_atomic.h&quot;</span>
+
+<span class="s3">// There are several different definitions of this, including the</span>
+<span class="s3">// plain ``int`` version, a ``volatile int`` and an ``_Atomic int``</span>
+<span class="s3">// I don't think any of those change the size/layout.</span>
+<span class="s0">typedef struct </span><span class="s1">_Py_atomic_int {</span>
+    <span class="s0">volatile int </span><span class="s1">_value;</span>
+<span class="s1">} _Py_atomic_int;</span>
+
+<span class="s3">// This needs too much infrastructure, so we just do a regular store.</span>
+<span class="s0">#define </span><span class="s1">_Py_atomic_store_relaxed(ATOMIC_VAL, NEW_VAL) \</span>
+    <span class="s1">(ATOMIC_VAL)</span><span class="s4">-&gt;</span><span class="s1">_value = NEW_VAL</span>
+
+
+
+<span class="s3">// From &quot;internal/pycore_pymem.h&quot;</span>
+<span class="s0">#define </span><span class="s1">NUM_GENERATIONS </span><span class="s2">3</span>
+
+
+<span class="s0">struct </span><span class="s1">gc_generation {</span>
+    <span class="s1">PyGC_Head head; </span><span class="s3">// We already have this defined.</span>
+    <span class="s0">int </span><span class="s1">threshold;</span>
+    <span class="s0">int </span><span class="s1">count;</span>
+<span class="s1">};</span>
+<span class="s0">struct </span><span class="s1">gc_generation_stats {</span>
+    <span class="s1">Py_ssize_t collections;</span>
+    <span class="s1">Py_ssize_t collected;</span>
+    <span class="s1">Py_ssize_t uncollectable;</span>
+<span class="s1">};</span>
+
+<span class="s0">struct </span><span class="s1">_gc_runtime_state {</span>
+    <span class="s0">void </span><span class="s1">*trash_delete_later;</span>
+    <span class="s0">int </span><span class="s1">trash_delete_nesting;</span>
+    <span class="s0">int </span><span class="s1">enabled;</span>
+    <span class="s0">int </span><span class="s1">debug;</span>
+    <span class="s0">struct </span><span class="s1">gc_generation generations[NUM_GENERATIONS];</span>
+    <span class="s0">void </span><span class="s1">*generation0;</span>
+    <span class="s0">struct </span><span class="s1">gc_generation permanent_generation;</span>
+    <span class="s0">struct </span><span class="s1">gc_generation_stats generation_stats[NUM_GENERATIONS];</span>
+    <span class="s0">int </span><span class="s1">collecting;</span>
+    <span class="s0">void </span><span class="s1">*garbage;</span>
+    <span class="s0">void </span><span class="s1">*callbacks;</span>
+    <span class="s1">Py_ssize_t long_lived_total;</span>
+    <span class="s1">Py_ssize_t long_lived_pending;</span>
+<span class="s1">};</span>
+
+<span class="s3">// From &quot;internal/pycore_pystate.h&quot;</span>
+<span class="s0">struct </span><span class="s1">_pending_calls {</span>
+    <span class="s0">int </span><span class="s1">finishing;</span>
+    <span class="s1">PyThread_type_lock lock;</span>
+    <span class="s1">_Py_atomic_int calls_to_do;</span>
+    <span class="s0">int </span><span class="s1">async_exc;</span>
+<span class="s0">#define </span><span class="s1">NPENDINGCALLS </span><span class="s2">32</span>
+    <span class="s0">struct </span><span class="s1">{</span>
+        <span class="s0">int </span><span class="s1">(*func)(</span><span class="s0">void </span><span class="s1">*);</span>
+        <span class="s0">void </span><span class="s1">*arg;</span>
+    <span class="s1">} calls[NPENDINGCALLS];</span>
+    <span class="s0">int </span><span class="s1">first;</span>
+    <span class="s0">int </span><span class="s1">last;</span>
+<span class="s1">};</span>
+
+<span class="s0">struct </span><span class="s1">_ceval_runtime_state {</span>
+    <span class="s0">int </span><span class="s1">recursion_limit;</span>
+    <span class="s0">int </span><span class="s1">tracing_possible;</span>
+    <span class="s1">_Py_atomic_int eval_breaker;</span>
+    <span class="s1">_Py_atomic_int gil_drop_request;</span>
+    <span class="s0">struct </span><span class="s1">_pending_calls pending;</span>
+    <span class="s3">// ...</span>
+<span class="s1">};</span>
+
+<span class="s0">typedef struct </span><span class="s1">pyruntimestate {</span>
+    <span class="s0">int </span><span class="s1">preinitializing;</span>
+    <span class="s0">int </span><span class="s1">preinitialized;</span>
+    <span class="s0">int </span><span class="s1">core_initialized;</span>
+    <span class="s0">int </span><span class="s1">initialized;</span>
+    <span class="s0">void </span><span class="s1">*finalizing;</span>
+
+    <span class="s0">struct </span><span class="s1">pyinterpreters {</span>
+        <span class="s1">PyThread_type_lock mutex;</span>
+        <span class="s0">void </span><span class="s1">*head;</span>
+        <span class="s0">void </span><span class="s1">*main;</span>
+        <span class="s1">int64_t next_id;</span>
+    <span class="s1">} interpreters;</span>
+    <span class="s3">// XXX Remove this field once we have a tp_* slot.</span>
+    <span class="s0">struct </span><span class="s1">_xidregistry {</span>
+        <span class="s1">PyThread_type_lock mutex;</span>
+        <span class="s0">void </span><span class="s1">*head;</span>
+    <span class="s1">} xidregistry;</span>
+
+    <span class="s0">unsigned long </span><span class="s1">main_thread;</span>
+
+<span class="s0">#define </span><span class="s1">NEXITFUNCS </span><span class="s2">32</span>
+    <span class="s0">void </span><span class="s1">(*exitfuncs[NEXITFUNCS])(</span><span class="s0">void</span><span class="s1">);</span>
+    <span class="s0">int </span><span class="s1">nexitfuncs;</span>
+
+    <span class="s0">struct </span><span class="s1">_gc_runtime_state gc;</span>
+    <span class="s0">struct </span><span class="s1">_ceval_runtime_state ceval;</span>
+    <span class="s3">// ...</span>
+<span class="s1">} _PyRuntimeState;</span>
+
+<span class="s0">#define </span><span class="s1">SIGNAL_PENDING_CALLS(ceval) \</span>
+    <span class="s0">do </span><span class="s1">{ \</span>
+        <span class="s1">_Py_atomic_store_relaxed(&amp;(ceval)</span><span class="s4">-&gt;</span><span class="s1">pending.calls_to_do, </span><span class="s2">1</span><span class="s1">); \</span>
+        <span class="s1">_Py_atomic_store_relaxed(&amp;(ceval)</span><span class="s4">-&gt;</span><span class="s1">eval_breaker, </span><span class="s2">1</span><span class="s1">); \</span>
+    <span class="s1">} </span><span class="s0">while </span><span class="s1">(</span><span class="s2">0</span><span class="s1">)</span>
+
+<span class="s0">extern </span><span class="s1">_PyRuntimeState _PyRuntime;</span>
+
+<span class="s0">#else</span>
+<span class="s1"># define GREENLET_BROKEN_PY_ADD_PENDING </span><span class="s2">0</span>
+<span class="s0">#endif</span>
+
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

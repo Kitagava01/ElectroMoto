@@ -1,0 +1,65 @@
+<html>
+<head>
+<title>widgets.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+widgets.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">urllib</span><span class="s2">.</span><span class="s1">parse </span><span class="s0">import </span><span class="s1">urlencode</span>
+
+<span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">current_app</span>
+<span class="s0">from </span><span class="s1">markupsafe </span><span class="s0">import </span><span class="s1">Markup</span>
+
+<span class="s1">RECAPTCHA_SCRIPT_DEFAULT </span><span class="s2">= </span><span class="s3">&quot;https://www.google.com/recaptcha/api.js&quot;</span>
+<span class="s1">RECAPTCHA_DIV_CLASS_DEFAULT </span><span class="s2">= </span><span class="s3">&quot;g-recaptcha&quot;</span>
+<span class="s1">RECAPTCHA_TEMPLATE </span><span class="s2">= </span><span class="s3">&quot;&quot;&quot; 
+&lt;script src='%s' async defer&gt;&lt;/script&gt; 
+&lt;div class=&quot;%s&quot; %s&gt;&lt;/div&gt; 
+&quot;&quot;&quot;</span>
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s3">&quot;RecaptchaWidget&quot;</span><span class="s2">]</span>
+
+
+<span class="s0">class </span><span class="s1">RecaptchaWidget</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">recaptcha_html</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">public_key</span><span class="s2">):</span>
+        <span class="s1">html </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;RECAPTCHA_HTML&quot;</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">html</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">Markup</span><span class="s2">(</span><span class="s1">html</span><span class="s2">)</span>
+        <span class="s1">params </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;RECAPTCHA_PARAMETERS&quot;</span><span class="s2">)</span>
+        <span class="s1">script </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;RECAPTCHA_SCRIPT&quot;</span><span class="s2">)</span>
+        <span class="s0">if not </span><span class="s1">script</span><span class="s2">:</span>
+            <span class="s1">script </span><span class="s2">= </span><span class="s1">RECAPTCHA_SCRIPT_DEFAULT</span>
+        <span class="s0">if </span><span class="s1">params</span><span class="s2">:</span>
+            <span class="s1">script </span><span class="s2">+= </span><span class="s3">&quot;?&quot; </span><span class="s2">+ </span><span class="s1">urlencode</span><span class="s2">(</span><span class="s1">params</span><span class="s2">)</span>
+        <span class="s1">attrs </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;RECAPTCHA_DATA_ATTRS&quot;</span><span class="s2">, {})</span>
+        <span class="s1">attrs</span><span class="s2">[</span><span class="s3">&quot;sitekey&quot;</span><span class="s2">] = </span><span class="s1">public_key</span>
+        <span class="s1">snippet </span><span class="s2">= </span><span class="s3">&quot; &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s3">f'data-</span><span class="s0">{</span><span class="s1">k</span><span class="s0">}</span><span class="s3">=&quot;</span><span class="s0">{</span><span class="s1">attrs</span><span class="s2">[</span><span class="s1">k</span><span class="s2">]</span><span class="s0">}</span><span class="s3">&quot;' </span><span class="s0">for </span><span class="s1">k </span><span class="s0">in </span><span class="s1">attrs</span><span class="s2">)  </span><span class="s4"># noqa: B028, B907</span>
+        <span class="s1">div_class </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;RECAPTCHA_DIV_CLASS&quot;</span><span class="s2">)</span>
+        <span class="s0">if not </span><span class="s1">div_class</span><span class="s2">:</span>
+            <span class="s1">div_class </span><span class="s2">= </span><span class="s1">RECAPTCHA_DIV_CLASS_DEFAULT</span>
+        <span class="s0">return </span><span class="s1">Markup</span><span class="s2">(</span><span class="s1">RECAPTCHA_TEMPLATE </span><span class="s2">% (</span><span class="s1">script</span><span class="s2">, </span><span class="s1">div_class</span><span class="s2">, </span><span class="s1">snippet</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">__call__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">field</span><span class="s2">, </span><span class="s1">error</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;Returns the recaptcha input HTML.&quot;&quot;&quot;</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">public_key </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">[</span><span class="s3">&quot;RECAPTCHA_PUBLIC_KEY&quot;</span><span class="s2">]</span>
+        <span class="s0">except </span><span class="s1">KeyError</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s3">&quot;RECAPTCHA_PUBLIC_KEY config not set&quot;</span><span class="s2">) </span><span class="s0">from None</span>
+
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">recaptcha_html</span><span class="s2">(</span><span class="s1">public_key</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

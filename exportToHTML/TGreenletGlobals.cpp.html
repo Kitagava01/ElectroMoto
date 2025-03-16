@@ -1,0 +1,117 @@
+<html>
+<head>
+<title>TGreenletGlobals.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #2aacb8;}
+.s6 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TGreenletGlobals.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">/* -*- indent-tabs-mode: nil; tab-width: 4; -*- */</span>
+<span class="s0">/** 
+ * Implementation of GreenletGlobals. 
+ * 
+ * Format with: 
+ *  clang-format -i --style=file src/greenlet/greenlet.c 
+ * 
+ * 
+ * Fix missing braces with: 
+ *   clang-tidy src/greenlet/greenlet.c -fix -checks=&quot;readability-braces-around-statements&quot; 
+*/</span>
+<span class="s2">#ifndef </span><span class="s1">T_GREENLET_GLOBALS</span>
+<span class="s2">#define </span><span class="s1">T_GREENLET_GLOBALS</span>
+
+<span class="s2">#include </span><span class="s3">&quot;greenlet_refs.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_exceptions.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_thread_support.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_internal.hpp&quot;</span>
+
+<span class="s4">namespace </span><span class="s1">greenlet {</span>
+
+<span class="s0">// This encapsulates what were previously module global &quot;constants&quot;</span>
+<span class="s0">// established at init time.</span>
+<span class="s0">// This is a step towards Python3 style module state that allows</span>
+<span class="s0">// reloading.</span>
+<span class="s0">//</span>
+<span class="s0">// In an earlier iteration of this code, we used placement new to be</span>
+<span class="s0">// able to allocate this object statically still, so that references</span>
+<span class="s0">// to its members don't incur an extra pointer indirection.</span>
+<span class="s0">// But under some scenarios, that could result in crashes at</span>
+<span class="s0">// shutdown because apparently the destructor was getting run twice?</span>
+<span class="s4">class </span><span class="s1">GreenletGlobals</span>
+<span class="s1">{</span>
+
+<span class="s4">public</span><span class="s1">:</span>
+    <span class="s2">const </span><span class="s1">greenlet::refs::ImmortalEventName event_switch;</span>
+    <span class="s2">const </span><span class="s1">greenlet::refs::ImmortalEventName event_throw;</span>
+    <span class="s2">const </span><span class="s1">greenlet::refs::ImmortalException PyExc_GreenletError;</span>
+    <span class="s2">const </span><span class="s1">greenlet::refs::ImmortalException PyExc_GreenletExit;</span>
+    <span class="s2">const </span><span class="s1">greenlet::refs::ImmortalObject empty_tuple;</span>
+    <span class="s2">const </span><span class="s1">greenlet::refs::ImmortalObject empty_dict;</span>
+    <span class="s2">const </span><span class="s1">greenlet::refs::ImmortalString str_run;</span>
+    <span class="s1">Mutex* </span><span class="s2">const </span><span class="s1">thread_states_to_destroy_lock;</span>
+    <span class="s1">greenlet::cleanup_queue_t thread_states_to_destroy;</span>
+
+    <span class="s1">GreenletGlobals() :</span>
+        <span class="s1">event_switch(</span><span class="s3">&quot;switch&quot;</span><span class="s1">),</span>
+        <span class="s1">event_throw(</span><span class="s3">&quot;throw&quot;</span><span class="s1">),</span>
+        <span class="s1">PyExc_GreenletError(</span><span class="s3">&quot;greenlet.error&quot;</span><span class="s1">),</span>
+        <span class="s1">PyExc_GreenletExit(</span><span class="s3">&quot;greenlet.GreenletExit&quot;</span><span class="s1">, PyExc_BaseException),</span>
+        <span class="s1">empty_tuple(Require(PyTuple_New(</span><span class="s5">0</span><span class="s1">))),</span>
+        <span class="s1">empty_dict(Require(PyDict_New())),</span>
+        <span class="s1">str_run(</span><span class="s3">&quot;run&quot;</span><span class="s1">),</span>
+        <span class="s1">thread_states_to_destroy_lock(</span><span class="s4">new </span><span class="s1">Mutex())</span>
+    <span class="s1">{}</span>
+
+    <span class="s1">~GreenletGlobals()</span>
+    <span class="s1">{</span>
+        <span class="s0">// This object is (currently) effectively immortal, and not</span>
+        <span class="s0">// just because of those placement new tricks; if we try to</span>
+        <span class="s0">// deallocate the static object we allocated, and overwrote,</span>
+        <span class="s0">// we would be doing so at C++ teardown time, which is after</span>
+        <span class="s0">// the final Python GIL is released, and we can't use the API</span>
+        <span class="s0">// then.</span>
+        <span class="s0">// (The members will still be destructed, but they also don't</span>
+        <span class="s0">// do any deallocation.)</span>
+    <span class="s1">}</span>
+
+    <span class="s2">void </span><span class="s1">queue_to_destroy(ThreadState* ts) </span><span class="s2">const</span>
+    <span class="s1">{</span>
+        <span class="s0">// we're currently accessed through a static const object,</span>
+        <span class="s0">// implicitly marking our members as const, so code can't just</span>
+        <span class="s0">// call push_back (or pop_back) without casting away the</span>
+        <span class="s0">// const.</span>
+        <span class="s0">//</span>
+        <span class="s0">// Do that for callers.</span>
+        <span class="s1">greenlet::cleanup_queue_t&amp; q = </span><span class="s4">const_cast</span><span class="s1">&lt;greenlet::cleanup_queue_t&amp;&gt;(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">thread_states_to_destroy);</span>
+        <span class="s1">q.push_back(ts);</span>
+    <span class="s1">}</span>
+
+    <span class="s1">ThreadState* take_next_to_destroy() </span><span class="s2">const</span>
+    <span class="s1">{</span>
+        <span class="s1">greenlet::cleanup_queue_t&amp; q = </span><span class="s4">const_cast</span><span class="s1">&lt;greenlet::cleanup_queue_t&amp;&gt;(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">thread_states_to_destroy);</span>
+        <span class="s1">ThreadState* result = q.back();</span>
+        <span class="s1">q.pop_back();</span>
+        <span class="s2">return </span><span class="s1">result;</span>
+    <span class="s1">}</span>
+<span class="s1">};</span>
+
+<span class="s1">}; </span><span class="s0">// namespace greenlet</span>
+
+<span class="s2">static const </span><span class="s1">greenlet::GreenletGlobals* mod_globs;</span>
+
+<span class="s2">#endif </span><span class="s0">// T_GREENLET_GLOBALS</span>
+</pre>
+</body>
+</html>

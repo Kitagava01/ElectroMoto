@@ -1,0 +1,893 @@
+<html>
+<head>
+<title>ext.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+ext.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;Extension API for adding custom tags and behavior.&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">pprint</span>
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">import </span><span class="s1">typing </span><span class="s2">as </span><span class="s1">t</span>
+
+<span class="s2">from </span><span class="s1">markupsafe </span><span class="s2">import </span><span class="s1">Markup</span>
+
+<span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">defaults</span>
+<span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">nodes</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">environment </span><span class="s2">import </span><span class="s1">Environment</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">exceptions </span><span class="s2">import </span><span class="s1">TemplateAssertionError</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">exceptions </span><span class="s2">import </span><span class="s1">TemplateSyntaxError</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">runtime </span><span class="s2">import </span><span class="s1">concat  </span><span class="s4"># type: ignore</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">runtime </span><span class="s2">import </span><span class="s1">Context</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">runtime </span><span class="s2">import </span><span class="s1">Undefined</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">utils </span><span class="s2">import </span><span class="s1">import_string</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">utils </span><span class="s2">import </span><span class="s1">pass_context</span>
+
+<span class="s2">if </span><span class="s1">t</span><span class="s3">.</span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">import </span><span class="s1">typing_extensions </span><span class="s2">as </span><span class="s1">te</span>
+
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">lexer </span><span class="s2">import </span><span class="s1">Token</span>
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">lexer </span><span class="s2">import </span><span class="s1">TokenStream</span>
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">parser </span><span class="s2">import </span><span class="s1">Parser</span>
+
+    <span class="s2">class </span><span class="s1">_TranslationsBasic</span><span class="s3">(</span><span class="s1">te</span><span class="s3">.</span><span class="s1">Protocol</span><span class="s3">):</span>
+        <span class="s2">def </span><span class="s1">gettext</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">message</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">: ...</span>
+
+        <span class="s2">def </span><span class="s1">ngettext</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">singular</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">plural</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">n</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+            <span class="s2">pass</span>
+
+    <span class="s2">class </span><span class="s1">_TranslationsContext</span><span class="s3">(</span><span class="s1">_TranslationsBasic</span><span class="s3">):</span>
+        <span class="s2">def </span><span class="s1">pgettext</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">context</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">message</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">: ...</span>
+
+        <span class="s2">def </span><span class="s1">npgettext</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">, </span><span class="s1">context</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">singular</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">plural</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">n</span><span class="s3">: </span><span class="s1">int</span>
+        <span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">: ...</span>
+
+    <span class="s1">_SupportedTranslations </span><span class="s3">= </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">_TranslationsBasic</span><span class="s3">, </span><span class="s1">_TranslationsContext</span><span class="s3">]</span>
+
+
+<span class="s4"># I18N functions available in Jinja templates. If the I18N library</span>
+<span class="s4"># provides ugettext, it will be assigned to gettext.</span>
+<span class="s1">GETTEXT_FUNCTIONS</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, ...] = (</span>
+    <span class="s5">&quot;_&quot;</span><span class="s3">,</span>
+    <span class="s5">&quot;gettext&quot;</span><span class="s3">,</span>
+    <span class="s5">&quot;ngettext&quot;</span><span class="s3">,</span>
+    <span class="s5">&quot;pgettext&quot;</span><span class="s3">,</span>
+    <span class="s5">&quot;npgettext&quot;</span><span class="s3">,</span>
+<span class="s3">)</span>
+<span class="s1">_ws_re </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s5">r&quot;\s*\n\s*&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">Extension</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;Extensions can be used to add extra functionality to the Jinja template 
+    system at the parser level.  Custom extensions are bound to an environment 
+    but may not store environment specific data on `self`.  The reason for 
+    this is that an extension can be bound to another environment (for 
+    overlays) by creating a copy and reassigning the `environment` attribute. 
+ 
+    As extensions are created by the environment they cannot accept any 
+    arguments for configuration.  One may want to work around that by using 
+    a factory function, but that is not possible as extensions are identified 
+    by their import name.  The correct way to configure the extension is 
+    storing the configuration values on the environment.  Because this way the 
+    environment ends up acting as central configuration storage the 
+    attributes may clash which is why extensions have to ensure that the names 
+    they choose for configuration are not too generic.  ``prefix`` for example 
+    is a terrible name, ``fragment_cache_prefix`` on the other hand is a good 
+    name as includes the name of the extension (fragment cache). 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">identifier</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">ClassVar</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]</span>
+
+    <span class="s2">def </span><span class="s1">__init_subclass__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">identifier </span><span class="s3">= </span><span class="s5">f&quot;</span><span class="s2">{</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__module__</span><span class="s2">}</span><span class="s5">.</span><span class="s2">{</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__name__</span><span class="s2">}</span><span class="s5">&quot;</span>
+
+    <span class="s4">#: if this extension parses this is the list of tags it's listening to.</span>
+    <span class="s1">tags</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Set</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] = </span><span class="s1">set</span><span class="s3">()</span>
+
+    <span class="s4">#: the priority of that extension.  This is especially useful for</span>
+    <span class="s4">#: extensions that preprocess values.  A lower value means higher</span>
+    <span class="s4">#: priority.</span>
+    <span class="s4">#:</span>
+    <span class="s4">#: .. versionadded:: 2.4</span>
+    <span class="s1">priority </span><span class="s3">= </span><span class="s6">100</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">environment</span><span class="s3">: </span><span class="s1">Environment</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">environment </span><span class="s3">= </span><span class="s1">environment</span>
+
+    <span class="s2">def </span><span class="s1">bind</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">environment</span><span class="s3">: </span><span class="s1">Environment</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s5">&quot;Extension&quot;</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;Create a copy of this extension bound to another environment.&quot;&quot;&quot;</span>
+        <span class="s1">rv </span><span class="s3">= </span><span class="s1">object</span><span class="s3">.</span><span class="s1">__new__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">)</span>
+        <span class="s1">rv</span><span class="s3">.</span><span class="s1">__dict__</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">__dict__</span><span class="s3">)</span>
+        <span class="s1">rv</span><span class="s3">.</span><span class="s1">environment </span><span class="s3">= </span><span class="s1">environment</span>
+        <span class="s2">return </span><span class="s1">rv</span>
+
+    <span class="s2">def </span><span class="s1">preprocess</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">source</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">name</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">filename</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] = </span><span class="s2">None</span>
+    <span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;This method is called before the actual lexing and can be used to 
+        preprocess the source.  The `filename` is optional.  The return value 
+        must be the preprocessed source. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">source</span>
+
+    <span class="s2">def </span><span class="s1">filter_stream</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">stream</span><span class="s3">: </span><span class="s5">&quot;TokenStream&quot;</span>
+    <span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s5">&quot;TokenStream&quot;</span><span class="s3">, </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Iterable</span><span class="s3">[</span><span class="s5">&quot;Token&quot;</span><span class="s3">]]:</span>
+        <span class="s0">&quot;&quot;&quot;It's passed a :class:`~jinja2.lexer.TokenStream` that can be used 
+        to filter tokens returned.  This method has to return an iterable of 
+        :class:`~jinja2.lexer.Token`\\s, but it doesn't have to return a 
+        :class:`~jinja2.lexer.TokenStream`. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">stream</span>
+
+    <span class="s2">def </span><span class="s1">parse</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">: </span><span class="s5">&quot;Parser&quot;</span><span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Node</span><span class="s3">, </span><span class="s1">t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Node</span><span class="s3">]]:</span>
+        <span class="s0">&quot;&quot;&quot;If any of the :attr:`tags` matched this method is called with the 
+        parser as first argument.  The token the parser stream is pointing at 
+        is the name token that matched.  This method has to return one or a 
+        list of multiple nodes. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">attr</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">lineno</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">int</span><span class="s3">] = </span><span class="s2">None</span>
+    <span class="s3">) </span><span class="s1">-&gt; nodes</span><span class="s3">.</span><span class="s1">ExtensionAttribute</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;Return an attribute node for the current extension.  This is useful 
+        to pass constants on extensions to generated template code. 
+ 
+        :: 
+ 
+            self.attr('_my_attribute', lineno=lineno) 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">ExtensionAttribute</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">identifier</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">lineno</span><span class="s3">=</span><span class="s1">lineno</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">call_method</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">name</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+        <span class="s1">args</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">]] = </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">kwargs</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Keyword</span><span class="s3">]] = </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">dyn_args</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">] = </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">dyn_kwargs</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">] = </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">lineno</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">int</span><span class="s3">] = </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; nodes</span><span class="s3">.</span><span class="s1">Call</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;Call a method of the extension.  This is a shortcut for 
+        :meth:`attr` + :class:`jinja2.nodes.Call`. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">args </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">args </span><span class="s3">= []</span>
+        <span class="s2">if </span><span class="s1">kwargs </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">kwargs </span><span class="s3">= []</span>
+        <span class="s2">return </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Call</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">attr</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s1">lineno</span><span class="s3">=</span><span class="s1">lineno</span><span class="s3">),</span>
+            <span class="s1">args</span><span class="s3">,</span>
+            <span class="s1">kwargs</span><span class="s3">,</span>
+            <span class="s1">dyn_args</span><span class="s3">,</span>
+            <span class="s1">dyn_kwargs</span><span class="s3">,</span>
+            <span class="s1">lineno</span><span class="s3">=</span><span class="s1">lineno</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">pass_context</span>
+<span class="s2">def </span><span class="s1">_gettext_alias</span><span class="s3">(</span>
+    <span class="s1">__context</span><span class="s3">: </span><span class="s1">Context</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span>
+<span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span><span class="s3">, </span><span class="s1">Undefined</span><span class="s3">]:</span>
+    <span class="s2">return </span><span class="s1">__context</span><span class="s3">.</span><span class="s1">call</span><span class="s3">(</span><span class="s1">__context</span><span class="s3">.</span><span class="s1">resolve</span><span class="s3">(</span><span class="s5">&quot;gettext&quot;</span><span class="s3">), *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_make_new_gettext</span><span class="s3">(</span><span class="s1">func</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">str</span><span class="s3">]) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[..., </span><span class="s1">str</span><span class="s3">]:</span>
+    <span class="s3">@</span><span class="s1">pass_context</span>
+    <span class="s2">def </span><span class="s1">gettext</span><span class="s3">(</span><span class="s1">__context</span><span class="s3">: </span><span class="s1">Context</span><span class="s3">, </span><span class="s1">__string</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, **</span><span class="s1">variables</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s1">rv </span><span class="s3">= </span><span class="s1">__context</span><span class="s3">.</span><span class="s1">call</span><span class="s3">(</span><span class="s1">func</span><span class="s3">, </span><span class="s1">__string</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">__context</span><span class="s3">.</span><span class="s1">eval_ctx</span><span class="s3">.</span><span class="s1">autoescape</span><span class="s3">:</span>
+            <span class="s1">rv </span><span class="s3">= </span><span class="s1">Markup</span><span class="s3">(</span><span class="s1">rv</span><span class="s3">)</span>
+        <span class="s4"># Always treat as a format string, even if there are no</span>
+        <span class="s4"># variables. This makes translation strings more consistent</span>
+        <span class="s4"># and predictable. This requires escaping</span>
+        <span class="s2">return </span><span class="s1">rv </span><span class="s3">% </span><span class="s1">variables  </span><span class="s4"># type: ignore</span>
+
+    <span class="s2">return </span><span class="s1">gettext</span>
+
+
+<span class="s2">def </span><span class="s1">_make_new_ngettext</span><span class="s3">(</span><span class="s1">func</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">int</span><span class="s3">], </span><span class="s1">str</span><span class="s3">]) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[..., </span><span class="s1">str</span><span class="s3">]:</span>
+    <span class="s3">@</span><span class="s1">pass_context</span>
+    <span class="s2">def </span><span class="s1">ngettext</span><span class="s3">(</span>
+        <span class="s1">__context</span><span class="s3">: </span><span class="s1">Context</span><span class="s3">,</span>
+        <span class="s1">__singular</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+        <span class="s1">__plural</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+        <span class="s1">__num</span><span class="s3">: </span><span class="s1">int</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">variables</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s1">variables</span><span class="s3">.</span><span class="s1">setdefault</span><span class="s3">(</span><span class="s5">&quot;num&quot;</span><span class="s3">, </span><span class="s1">__num</span><span class="s3">)</span>
+        <span class="s1">rv </span><span class="s3">= </span><span class="s1">__context</span><span class="s3">.</span><span class="s1">call</span><span class="s3">(</span><span class="s1">func</span><span class="s3">, </span><span class="s1">__singular</span><span class="s3">, </span><span class="s1">__plural</span><span class="s3">, </span><span class="s1">__num</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">__context</span><span class="s3">.</span><span class="s1">eval_ctx</span><span class="s3">.</span><span class="s1">autoescape</span><span class="s3">:</span>
+            <span class="s1">rv </span><span class="s3">= </span><span class="s1">Markup</span><span class="s3">(</span><span class="s1">rv</span><span class="s3">)</span>
+        <span class="s4"># Always treat as a format string, see gettext comment above.</span>
+        <span class="s2">return </span><span class="s1">rv </span><span class="s3">% </span><span class="s1">variables  </span><span class="s4"># type: ignore</span>
+
+    <span class="s2">return </span><span class="s1">ngettext</span>
+
+
+<span class="s2">def </span><span class="s1">_make_new_pgettext</span><span class="s3">(</span><span class="s1">func</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">], </span><span class="s1">str</span><span class="s3">]) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[..., </span><span class="s1">str</span><span class="s3">]:</span>
+    <span class="s3">@</span><span class="s1">pass_context</span>
+    <span class="s2">def </span><span class="s1">pgettext</span><span class="s3">(</span>
+        <span class="s1">__context</span><span class="s3">: </span><span class="s1">Context</span><span class="s3">, </span><span class="s1">__string_ctx</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">__string</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, **</span><span class="s1">variables</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span>
+    <span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s1">variables</span><span class="s3">.</span><span class="s1">setdefault</span><span class="s3">(</span><span class="s5">&quot;context&quot;</span><span class="s3">, </span><span class="s1">__string_ctx</span><span class="s3">)</span>
+        <span class="s1">rv </span><span class="s3">= </span><span class="s1">__context</span><span class="s3">.</span><span class="s1">call</span><span class="s3">(</span><span class="s1">func</span><span class="s3">, </span><span class="s1">__string_ctx</span><span class="s3">, </span><span class="s1">__string</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">__context</span><span class="s3">.</span><span class="s1">eval_ctx</span><span class="s3">.</span><span class="s1">autoescape</span><span class="s3">:</span>
+            <span class="s1">rv </span><span class="s3">= </span><span class="s1">Markup</span><span class="s3">(</span><span class="s1">rv</span><span class="s3">)</span>
+
+        <span class="s4"># Always treat as a format string, see gettext comment above.</span>
+        <span class="s2">return </span><span class="s1">rv </span><span class="s3">% </span><span class="s1">variables  </span><span class="s4"># type: ignore</span>
+
+    <span class="s2">return </span><span class="s1">pgettext</span>
+
+
+<span class="s2">def </span><span class="s1">_make_new_npgettext</span><span class="s3">(</span>
+    <span class="s1">func</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">int</span><span class="s3">], </span><span class="s1">str</span><span class="s3">],</span>
+<span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[..., </span><span class="s1">str</span><span class="s3">]:</span>
+    <span class="s3">@</span><span class="s1">pass_context</span>
+    <span class="s2">def </span><span class="s1">npgettext</span><span class="s3">(</span>
+        <span class="s1">__context</span><span class="s3">: </span><span class="s1">Context</span><span class="s3">,</span>
+        <span class="s1">__string_ctx</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+        <span class="s1">__singular</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+        <span class="s1">__plural</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+        <span class="s1">__num</span><span class="s3">: </span><span class="s1">int</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">variables</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s1">variables</span><span class="s3">.</span><span class="s1">setdefault</span><span class="s3">(</span><span class="s5">&quot;context&quot;</span><span class="s3">, </span><span class="s1">__string_ctx</span><span class="s3">)</span>
+        <span class="s1">variables</span><span class="s3">.</span><span class="s1">setdefault</span><span class="s3">(</span><span class="s5">&quot;num&quot;</span><span class="s3">, </span><span class="s1">__num</span><span class="s3">)</span>
+        <span class="s1">rv </span><span class="s3">= </span><span class="s1">__context</span><span class="s3">.</span><span class="s1">call</span><span class="s3">(</span><span class="s1">func</span><span class="s3">, </span><span class="s1">__string_ctx</span><span class="s3">, </span><span class="s1">__singular</span><span class="s3">, </span><span class="s1">__plural</span><span class="s3">, </span><span class="s1">__num</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">__context</span><span class="s3">.</span><span class="s1">eval_ctx</span><span class="s3">.</span><span class="s1">autoescape</span><span class="s3">:</span>
+            <span class="s1">rv </span><span class="s3">= </span><span class="s1">Markup</span><span class="s3">(</span><span class="s1">rv</span><span class="s3">)</span>
+
+        <span class="s4"># Always treat as a format string, see gettext comment above.</span>
+        <span class="s2">return </span><span class="s1">rv </span><span class="s3">% </span><span class="s1">variables  </span><span class="s4"># type: ignore</span>
+
+    <span class="s2">return </span><span class="s1">npgettext</span>
+
+
+<span class="s2">class </span><span class="s1">InternationalizationExtension</span><span class="s3">(</span><span class="s1">Extension</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;This extension adds gettext support to Jinja.&quot;&quot;&quot;</span>
+
+    <span class="s1">tags </span><span class="s3">= {</span><span class="s5">&quot;trans&quot;</span><span class="s3">}</span>
+
+    <span class="s4"># TODO: the i18n extension is currently reevaluating values in a few</span>
+    <span class="s4"># situations.  Take this example:</span>
+    <span class="s4">#   {% trans count=something() %}{{ count }} foo{% pluralize</span>
+    <span class="s4">#     %}{{ count }} fooss{% endtrans %}</span>
+    <span class="s4"># something is called twice here.  One time for the gettext value and</span>
+    <span class="s4"># the other time for the n-parameter of the ngettext function.</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">environment</span><span class="s3">: </span><span class="s1">Environment</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">environment</span><span class="s3">)</span>
+        <span class="s1">environment</span><span class="s3">.</span><span class="s1">globals</span><span class="s3">[</span><span class="s5">&quot;_&quot;</span><span class="s3">] = </span><span class="s1">_gettext_alias</span>
+        <span class="s1">environment</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">(</span>
+            <span class="s1">install_gettext_translations</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_install</span><span class="s3">,</span>
+            <span class="s1">install_null_translations</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_install_null</span><span class="s3">,</span>
+            <span class="s1">install_gettext_callables</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_install_callables</span><span class="s3">,</span>
+            <span class="s1">uninstall_gettext_translations</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_uninstall</span><span class="s3">,</span>
+            <span class="s1">extract_translations</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_extract</span><span class="s3">,</span>
+            <span class="s1">newstyle_gettext</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_install</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">translations</span><span class="s3">: </span><span class="s5">&quot;_SupportedTranslations&quot;</span><span class="s3">, </span><span class="s1">newstyle</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">bool</span><span class="s3">] = </span><span class="s2">None</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s4"># ugettext and ungettext are preferred in case the I18N library</span>
+        <span class="s4"># is providing compatibility with older Python versions.</span>
+        <span class="s1">gettext </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">translations</span><span class="s3">, </span><span class="s5">&quot;ugettext&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">gettext </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">gettext </span><span class="s3">= </span><span class="s1">translations</span><span class="s3">.</span><span class="s1">gettext</span>
+        <span class="s1">ngettext </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">translations</span><span class="s3">, </span><span class="s5">&quot;ungettext&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">ngettext </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">ngettext </span><span class="s3">= </span><span class="s1">translations</span><span class="s3">.</span><span class="s1">ngettext</span>
+
+        <span class="s1">pgettext </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">translations</span><span class="s3">, </span><span class="s5">&quot;pgettext&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s1">npgettext </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">translations</span><span class="s3">, </span><span class="s5">&quot;npgettext&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_install_callables</span><span class="s3">(</span>
+            <span class="s1">gettext</span><span class="s3">, </span><span class="s1">ngettext</span><span class="s3">, </span><span class="s1">newstyle</span><span class="s3">=</span><span class="s1">newstyle</span><span class="s3">, </span><span class="s1">pgettext</span><span class="s3">=</span><span class="s1">pgettext</span><span class="s3">, </span><span class="s1">npgettext</span><span class="s3">=</span><span class="s1">npgettext</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_install_null</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">newstyle</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">bool</span><span class="s3">] = </span><span class="s2">None</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">import </span><span class="s1">gettext</span>
+
+        <span class="s1">translations </span><span class="s3">= </span><span class="s1">gettext</span><span class="s3">.</span><span class="s1">NullTranslations</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">translations</span><span class="s3">, </span><span class="s5">&quot;pgettext&quot;</span><span class="s3">):</span>
+            <span class="s4"># Python &lt; 3.8</span>
+            <span class="s1">pgettext </span><span class="s3">= </span><span class="s1">translations</span><span class="s3">.</span><span class="s1">pgettext</span>
+        <span class="s2">else</span><span class="s3">:</span>
+
+            <span class="s2">def </span><span class="s1">pgettext</span><span class="s3">(</span><span class="s1">c</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">s</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:  </span><span class="s4"># type: ignore[misc]</span>
+                <span class="s2">return </span><span class="s1">s</span>
+
+        <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">translations</span><span class="s3">, </span><span class="s5">&quot;npgettext&quot;</span><span class="s3">):</span>
+            <span class="s1">npgettext </span><span class="s3">= </span><span class="s1">translations</span><span class="s3">.</span><span class="s1">npgettext</span>
+        <span class="s2">else</span><span class="s3">:</span>
+
+            <span class="s2">def </span><span class="s1">npgettext</span><span class="s3">(</span><span class="s1">c</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">s</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">p</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">n</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:  </span><span class="s4"># type: ignore[misc]</span>
+                <span class="s2">return </span><span class="s1">s </span><span class="s2">if </span><span class="s1">n </span><span class="s3">== </span><span class="s6">1 </span><span class="s2">else </span><span class="s1">p</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_install_callables</span><span class="s3">(</span>
+            <span class="s1">gettext</span><span class="s3">=</span><span class="s1">translations</span><span class="s3">.</span><span class="s1">gettext</span><span class="s3">,</span>
+            <span class="s1">ngettext</span><span class="s3">=</span><span class="s1">translations</span><span class="s3">.</span><span class="s1">ngettext</span><span class="s3">,</span>
+            <span class="s1">newstyle</span><span class="s3">=</span><span class="s1">newstyle</span><span class="s3">,</span>
+            <span class="s1">pgettext</span><span class="s3">=</span><span class="s1">pgettext</span><span class="s3">,</span>
+            <span class="s1">npgettext</span><span class="s3">=</span><span class="s1">npgettext</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_install_callables</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">gettext</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">str</span><span class="s3">],</span>
+        <span class="s1">ngettext</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">int</span><span class="s3">], </span><span class="s1">str</span><span class="s3">],</span>
+        <span class="s1">newstyle</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">bool</span><span class="s3">] = </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">pgettext</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">], </span><span class="s1">str</span><span class="s3">]] = </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">npgettext</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Callable</span><span class="s3">[[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">int</span><span class="s3">], </span><span class="s1">str</span><span class="s3">]] = </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">newstyle </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">newstyle_gettext </span><span class="s3">= </span><span class="s1">newstyle  </span><span class="s4"># type: ignore</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">newstyle_gettext</span><span class="s3">:  </span><span class="s4"># type: ignore</span>
+            <span class="s1">gettext </span><span class="s3">= </span><span class="s1">_make_new_gettext</span><span class="s3">(</span><span class="s1">gettext</span><span class="s3">)</span>
+            <span class="s1">ngettext </span><span class="s3">= </span><span class="s1">_make_new_ngettext</span><span class="s3">(</span><span class="s1">ngettext</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">pgettext </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">pgettext </span><span class="s3">= </span><span class="s1">_make_new_pgettext</span><span class="s3">(</span><span class="s1">pgettext</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">npgettext </span><span class="s2">is not None</span><span class="s3">:</span>
+                <span class="s1">npgettext </span><span class="s3">= </span><span class="s1">_make_new_npgettext</span><span class="s3">(</span><span class="s1">npgettext</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">globals</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span>
+            <span class="s1">gettext</span><span class="s3">=</span><span class="s1">gettext</span><span class="s3">, </span><span class="s1">ngettext</span><span class="s3">=</span><span class="s1">ngettext</span><span class="s3">, </span><span class="s1">pgettext</span><span class="s3">=</span><span class="s1">pgettext</span><span class="s3">, </span><span class="s1">npgettext</span><span class="s3">=</span><span class="s1">npgettext</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_uninstall</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">translations</span><span class="s3">: </span><span class="s5">&quot;_SupportedTranslations&quot;</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">key </span><span class="s2">in </span><span class="s3">(</span><span class="s5">&quot;gettext&quot;</span><span class="s3">, </span><span class="s5">&quot;ngettext&quot;</span><span class="s3">, </span><span class="s5">&quot;pgettext&quot;</span><span class="s3">, </span><span class="s5">&quot;npgettext&quot;</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">globals</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_extract</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">source</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Template</span><span class="s3">],</span>
+        <span class="s1">gettext_functions</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] = </span><span class="s1">GETTEXT_FUNCTIONS</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Iterator</span><span class="s3">[</span>
+        <span class="s1">t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], ...]]]</span>
+    <span class="s3">]:</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">source</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s1">source </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">parse</span><span class="s3">(</span><span class="s1">source</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">extract_from_ast</span><span class="s3">(</span><span class="s1">source</span><span class="s3">, </span><span class="s1">gettext_functions</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">parse</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">: </span><span class="s5">&quot;Parser&quot;</span><span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Node</span><span class="s3">, </span><span class="s1">t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Node</span><span class="s3">]]:</span>
+        <span class="s0">&quot;&quot;&quot;Parse a translatable tag.&quot;&quot;&quot;</span>
+        <span class="s1">lineno </span><span class="s3">= </span><span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">).</span><span class="s1">lineno</span>
+
+        <span class="s1">context </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">context_token </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">next_if</span><span class="s3">(</span><span class="s5">&quot;string&quot;</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">context_token </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">context </span><span class="s3">= </span><span class="s1">context_token</span><span class="s3">.</span><span class="s1">value</span>
+
+        <span class="s4"># find all the variables referenced.  Additionally a variable can be</span>
+        <span class="s4"># defined in the body of the trans block too, but this is checked at</span>
+        <span class="s4"># a later state.</span>
+        <span class="s1">plural_expr</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">] = </span><span class="s2">None</span>
+        <span class="s1">plural_expr_assignment</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Assign</span><span class="s3">] = </span><span class="s2">None</span>
+        <span class="s1">num_called_num </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s1">variables</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">] = {}</span>
+        <span class="s1">trimmed </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">while </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">type </span><span class="s3">!= </span><span class="s5">&quot;block_end&quot;</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">variables</span><span class="s3">:</span>
+                <span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">expect</span><span class="s3">(</span><span class="s5">&quot;comma&quot;</span><span class="s3">)</span>
+
+            <span class="s4"># skip colon for python compatibility</span>
+            <span class="s2">if </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">skip_if</span><span class="s3">(</span><span class="s5">&quot;colon&quot;</span><span class="s3">):</span>
+                <span class="s2">break</span>
+
+            <span class="s1">token </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">expect</span><span class="s3">(</span><span class="s5">&quot;name&quot;</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">token</span><span class="s3">.</span><span class="s1">value </span><span class="s2">in </span><span class="s1">variables</span><span class="s3">:</span>
+                <span class="s1">parser</span><span class="s3">.</span><span class="s1">fail</span><span class="s3">(</span>
+                    <span class="s5">f&quot;translatable variable </span><span class="s2">{</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value</span><span class="s2">!r} </span><span class="s5">defined twice.&quot;</span><span class="s3">,</span>
+                    <span class="s1">token</span><span class="s3">.</span><span class="s1">lineno</span><span class="s3">,</span>
+                    <span class="s1">exc</span><span class="s3">=</span><span class="s1">TemplateAssertionError</span><span class="s3">,</span>
+                <span class="s3">)</span>
+
+            <span class="s4"># expressions</span>
+            <span class="s2">if </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s5">&quot;assign&quot;</span><span class="s3">:</span>
+                <span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">)</span>
+                <span class="s1">variables</span><span class="s3">[</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value</span><span class="s3">] = </span><span class="s1">var </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">parse_expression</span><span class="s3">()</span>
+            <span class="s2">elif </span><span class="s1">trimmed </span><span class="s2">is None and </span><span class="s1">token</span><span class="s3">.</span><span class="s1">value </span><span class="s2">in </span><span class="s3">(</span><span class="s5">&quot;trimmed&quot;</span><span class="s3">, </span><span class="s5">&quot;notrimmed&quot;</span><span class="s3">):</span>
+                <span class="s1">trimmed </span><span class="s3">= </span><span class="s1">token</span><span class="s3">.</span><span class="s1">value </span><span class="s3">== </span><span class="s5">&quot;trimmed&quot;</span>
+                <span class="s2">continue</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">variables</span><span class="s3">[</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value</span><span class="s3">] = </span><span class="s1">var </span><span class="s3">= </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Name</span><span class="s3">(</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value</span><span class="s3">, </span><span class="s5">&quot;load&quot;</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">plural_expr </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">var</span><span class="s3">, </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Call</span><span class="s3">):</span>
+                    <span class="s1">plural_expr </span><span class="s3">= </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Name</span><span class="s3">(</span><span class="s5">&quot;_trans&quot;</span><span class="s3">, </span><span class="s5">&quot;load&quot;</span><span class="s3">)</span>
+                    <span class="s1">variables</span><span class="s3">[</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value</span><span class="s3">] = </span><span class="s1">plural_expr</span>
+                    <span class="s1">plural_expr_assignment </span><span class="s3">= </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Assign</span><span class="s3">(</span>
+                        <span class="s1">nodes</span><span class="s3">.</span><span class="s1">Name</span><span class="s3">(</span><span class="s5">&quot;_trans&quot;</span><span class="s3">, </span><span class="s5">&quot;store&quot;</span><span class="s3">), </span><span class="s1">var</span>
+                    <span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">plural_expr </span><span class="s3">= </span><span class="s1">var</span>
+                <span class="s1">num_called_num </span><span class="s3">= </span><span class="s1">token</span><span class="s3">.</span><span class="s1">value </span><span class="s3">== </span><span class="s5">&quot;num&quot;</span>
+
+        <span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">expect</span><span class="s3">(</span><span class="s5">&quot;block_end&quot;</span><span class="s3">)</span>
+
+        <span class="s1">plural </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">have_plural </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s1">referenced </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+
+        <span class="s4"># now parse until endtrans or pluralize</span>
+        <span class="s1">singular_names</span><span class="s3">, </span><span class="s1">singular </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_block</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">, </span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">singular_names</span><span class="s3">:</span>
+            <span class="s1">referenced</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">singular_names</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">plural_expr </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s1">plural_expr </span><span class="s3">= </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Name</span><span class="s3">(</span><span class="s1">singular_names</span><span class="s3">[</span><span class="s6">0</span><span class="s3">], </span><span class="s5">&quot;load&quot;</span><span class="s3">)</span>
+                <span class="s1">num_called_num </span><span class="s3">= </span><span class="s1">singular_names</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] == </span><span class="s5">&quot;num&quot;</span>
+
+        <span class="s4"># if we have a pluralize block, we parse that too</span>
+        <span class="s2">if </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">test</span><span class="s3">(</span><span class="s5">&quot;name:pluralize&quot;</span><span class="s3">):</span>
+            <span class="s1">have_plural </span><span class="s3">= </span><span class="s2">True</span>
+            <span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">type </span><span class="s3">!= </span><span class="s5">&quot;block_end&quot;</span><span class="s3">:</span>
+                <span class="s1">token </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">expect</span><span class="s3">(</span><span class="s5">&quot;name&quot;</span><span class="s3">)</span>
+                <span class="s2">if </span><span class="s1">token</span><span class="s3">.</span><span class="s1">value </span><span class="s2">not in </span><span class="s1">variables</span><span class="s3">:</span>
+                    <span class="s1">parser</span><span class="s3">.</span><span class="s1">fail</span><span class="s3">(</span>
+                        <span class="s5">f&quot;unknown variable </span><span class="s2">{</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value</span><span class="s2">!r} </span><span class="s5">for pluralization&quot;</span><span class="s3">,</span>
+                        <span class="s1">token</span><span class="s3">.</span><span class="s1">lineno</span><span class="s3">,</span>
+                        <span class="s1">exc</span><span class="s3">=</span><span class="s1">TemplateAssertionError</span><span class="s3">,</span>
+                    <span class="s3">)</span>
+                <span class="s1">plural_expr </span><span class="s3">= </span><span class="s1">variables</span><span class="s3">[</span><span class="s1">token</span><span class="s3">.</span><span class="s1">value</span><span class="s3">]</span>
+                <span class="s1">num_called_num </span><span class="s3">= </span><span class="s1">token</span><span class="s3">.</span><span class="s1">value </span><span class="s3">== </span><span class="s5">&quot;num&quot;</span>
+            <span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">expect</span><span class="s3">(</span><span class="s5">&quot;block_end&quot;</span><span class="s3">)</span>
+            <span class="s1">plural_names</span><span class="s3">, </span><span class="s1">plural </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_block</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">, </span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">)</span>
+            <span class="s1">referenced</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">plural_names</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">)</span>
+
+        <span class="s4"># register free names as simple name expressions</span>
+        <span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">referenced</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">name </span><span class="s2">not in </span><span class="s1">variables</span><span class="s3">:</span>
+                <span class="s1">variables</span><span class="s3">[</span><span class="s1">name</span><span class="s3">] = </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Name</span><span class="s3">(</span><span class="s1">name</span><span class="s3">, </span><span class="s5">&quot;load&quot;</span><span class="s3">)</span>
+
+        <span class="s2">if not </span><span class="s1">have_plural</span><span class="s3">:</span>
+            <span class="s1">plural_expr </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">elif </span><span class="s1">plural_expr </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">parser</span><span class="s3">.</span><span class="s1">fail</span><span class="s3">(</span><span class="s5">&quot;pluralize without variables&quot;</span><span class="s3">, </span><span class="s1">lineno</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">trimmed </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">trimmed </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">policies</span><span class="s3">[</span><span class="s5">&quot;ext.i18n.trimmed&quot;</span><span class="s3">]</span>
+        <span class="s2">if </span><span class="s1">trimmed</span><span class="s3">:</span>
+            <span class="s1">singular </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_trim_whitespace</span><span class="s3">(</span><span class="s1">singular</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">plural</span><span class="s3">:</span>
+                <span class="s1">plural </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_trim_whitespace</span><span class="s3">(</span><span class="s1">plural</span><span class="s3">)</span>
+
+        <span class="s1">node </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_make_node</span><span class="s3">(</span>
+            <span class="s1">singular</span><span class="s3">,</span>
+            <span class="s1">plural</span><span class="s3">,</span>
+            <span class="s1">context</span><span class="s3">,</span>
+            <span class="s1">variables</span><span class="s3">,</span>
+            <span class="s1">plural_expr</span><span class="s3">,</span>
+            <span class="s1">bool</span><span class="s3">(</span><span class="s1">referenced</span><span class="s3">),</span>
+            <span class="s1">num_called_num </span><span class="s2">and </span><span class="s1">have_plural</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">node</span><span class="s3">.</span><span class="s1">set_lineno</span><span class="s3">(</span><span class="s1">lineno</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">plural_expr_assignment </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s3">[</span><span class="s1">plural_expr_assignment</span><span class="s3">, </span><span class="s1">node</span><span class="s3">]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">node</span>
+
+    <span class="s2">def </span><span class="s1">_trim_whitespace</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">string</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">_ws_re</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Pattern</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] = </span><span class="s1">_ws_re</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">_ws_re</span><span class="s3">.</span><span class="s1">sub</span><span class="s3">(</span><span class="s5">&quot; &quot;</span><span class="s3">, </span><span class="s1">string</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">())</span>
+
+    <span class="s2">def </span><span class="s1">_parse_block</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">: </span><span class="s5">&quot;Parser&quot;</span><span class="s3">, </span><span class="s1">allow_pluralize</span><span class="s3">: </span><span class="s1">bool</span>
+    <span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s0">&quot;&quot;&quot;Parse until the next block tag with a given name.&quot;&quot;&quot;</span>
+        <span class="s1">referenced </span><span class="s3">= []</span>
+        <span class="s1">buf </span><span class="s3">= []</span>
+
+        <span class="s2">while True</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s5">&quot;data&quot;</span><span class="s3">:</span>
+                <span class="s1">buf</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">value</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s5">&quot;%&quot;</span><span class="s3">, </span><span class="s5">&quot;%%&quot;</span><span class="s3">))</span>
+                <span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">)</span>
+            <span class="s2">elif </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s5">&quot;variable_begin&quot;</span><span class="s3">:</span>
+                <span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">)</span>
+                <span class="s1">name </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">expect</span><span class="s3">(</span><span class="s5">&quot;name&quot;</span><span class="s3">).</span><span class="s1">value</span>
+                <span class="s1">referenced</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">name</span><span class="s3">)</span>
+                <span class="s1">buf</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">f&quot;%(</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s5">)s&quot;</span><span class="s3">)</span>
+                <span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">expect</span><span class="s3">(</span><span class="s5">&quot;variable_end&quot;</span><span class="s3">)</span>
+            <span class="s2">elif </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s5">&quot;block_begin&quot;</span><span class="s3">:</span>
+                <span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">)</span>
+                <span class="s1">block_name </span><span class="s3">= (</span>
+                    <span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">value</span>
+                    <span class="s2">if </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">current</span><span class="s3">.</span><span class="s1">type </span><span class="s3">== </span><span class="s5">&quot;name&quot;</span>
+                    <span class="s2">else None</span>
+                <span class="s3">)</span>
+                <span class="s2">if </span><span class="s1">block_name </span><span class="s3">== </span><span class="s5">&quot;endtrans&quot;</span><span class="s3">:</span>
+                    <span class="s2">break</span>
+                <span class="s2">elif </span><span class="s1">block_name </span><span class="s3">== </span><span class="s5">&quot;pluralize&quot;</span><span class="s3">:</span>
+                    <span class="s2">if </span><span class="s1">allow_pluralize</span><span class="s3">:</span>
+                        <span class="s2">break</span>
+                    <span class="s1">parser</span><span class="s3">.</span><span class="s1">fail</span><span class="s3">(</span>
+                        <span class="s5">&quot;a translatable section can have only one pluralize section&quot;</span>
+                    <span class="s3">)</span>
+                <span class="s2">elif </span><span class="s1">block_name </span><span class="s3">== </span><span class="s5">&quot;trans&quot;</span><span class="s3">:</span>
+                    <span class="s1">parser</span><span class="s3">.</span><span class="s1">fail</span><span class="s3">(</span>
+                        <span class="s5">&quot;trans blocks can't be nested; did you mean `endtrans`?&quot;</span>
+                    <span class="s3">)</span>
+                <span class="s1">parser</span><span class="s3">.</span><span class="s1">fail</span><span class="s3">(</span>
+                    <span class="s5">f&quot;control structures in translatable sections are not allowed; &quot;</span>
+                    <span class="s5">f&quot;saw `</span><span class="s2">{</span><span class="s1">block_name</span><span class="s2">}</span><span class="s5">`&quot;</span>
+                <span class="s3">)</span>
+            <span class="s2">elif </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">eos</span><span class="s3">:</span>
+                <span class="s1">parser</span><span class="s3">.</span><span class="s1">fail</span><span class="s3">(</span><span class="s5">&quot;unclosed translation block&quot;</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">RuntimeError</span><span class="s3">(</span><span class="s5">&quot;internal parser error&quot;</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">referenced</span><span class="s3">, </span><span class="s1">concat</span><span class="s3">(</span><span class="s1">buf</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_make_node</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">singular</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+        <span class="s1">plural</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">],</span>
+        <span class="s1">context</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">],</span>
+        <span class="s1">variables</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">],</span>
+        <span class="s1">plural_expr</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">],</span>
+        <span class="s1">vars_referenced</span><span class="s3">: </span><span class="s1">bool</span><span class="s3">,</span>
+        <span class="s1">num_called_num</span><span class="s3">: </span><span class="s1">bool</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; nodes</span><span class="s3">.</span><span class="s1">Output</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;Generates a useful node from the data provided.&quot;&quot;&quot;</span>
+        <span class="s1">newstyle </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">newstyle_gettext  </span><span class="s4"># type: ignore</span>
+        <span class="s1">node</span><span class="s3">: </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span>
+
+        <span class="s4"># no variables referenced?  no need to escape for old style</span>
+        <span class="s4"># gettext invocations only if there are vars.</span>
+        <span class="s2">if not </span><span class="s1">vars_referenced </span><span class="s2">and not </span><span class="s1">newstyle</span><span class="s3">:</span>
+            <span class="s1">singular </span><span class="s3">= </span><span class="s1">singular</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s5">&quot;%%&quot;</span><span class="s3">, </span><span class="s5">&quot;%&quot;</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">plural</span><span class="s3">:</span>
+                <span class="s1">plural </span><span class="s3">= </span><span class="s1">plural</span><span class="s3">.</span><span class="s1">replace</span><span class="s3">(</span><span class="s5">&quot;%%&quot;</span><span class="s3">, </span><span class="s5">&quot;%&quot;</span><span class="s3">)</span>
+
+        <span class="s1">func_name </span><span class="s3">= </span><span class="s5">&quot;gettext&quot;</span>
+        <span class="s1">func_args</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">] = [</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Const</span><span class="s3">(</span><span class="s1">singular</span><span class="s3">)]</span>
+
+        <span class="s2">if </span><span class="s1">context </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">func_args</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(</span><span class="s6">0</span><span class="s3">, </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Const</span><span class="s3">(</span><span class="s1">context</span><span class="s3">))</span>
+            <span class="s1">func_name </span><span class="s3">= </span><span class="s5">f&quot;p</span><span class="s2">{</span><span class="s1">func_name</span><span class="s2">}</span><span class="s5">&quot;</span>
+
+        <span class="s2">if </span><span class="s1">plural_expr </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">func_name </span><span class="s3">= </span><span class="s5">f&quot;n</span><span class="s2">{</span><span class="s1">func_name</span><span class="s2">}</span><span class="s5">&quot;</span>
+            <span class="s1">func_args</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">((</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Const</span><span class="s3">(</span><span class="s1">plural</span><span class="s3">), </span><span class="s1">plural_expr</span><span class="s3">))</span>
+
+        <span class="s1">node </span><span class="s3">= </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Call</span><span class="s3">(</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Name</span><span class="s3">(</span><span class="s1">func_name</span><span class="s3">, </span><span class="s5">&quot;load&quot;</span><span class="s3">), </span><span class="s1">func_args</span><span class="s3">, [], </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+
+        <span class="s4"># in case newstyle gettext is used, the method is powerful</span>
+        <span class="s4"># enough to handle the variable expansion and autoescape</span>
+        <span class="s4"># handling itself</span>
+        <span class="s2">if </span><span class="s1">newstyle</span><span class="s3">:</span>
+            <span class="s2">for </span><span class="s1">key</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">variables</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+                <span class="s4"># the function adds that later anyways in case num was</span>
+                <span class="s4"># called num, so just skip it.</span>
+                <span class="s2">if </span><span class="s1">num_called_num </span><span class="s2">and </span><span class="s1">key </span><span class="s3">== </span><span class="s5">&quot;num&quot;</span><span class="s3">:</span>
+                    <span class="s2">continue</span>
+                <span class="s1">node</span><span class="s3">.</span><span class="s1">kwargs</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Keyword</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">value</span><span class="s3">))</span>
+
+        <span class="s4"># otherwise do that here</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s4"># mark the return value as safe if we are in an</span>
+            <span class="s4"># environment with autoescaping turned on</span>
+            <span class="s1">node </span><span class="s3">= </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">MarkSafeIfAutoescape</span><span class="s3">(</span><span class="s1">node</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">variables</span><span class="s3">:</span>
+                <span class="s1">node </span><span class="s3">= </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Mod</span><span class="s3">(</span>
+                    <span class="s1">node</span><span class="s3">,</span>
+                    <span class="s1">nodes</span><span class="s3">.</span><span class="s1">Dict</span><span class="s3">(</span>
+                        <span class="s3">[</span>
+                            <span class="s1">nodes</span><span class="s3">.</span><span class="s1">Pair</span><span class="s3">(</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Const</span><span class="s3">(</span><span class="s1">key</span><span class="s3">), </span><span class="s1">value</span><span class="s3">)</span>
+                            <span class="s2">for </span><span class="s1">key</span><span class="s3">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">variables</span><span class="s3">.</span><span class="s1">items</span><span class="s3">()</span>
+                        <span class="s3">]</span>
+                    <span class="s3">),</span>
+                <span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Output</span><span class="s3">([</span><span class="s1">node</span><span class="s3">])</span>
+
+
+<span class="s2">class </span><span class="s1">ExprStmtExtension</span><span class="s3">(</span><span class="s1">Extension</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Adds a `do` tag to Jinja that works like the print statement just 
+    that it doesn't print the return value. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">tags </span><span class="s3">= {</span><span class="s5">&quot;do&quot;</span><span class="s3">}</span>
+
+    <span class="s2">def </span><span class="s1">parse</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">: </span><span class="s5">&quot;Parser&quot;</span><span class="s3">) </span><span class="s1">-&gt; nodes</span><span class="s3">.</span><span class="s1">ExprStmt</span><span class="s3">:</span>
+        <span class="s1">node </span><span class="s3">= </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">ExprStmt</span><span class="s3">(</span><span class="s1">lineno</span><span class="s3">=</span><span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">).</span><span class="s1">lineno</span><span class="s3">)</span>
+        <span class="s1">node</span><span class="s3">.</span><span class="s1">node </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">parse_tuple</span><span class="s3">()</span>
+        <span class="s2">return </span><span class="s1">node</span>
+
+
+<span class="s2">class </span><span class="s1">LoopControlExtension</span><span class="s3">(</span><span class="s1">Extension</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;Adds break and continue to the template engine.&quot;&quot;&quot;</span>
+
+    <span class="s1">tags </span><span class="s3">= {</span><span class="s5">&quot;break&quot;</span><span class="s3">, </span><span class="s5">&quot;continue&quot;</span><span class="s3">}</span>
+
+    <span class="s2">def </span><span class="s1">parse</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">: </span><span class="s5">&quot;Parser&quot;</span><span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Break</span><span class="s3">, </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Continue</span><span class="s3">]:</span>
+        <span class="s1">token </span><span class="s3">= </span><span class="s1">next</span><span class="s3">(</span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">token</span><span class="s3">.</span><span class="s1">value </span><span class="s3">== </span><span class="s5">&quot;break&quot;</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Break</span><span class="s3">(</span><span class="s1">lineno</span><span class="s3">=</span><span class="s1">token</span><span class="s3">.</span><span class="s1">lineno</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Continue</span><span class="s3">(</span><span class="s1">lineno</span><span class="s3">=</span><span class="s1">token</span><span class="s3">.</span><span class="s1">lineno</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">DebugExtension</span><span class="s3">(</span><span class="s1">Extension</span><span class="s3">):</span>
+    <span class="s0">&quot;&quot;&quot;A ``{% debug %}`` tag that dumps the available variables, 
+    filters, and tests. 
+ 
+    .. code-block:: html+jinja 
+ 
+        &lt;pre&gt;{% debug %}&lt;/pre&gt; 
+ 
+    .. code-block:: text 
+ 
+        {'context': {'cycler': &lt;class 'jinja2.utils.Cycler'&gt;, 
+                     ..., 
+                     'namespace': &lt;class 'jinja2.utils.Namespace'&gt;}, 
+         'filters': ['abs', 'attr', 'batch', 'capitalize', 'center', 'count', 'd', 
+                     ..., 'urlencode', 'urlize', 'wordcount', 'wordwrap', 'xmlattr'], 
+         'tests': ['!=', '&lt;', '&lt;=', '==', '&gt;', '&gt;=', 'callable', 'defined', 
+                   ..., 'odd', 'sameas', 'sequence', 'string', 'undefined', 'upper']} 
+ 
+    .. versionadded:: 2.11.0 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">tags </span><span class="s3">= {</span><span class="s5">&quot;debug&quot;</span><span class="s3">}</span>
+
+    <span class="s2">def </span><span class="s1">parse</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">parser</span><span class="s3">: </span><span class="s5">&quot;Parser&quot;</span><span class="s3">) </span><span class="s1">-&gt; nodes</span><span class="s3">.</span><span class="s1">Output</span><span class="s3">:</span>
+        <span class="s1">lineno </span><span class="s3">= </span><span class="s1">parser</span><span class="s3">.</span><span class="s1">stream</span><span class="s3">.</span><span class="s1">expect</span><span class="s3">(</span><span class="s5">&quot;name:debug&quot;</span><span class="s3">).</span><span class="s1">lineno</span>
+        <span class="s1">context </span><span class="s3">= </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">ContextReference</span><span class="s3">()</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">call_method</span><span class="s3">(</span><span class="s5">&quot;_render&quot;</span><span class="s3">, [</span><span class="s1">context</span><span class="s3">], </span><span class="s1">lineno</span><span class="s3">=</span><span class="s1">lineno</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Output</span><span class="s3">([</span><span class="s1">result</span><span class="s3">], </span><span class="s1">lineno</span><span class="s3">=</span><span class="s1">lineno</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_render</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">context</span><span class="s3">: </span><span class="s1">Context</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s1">result </span><span class="s3">= {</span>
+            <span class="s5">&quot;context&quot;</span><span class="s3">: </span><span class="s1">context</span><span class="s3">.</span><span class="s1">get_all</span><span class="s3">(),</span>
+            <span class="s5">&quot;filters&quot;</span><span class="s3">: </span><span class="s1">sorted</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">filters</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">()),</span>
+            <span class="s5">&quot;tests&quot;</span><span class="s3">: </span><span class="s1">sorted</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">tests</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">()),</span>
+        <span class="s3">}</span>
+
+        <span class="s4"># Set the depth since the intent is to show the top few names.</span>
+        <span class="s2">return </span><span class="s1">pprint</span><span class="s3">.</span><span class="s1">pformat</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">depth</span><span class="s3">=</span><span class="s6">3</span><span class="s3">, </span><span class="s1">compact</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">extract_from_ast</span><span class="s3">(</span>
+    <span class="s1">ast</span><span class="s3">: </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Template</span><span class="s3">,</span>
+    <span class="s1">gettext_functions</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">str</span><span class="s3">] = </span><span class="s1">GETTEXT_FUNCTIONS</span><span class="s3">,</span>
+    <span class="s1">babel_style</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">True</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Iterator</span><span class="s3">[</span>
+    <span class="s1">t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], ...]]]</span>
+<span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot;Extract localizable strings from the given template node.  Per 
+    default this function returns matches in babel style that means non string 
+    parameters as well as keyword arguments are returned as `None`.  This 
+    allows Babel to figure out what you really meant if you are using 
+    gettext functions that allow keyword arguments for placeholder expansion. 
+    If you don't want that behavior set the `babel_style` parameter to `False` 
+    which causes only strings to be returned and parameters are always stored 
+    in tuples.  As a consequence invalid gettext calls (calls without a single 
+    string parameter or string parameters after non-string parameters) are 
+    skipped. 
+ 
+    This example explains the behavior: 
+ 
+    &gt;&gt;&gt; from jinja2 import Environment 
+    &gt;&gt;&gt; env = Environment() 
+    &gt;&gt;&gt; node = env.parse('{{ (_(&quot;foo&quot;), _(), ngettext(&quot;foo&quot;, &quot;bar&quot;, 42)) }}') 
+    &gt;&gt;&gt; list(extract_from_ast(node)) 
+    [(1, '_', 'foo'), (1, '_', ()), (1, 'ngettext', ('foo', 'bar', None))] 
+    &gt;&gt;&gt; list(extract_from_ast(node, babel_style=False)) 
+    [(1, '_', ('foo',)), (1, 'ngettext', ('foo', 'bar'))] 
+ 
+    For every string found this function yields a ``(lineno, function, 
+    message)`` tuple, where: 
+ 
+    * ``lineno`` is the number of the line on which the string was found, 
+    * ``function`` is the name of the ``gettext`` function used (if the 
+      string was extracted from embedded Python code), and 
+    *   ``message`` is the string, or a tuple of strings for functions 
+         with multiple string arguments. 
+ 
+    This extraction function operates on the AST and is because of that unable 
+    to extract any comments.  For comment support you have to use the babel 
+    extraction interface or extract comments yourself. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">out</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], ...]]</span>
+
+    <span class="s2">for </span><span class="s1">node </span><span class="s2">in </span><span class="s1">ast</span><span class="s3">.</span><span class="s1">find_all</span><span class="s3">(</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Call</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s3">(</span>
+            <span class="s2">not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">node</span><span class="s3">.</span><span class="s1">node</span><span class="s3">, </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Name</span><span class="s3">)</span>
+            <span class="s2">or </span><span class="s1">node</span><span class="s3">.</span><span class="s1">node</span><span class="s3">.</span><span class="s1">name </span><span class="s2">not in </span><span class="s1">gettext_functions</span>
+        <span class="s3">):</span>
+            <span class="s2">continue</span>
+
+        <span class="s1">strings</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]] = []</span>
+
+        <span class="s2">for </span><span class="s1">arg </span><span class="s2">in </span><span class="s1">node</span><span class="s3">.</span><span class="s1">args</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">arg</span><span class="s3">, </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Const</span><span class="s3">) </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">arg</span><span class="s3">.</span><span class="s1">value</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+                <span class="s1">strings</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">arg</span><span class="s3">.</span><span class="s1">value</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">strings</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s2">None</span><span class="s3">)</span>
+
+        <span class="s2">for </span><span class="s1">_ </span><span class="s2">in </span><span class="s1">node</span><span class="s3">.</span><span class="s1">kwargs</span><span class="s3">:</span>
+            <span class="s1">strings</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">node</span><span class="s3">.</span><span class="s1">dyn_args </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">strings</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">node</span><span class="s3">.</span><span class="s1">dyn_kwargs </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">strings</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s2">None</span><span class="s3">)</span>
+
+        <span class="s2">if not </span><span class="s1">babel_style</span><span class="s3">:</span>
+            <span class="s1">out </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">x </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">strings </span><span class="s2">if </span><span class="s1">x </span><span class="s2">is not None</span><span class="s3">)</span>
+
+            <span class="s2">if not </span><span class="s1">out</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">strings</span><span class="s3">) == </span><span class="s6">1</span><span class="s3">:</span>
+                <span class="s1">out </span><span class="s3">= </span><span class="s1">strings</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">out </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">strings</span><span class="s3">)</span>
+
+        <span class="s2">yield </span><span class="s1">node</span><span class="s3">.</span><span class="s1">lineno</span><span class="s3">, </span><span class="s1">node</span><span class="s3">.</span><span class="s1">node</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">out</span>
+
+
+<span class="s2">class </span><span class="s1">_CommentFinder</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;Helper class to find comments in a token stream.  Can only 
+    find comments for gettext calls forwards.  Once the comment 
+    from line 4 is found, a comment for line 1 will not return a 
+    usable value. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">tokens</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span><span class="s1">int</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">]], </span><span class="s1">comment_tags</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">tokens </span><span class="s3">= </span><span class="s1">tokens</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">comment_tags </span><span class="s3">= </span><span class="s1">comment_tags</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">last_lineno </span><span class="s3">= </span><span class="s6">0</span>
+
+    <span class="s2">def </span><span class="s1">find_backwards</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">for </span><span class="s1">_</span><span class="s3">, </span><span class="s1">token_type</span><span class="s3">, </span><span class="s1">token_value </span><span class="s2">in </span><span class="s1">reversed</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">tokens</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">: </span><span class="s1">offset</span><span class="s3">]</span>
+            <span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">token_type </span><span class="s2">in </span><span class="s3">(</span><span class="s5">&quot;comment&quot;</span><span class="s3">, </span><span class="s5">&quot;linecomment&quot;</span><span class="s3">):</span>
+                    <span class="s2">try</span><span class="s3">:</span>
+                        <span class="s1">prefix</span><span class="s3">, </span><span class="s1">comment </span><span class="s3">= </span><span class="s1">token_value</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s2">None</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+                    <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+                        <span class="s2">continue</span>
+                    <span class="s2">if </span><span class="s1">prefix </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">comment_tags</span><span class="s3">:</span>
+                        <span class="s2">return </span><span class="s3">[</span><span class="s1">comment</span><span class="s3">.</span><span class="s1">rstrip</span><span class="s3">()]</span>
+            <span class="s2">return </span><span class="s3">[]</span>
+        <span class="s2">finally</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">= </span><span class="s1">offset</span>
+
+    <span class="s2">def </span><span class="s1">find_comments</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">lineno</span><span class="s3">: </span><span class="s1">int</span><span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">comment_tags </span><span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">last_lineno </span><span class="s3">&gt; </span><span class="s1">lineno</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s3">[]</span>
+        <span class="s2">for </span><span class="s1">idx</span><span class="s3">, (</span><span class="s1">token_lineno</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">_</span><span class="s3">) </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tokens</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">:]):</span>
+            <span class="s2">if </span><span class="s1">token_lineno </span><span class="s3">&gt; </span><span class="s1">lineno</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">find_backwards</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">offset </span><span class="s3">+ </span><span class="s1">idx</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">find_backwards</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tokens</span><span class="s3">))</span>
+
+
+<span class="s2">def </span><span class="s1">babel_extract</span><span class="s3">(</span>
+    <span class="s1">fileobj</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">BinaryIO</span><span class="s3">,</span>
+    <span class="s1">keywords</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">str</span><span class="s3">],</span>
+    <span class="s1">comment_tags</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Sequence</span><span class="s3">[</span><span class="s1">str</span><span class="s3">],</span>
+    <span class="s1">options</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span><span class="s3">],</span>
+<span class="s3">) </span><span class="s1">-&gt; t</span><span class="s3">.</span><span class="s1">Iterator</span><span class="s3">[</span>
+    <span class="s1">t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span>
+        <span class="s1">int</span><span class="s3">, </span><span class="s1">str</span><span class="s3">, </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Tuple</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">], ...]], </span><span class="s1">t</span><span class="s3">.</span><span class="s1">List</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]</span>
+    <span class="s3">]</span>
+<span class="s3">]:</span>
+    <span class="s0">&quot;&quot;&quot;Babel extraction method for Jinja templates. 
+ 
+    .. versionchanged:: 2.3 
+       Basic support for translation comments was added.  If `comment_tags` 
+       is now set to a list of keywords for extraction, the extractor will 
+       try to find the best preceding comment that begins with one of the 
+       keywords.  For best results, make sure to not have more than one 
+       gettext call in one line of code and the matching comment in the 
+       same line or the line before. 
+ 
+    .. versionchanged:: 2.5.1 
+       The `newstyle_gettext` flag can be set to `True` to enable newstyle 
+       gettext calls. 
+ 
+    .. versionchanged:: 2.7 
+       A `silent` option can now be provided.  If set to `False` template 
+       syntax errors are propagated instead of being ignored. 
+ 
+    :param fileobj: the file-like object the messages should be extracted from 
+    :param keywords: a list of keywords (i.e. function names) that should be 
+                     recognized as translation functions 
+    :param comment_tags: a list of translator tags to search for and include 
+                         in the results. 
+    :param options: a dictionary of additional options (optional) 
+    :return: an iterator over ``(lineno, funcname, message, comments)`` tuples. 
+             (comments will be empty currently) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">extensions</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Dict</span><span class="s3">[</span><span class="s1">t</span><span class="s3">.</span><span class="s1">Type</span><span class="s3">[</span><span class="s1">Extension</span><span class="s3">], </span><span class="s2">None</span><span class="s3">] = {}</span>
+
+    <span class="s2">for </span><span class="s1">extension_name </span><span class="s2">in </span><span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;extensions&quot;</span><span class="s3">, </span><span class="s5">&quot;&quot;</span><span class="s3">).</span><span class="s1">split</span><span class="s3">(</span><span class="s5">&quot;,&quot;</span><span class="s3">):</span>
+        <span class="s1">extension_name </span><span class="s3">= </span><span class="s1">extension_name</span><span class="s3">.</span><span class="s1">strip</span><span class="s3">()</span>
+
+        <span class="s2">if not </span><span class="s1">extension_name</span><span class="s3">:</span>
+            <span class="s2">continue</span>
+
+        <span class="s1">extensions</span><span class="s3">[</span><span class="s1">import_string</span><span class="s3">(</span><span class="s1">extension_name</span><span class="s3">)] = </span><span class="s2">None</span>
+
+    <span class="s2">if </span><span class="s1">InternationalizationExtension </span><span class="s2">not in </span><span class="s1">extensions</span><span class="s3">:</span>
+        <span class="s1">extensions</span><span class="s3">[</span><span class="s1">InternationalizationExtension</span><span class="s3">] = </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">getbool</span><span class="s3">(</span><span class="s1">options</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Mapping</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">str</span><span class="s3">], </span><span class="s1">key</span><span class="s3">: </span><span class="s1">str</span><span class="s3">, </span><span class="s1">default</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">) </span><span class="s1">-&gt; bool</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">key</span><span class="s3">, </span><span class="s1">str</span><span class="s3">(</span><span class="s1">default</span><span class="s3">)).</span><span class="s1">lower</span><span class="s3">() </span><span class="s2">in </span><span class="s3">{</span><span class="s5">&quot;1&quot;</span><span class="s3">, </span><span class="s5">&quot;on&quot;</span><span class="s3">, </span><span class="s5">&quot;yes&quot;</span><span class="s3">, </span><span class="s5">&quot;true&quot;</span><span class="s3">}</span>
+
+    <span class="s1">silent </span><span class="s3">= </span><span class="s1">getbool</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s5">&quot;silent&quot;</span><span class="s3">, </span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">environment </span><span class="s3">= </span><span class="s1">Environment</span><span class="s3">(</span>
+        <span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;block_start_string&quot;</span><span class="s3">, </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">BLOCK_START_STRING</span><span class="s3">),</span>
+        <span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;block_end_string&quot;</span><span class="s3">, </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">BLOCK_END_STRING</span><span class="s3">),</span>
+        <span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;variable_start_string&quot;</span><span class="s3">, </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">VARIABLE_START_STRING</span><span class="s3">),</span>
+        <span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;variable_end_string&quot;</span><span class="s3">, </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">VARIABLE_END_STRING</span><span class="s3">),</span>
+        <span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;comment_start_string&quot;</span><span class="s3">, </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">COMMENT_START_STRING</span><span class="s3">),</span>
+        <span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;comment_end_string&quot;</span><span class="s3">, </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">COMMENT_END_STRING</span><span class="s3">),</span>
+        <span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;line_statement_prefix&quot;</span><span class="s3">) </span><span class="s2">or </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">LINE_STATEMENT_PREFIX</span><span class="s3">,</span>
+        <span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;line_comment_prefix&quot;</span><span class="s3">) </span><span class="s2">or </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">LINE_COMMENT_PREFIX</span><span class="s3">,</span>
+        <span class="s1">getbool</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s5">&quot;trim_blocks&quot;</span><span class="s3">, </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">TRIM_BLOCKS</span><span class="s3">),</span>
+        <span class="s1">getbool</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s5">&quot;lstrip_blocks&quot;</span><span class="s3">, </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">LSTRIP_BLOCKS</span><span class="s3">),</span>
+        <span class="s1">defaults</span><span class="s3">.</span><span class="s1">NEWLINE_SEQUENCE</span><span class="s3">,</span>
+        <span class="s1">getbool</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s5">&quot;keep_trailing_newline&quot;</span><span class="s3">, </span><span class="s1">defaults</span><span class="s3">.</span><span class="s1">KEEP_TRAILING_NEWLINE</span><span class="s3">),</span>
+        <span class="s1">tuple</span><span class="s3">(</span><span class="s1">extensions</span><span class="s3">),</span>
+        <span class="s1">cache_size</span><span class="s3">=</span><span class="s6">0</span><span class="s3">,</span>
+        <span class="s1">auto_reload</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">getbool</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s5">&quot;trimmed&quot;</span><span class="s3">):</span>
+        <span class="s1">environment</span><span class="s3">.</span><span class="s1">policies</span><span class="s3">[</span><span class="s5">&quot;ext.i18n.trimmed&quot;</span><span class="s3">] = </span><span class="s2">True</span>
+    <span class="s2">if </span><span class="s1">getbool</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s5">&quot;newstyle_gettext&quot;</span><span class="s3">):</span>
+        <span class="s1">environment</span><span class="s3">.</span><span class="s1">newstyle_gettext </span><span class="s3">= </span><span class="s2">True  </span><span class="s4"># type: ignore</span>
+
+    <span class="s1">source </span><span class="s3">= </span><span class="s1">fileobj</span><span class="s3">.</span><span class="s1">read</span><span class="s3">().</span><span class="s1">decode</span><span class="s3">(</span><span class="s1">options</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s5">&quot;encoding&quot;</span><span class="s3">, </span><span class="s5">&quot;utf-8&quot;</span><span class="s3">))</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">node </span><span class="s3">= </span><span class="s1">environment</span><span class="s3">.</span><span class="s1">parse</span><span class="s3">(</span><span class="s1">source</span><span class="s3">)</span>
+        <span class="s1">tokens </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">lex</span><span class="s3">(</span><span class="s1">environment</span><span class="s3">.</span><span class="s1">preprocess</span><span class="s3">(</span><span class="s1">source</span><span class="s3">)))</span>
+    <span class="s2">except </span><span class="s1">TemplateSyntaxError</span><span class="s3">:</span>
+        <span class="s2">if not </span><span class="s1">silent</span><span class="s3">:</span>
+            <span class="s2">raise</span>
+        <span class="s4"># skip templates with syntax errors</span>
+        <span class="s2">return</span>
+
+    <span class="s1">finder </span><span class="s3">= </span><span class="s1">_CommentFinder</span><span class="s3">(</span><span class="s1">tokens</span><span class="s3">, </span><span class="s1">comment_tags</span><span class="s3">)</span>
+    <span class="s2">for </span><span class="s1">lineno</span><span class="s3">, </span><span class="s1">func</span><span class="s3">, </span><span class="s1">message </span><span class="s2">in </span><span class="s1">extract_from_ast</span><span class="s3">(</span><span class="s1">node</span><span class="s3">, </span><span class="s1">keywords</span><span class="s3">):</span>
+        <span class="s2">yield </span><span class="s1">lineno</span><span class="s3">, </span><span class="s1">func</span><span class="s3">, </span><span class="s1">message</span><span class="s3">, </span><span class="s1">finder</span><span class="s3">.</span><span class="s1">find_comments</span><span class="s3">(</span><span class="s1">lineno</span><span class="s3">)</span>
+
+
+<span class="s4">#: nicer import names</span>
+<span class="s1">i18n </span><span class="s3">= </span><span class="s1">InternationalizationExtension</span>
+<span class="s1">do </span><span class="s3">= </span><span class="s1">ExprStmtExtension</span>
+<span class="s1">loopcontrols </span><span class="s3">= </span><span class="s1">LoopControlExtension</span>
+<span class="s1">debug </span><span class="s3">= </span><span class="s1">DebugExtension</span>
+</pre>
+</body>
+</html>

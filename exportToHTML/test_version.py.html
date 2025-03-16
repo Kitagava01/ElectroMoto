@@ -1,0 +1,63 @@
+<html>
+<head>
+<title>test_version.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_version.py</font>
+</center></td></tr></table>
+<pre><span class="s0">#! /usr/bin/env python</span>
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">absolute_import</span>
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">print_function</span>
+
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">from </span><span class="s1">unittest </span><span class="s2">import </span><span class="s1">TestCase </span><span class="s2">as </span><span class="s1">NonLeakingTestCase</span>
+
+<span class="s2">import </span><span class="s1">greenlet</span>
+
+<span class="s0"># No reason to run this multiple times under leakchecks,</span>
+<span class="s0"># it doesn't do anything.</span>
+<span class="s2">class </span><span class="s1">VersionTests</span><span class="s3">(</span><span class="s1">NonLeakingTestCase</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">test_version</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">def </span><span class="s1">find_dominating_file</span><span class="s3">(</span><span class="s1">name</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">name</span><span class="s3">):</span>
+                <span class="s2">return </span><span class="s1">name</span>
+
+            <span class="s1">tried </span><span class="s3">= []</span>
+            <span class="s1">here </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">dirname</span><span class="s3">(</span><span class="s1">__file__</span><span class="s3">))</span>
+            <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s4">10</span><span class="s3">):</span>
+                <span class="s1">up </span><span class="s3">= [</span><span class="s5">'..'</span><span class="s3">] * </span><span class="s1">i</span>
+                <span class="s1">path </span><span class="s3">= [</span><span class="s1">here</span><span class="s3">] + </span><span class="s1">up </span><span class="s3">+ [</span><span class="s1">name</span><span class="s3">]</span>
+                <span class="s1">fname </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(*</span><span class="s1">path</span><span class="s3">)</span>
+                <span class="s1">fname </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">abspath</span><span class="s3">(</span><span class="s1">fname</span><span class="s3">)</span>
+                <span class="s1">tried</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">fname</span><span class="s3">)</span>
+                <span class="s2">if </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">(</span><span class="s1">fname</span><span class="s3">):</span>
+                    <span class="s2">return </span><span class="s1">fname</span>
+            <span class="s2">raise </span><span class="s1">AssertionError</span><span class="s3">(</span><span class="s5">&quot;Could not find file &quot; </span><span class="s3">+ </span><span class="s1">name </span><span class="s3">+ </span><span class="s5">&quot;; checked &quot; </span><span class="s3">+ </span><span class="s1">str</span><span class="s3">(</span><span class="s1">tried</span><span class="s3">))</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">setup_py </span><span class="s3">= </span><span class="s1">find_dominating_file</span><span class="s3">(</span><span class="s5">'setup.py'</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">AssertionError </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">skipTest</span><span class="s3">(</span><span class="s5">&quot;Unable to find setup.py; must be out of tree. &quot; </span><span class="s3">+ </span><span class="s1">str</span><span class="s3">(</span><span class="s1">e</span><span class="s3">))</span>
+
+
+        <span class="s1">invoke_setup </span><span class="s3">= </span><span class="s5">&quot;%s %s --version&quot; </span><span class="s3">% (</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">executable</span><span class="s3">, </span><span class="s1">setup_py</span><span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">os</span><span class="s3">.</span><span class="s1">popen</span><span class="s3">(</span><span class="s1">invoke_setup</span><span class="s3">) </span><span class="s2">as </span><span class="s1">f</span><span class="s3">:</span>
+            <span class="s1">sversion </span><span class="s3">= </span><span class="s1">f</span><span class="s3">.</span><span class="s1">read</span><span class="s3">().</span><span class="s1">strip</span><span class="s3">()</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">assertEqual</span><span class="s3">(</span><span class="s1">sversion</span><span class="s3">, </span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">__version__</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

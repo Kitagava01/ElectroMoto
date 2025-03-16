@@ -1,0 +1,189 @@
+<html>
+<head>
+<title>lock.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+lock.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;holds locking functionality that works across processes.&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">logging</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">from </span><span class="s1">abc </span><span class="s2">import </span><span class="s1">ABC</span><span class="s3">, </span><span class="s1">abstractmethod</span>
+<span class="s2">from </span><span class="s1">contextlib </span><span class="s2">import </span><span class="s1">contextmanager</span><span class="s3">, </span><span class="s1">suppress</span>
+<span class="s2">from </span><span class="s1">pathlib </span><span class="s2">import </span><span class="s1">Path</span>
+<span class="s2">from </span><span class="s1">threading </span><span class="s2">import </span><span class="s1">Lock</span><span class="s3">, </span><span class="s1">RLock</span>
+
+<span class="s2">from </span><span class="s1">filelock </span><span class="s2">import </span><span class="s1">FileLock</span><span class="s3">, </span><span class="s1">Timeout</span>
+
+
+<span class="s2">class </span><span class="s1">_CountedFileLock</span><span class="s3">(</span><span class="s1">FileLock</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">lock_file</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">parent </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">dirname</span><span class="s3">(</span><span class="s1">lock_file</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">isdir</span><span class="s3">(</span><span class="s1">parent</span><span class="s3">):</span>
+            <span class="s2">with </span><span class="s1">suppress</span><span class="s3">(</span><span class="s1">OSError</span><span class="s3">):</span>
+                <span class="s1">os</span><span class="s3">.</span><span class="s1">makedirs</span><span class="s3">(</span><span class="s1">parent</span><span class="s3">)</span>
+
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">lock_file</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">count </span><span class="s3">= </span><span class="s4">0</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">thread_safe </span><span class="s3">= </span><span class="s1">RLock</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">acquire</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">timeout</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">poll_interval</span><span class="s3">=</span><span class="s4">0.05</span><span class="s3">):</span>
+        <span class="s2">if not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">thread_safe</span><span class="s3">.</span><span class="s1">acquire</span><span class="s3">(</span><span class="s1">timeout</span><span class="s3">=-</span><span class="s4">1 </span><span class="s2">if </span><span class="s1">timeout </span><span class="s2">is None else </span><span class="s1">timeout</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">Timeout</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">lock_file</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">count </span><span class="s3">== </span><span class="s4">0</span><span class="s3">:</span>
+            <span class="s1">super</span><span class="s3">().</span><span class="s1">acquire</span><span class="s3">(</span><span class="s1">timeout</span><span class="s3">, </span><span class="s1">poll_interval</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">count </span><span class="s3">+= </span><span class="s4">1</span>
+
+    <span class="s2">def </span><span class="s1">release</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">force</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):  </span><span class="s5"># noqa: FBT002</span>
+        <span class="s2">with </span><span class="s1">self</span><span class="s3">.</span><span class="s1">thread_safe</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">count </span><span class="s3">&gt; </span><span class="s4">0</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">thread_safe</span><span class="s3">.</span><span class="s1">release</span><span class="s3">()</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">count </span><span class="s3">== </span><span class="s4">1</span><span class="s3">:</span>
+                <span class="s1">super</span><span class="s3">().</span><span class="s1">release</span><span class="s3">(</span><span class="s1">force</span><span class="s3">=</span><span class="s1">force</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">count </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">count </span><span class="s3">- </span><span class="s4">1</span><span class="s3">, </span><span class="s4">0</span><span class="s3">)</span>
+
+
+<span class="s1">_lock_store </span><span class="s3">= {}</span>
+<span class="s1">_store_lock </span><span class="s3">= </span><span class="s1">Lock</span><span class="s3">()</span>
+
+
+<span class="s2">class </span><span class="s1">PathLockBase</span><span class="s3">(</span><span class="s1">ABC</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">folder</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">path </span><span class="s3">= </span><span class="s1">Path</span><span class="s3">(</span><span class="s1">folder</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">path </span><span class="s3">= </span><span class="s1">path</span><span class="s3">.</span><span class="s1">resolve</span><span class="s3">() </span><span class="s2">if </span><span class="s1">path</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">() </span><span class="s2">else </span><span class="s1">path</span>
+
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">__name__</span><span class="s2">}</span><span class="s6">(</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">path</span><span class="s2">}</span><span class="s6">)&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__truediv__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">path </span><span class="s3">/ </span><span class="s1">other</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">__enter__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s2">def </span><span class="s1">__exit__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">exc_type</span><span class="s3">, </span><span class="s1">exc_val</span><span class="s3">, </span><span class="s1">exc_tb</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s3">@</span><span class="s1">contextmanager</span>
+    <span class="s2">def </span><span class="s1">lock_for_key</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">no_block</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):  </span><span class="s5"># noqa: FBT002</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s3">@</span><span class="s1">abstractmethod</span>
+    <span class="s3">@</span><span class="s1">contextmanager</span>
+    <span class="s2">def </span><span class="s1">non_reentrant_lock_for_key</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+
+<span class="s2">class </span><span class="s1">ReentrantFileLock</span><span class="s3">(</span><span class="s1">PathLockBase</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">folder</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">folder</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_lock </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">_create_lock</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">=</span><span class="s6">&quot;&quot;</span><span class="s3">):</span>
+        <span class="s1">lock_file </span><span class="s3">= </span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">path </span><span class="s3">/ </span><span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s6">.lock&quot;</span><span class="s3">)</span>
+        <span class="s2">with </span><span class="s1">_store_lock</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">lock_file </span><span class="s2">not in </span><span class="s1">_lock_store</span><span class="s3">:</span>
+                <span class="s1">_lock_store</span><span class="s3">[</span><span class="s1">lock_file</span><span class="s3">] = </span><span class="s1">_CountedFileLock</span><span class="s3">(</span><span class="s1">lock_file</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">_lock_store</span><span class="s3">[</span><span class="s1">lock_file</span><span class="s3">]</span>
+
+    <span class="s3">@</span><span class="s1">staticmethod</span>
+    <span class="s2">def </span><span class="s1">_del_lock</span><span class="s3">(</span><span class="s1">lock</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">lock </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">with </span><span class="s1">_store_lock</span><span class="s3">, </span><span class="s1">lock</span><span class="s3">.</span><span class="s1">thread_safe</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">lock</span><span class="s3">.</span><span class="s1">count </span><span class="s3">== </span><span class="s4">0</span><span class="s3">:</span>
+                    <span class="s1">_lock_store</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s1">lock</span><span class="s3">.</span><span class="s1">lock_file</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__del__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_del_lock</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_lock</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__enter__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_lock </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_create_lock</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_lock_file</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_lock</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__exit__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">exc_type</span><span class="s3">, </span><span class="s1">exc_val</span><span class="s3">, </span><span class="s1">exc_tb</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_release</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_lock</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_del_lock</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_lock</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_lock </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">_lock_file</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">lock</span><span class="s3">, </span><span class="s1">no_block</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):  </span><span class="s5"># noqa: FBT002</span>
+        <span class="s5"># multiple processes might be trying to get a first lock... so we cannot check if this directory exist without</span>
+        <span class="s5"># a lock, but that lock might then become expensive, and it's not clear where that lock should live.</span>
+        <span class="s5"># Instead here we just ignore if we fail to create the directory.</span>
+        <span class="s2">with </span><span class="s1">suppress</span><span class="s3">(</span><span class="s1">OSError</span><span class="s3">):</span>
+            <span class="s1">os</span><span class="s3">.</span><span class="s1">makedirs</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">path</span><span class="s3">))</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">lock</span><span class="s3">.</span><span class="s1">acquire</span><span class="s3">(</span><span class="s4">0.0001</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">Timeout</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">no_block</span><span class="s3">:</span>
+                <span class="s2">raise</span>
+            <span class="s1">logging</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s6">&quot;lock file %s present, will block until released&quot;</span><span class="s3">, </span><span class="s1">lock</span><span class="s3">.</span><span class="s1">lock_file</span><span class="s3">)</span>
+            <span class="s1">lock</span><span class="s3">.</span><span class="s1">release</span><span class="s3">()  </span><span class="s5"># release the acquire try from above</span>
+            <span class="s1">lock</span><span class="s3">.</span><span class="s1">acquire</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">staticmethod</span>
+    <span class="s2">def </span><span class="s1">_release</span><span class="s3">(</span><span class="s1">lock</span><span class="s3">):</span>
+        <span class="s1">lock</span><span class="s3">.</span><span class="s1">release</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">contextmanager</span>
+    <span class="s2">def </span><span class="s1">lock_for_key</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">no_block</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):  </span><span class="s5"># noqa: FBT002</span>
+        <span class="s1">lock </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_create_lock</span><span class="s3">(</span><span class="s1">name</span><span class="s3">)</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_lock_file</span><span class="s3">(</span><span class="s1">lock</span><span class="s3">, </span><span class="s1">no_block</span><span class="s3">)</span>
+                <span class="s2">yield</span>
+            <span class="s2">finally</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_release</span><span class="s3">(</span><span class="s1">lock</span><span class="s3">)</span>
+        <span class="s2">finally</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_del_lock</span><span class="s3">(</span><span class="s1">lock</span><span class="s3">)</span>
+            <span class="s1">lock </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s3">@</span><span class="s1">contextmanager</span>
+    <span class="s2">def </span><span class="s1">non_reentrant_lock_for_key</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">):</span>
+        <span class="s2">with </span><span class="s1">_CountedFileLock</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">path </span><span class="s3">/ </span><span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s6">.lock&quot;</span><span class="s3">)):</span>
+            <span class="s2">yield</span>
+
+
+<span class="s2">class </span><span class="s1">NoOpFileLock</span><span class="s3">(</span><span class="s1">PathLockBase</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__enter__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s2">def </span><span class="s1">__exit__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">exc_type</span><span class="s3">, </span><span class="s1">exc_val</span><span class="s3">, </span><span class="s1">exc_tb</span><span class="s3">):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s3">@</span><span class="s1">contextmanager</span>
+    <span class="s2">def </span><span class="s1">lock_for_key</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">no_block</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):  </span><span class="s5"># noqa: ARG002, FBT002</span>
+        <span class="s2">yield</span>
+
+    <span class="s3">@</span><span class="s1">contextmanager</span>
+    <span class="s2">def </span><span class="s1">non_reentrant_lock_for_key</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">):  </span><span class="s5"># noqa: ARG002</span>
+        <span class="s2">yield</span>
+
+
+<span class="s1">__all__ </span><span class="s3">= [</span>
+    <span class="s6">&quot;NoOpFileLock&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;ReentrantFileLock&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;Timeout&quot;</span><span class="s3">,</span>
+<span class="s3">]</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,314 @@
+<html>
+<head>
+<title>test_tracing.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_tracing.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">print_function</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">greenlet</span>
+<span class="s0">import </span><span class="s1">unittest</span>
+
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">TestCase</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">PY312</span>
+
+<span class="s3"># https://discuss.python.org/t/cpython-3-12-greenlet-and-tracing-profiling-how-to-not-crash-and-get-correct-results/33144/2</span>
+<span class="s1">DEBUG_BUILD_PY312 </span><span class="s2">= (</span>
+    <span class="s1">PY312 </span><span class="s0">and </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s4">'gettotalrefcount'</span><span class="s2">),</span>
+    <span class="s4">&quot;Broken on debug builds of Python 3.12&quot;</span>
+<span class="s2">)</span>
+
+<span class="s0">class </span><span class="s1">SomeError</span><span class="s2">(</span><span class="s1">Exception</span><span class="s2">):</span>
+    <span class="s0">pass</span>
+
+<span class="s0">class </span><span class="s1">GreenletTracer</span><span class="s2">(</span><span class="s1">object</span><span class="s2">):</span>
+    <span class="s1">oldtrace </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">error_on_trace</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">actions </span><span class="s2">= []</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">error_on_trace </span><span class="s2">= </span><span class="s1">error_on_trace</span>
+
+    <span class="s0">def </span><span class="s1">__call__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">actions</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">args</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">error_on_trace</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">SomeError</span>
+
+    <span class="s0">def </span><span class="s1">__enter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">oldtrace </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">settrace</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">actions</span>
+
+    <span class="s0">def </span><span class="s1">__exit__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">):</span>
+        <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">settrace</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">oldtrace</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">TestGreenletTracing</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Tests of ``greenlet.settrace()`` 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">test_a_greenlet_tracing</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+        <span class="s0">def </span><span class="s1">dummy</span><span class="s2">():</span>
+            <span class="s0">pass</span>
+        <span class="s0">def </span><span class="s1">dummyexc</span><span class="s2">():</span>
+            <span class="s0">raise </span><span class="s1">SomeError</span><span class="s2">()</span>
+
+        <span class="s0">with </span><span class="s1">GreenletTracer</span><span class="s2">() </span><span class="s0">as </span><span class="s1">actions</span><span class="s2">:</span>
+            <span class="s1">g1 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">dummy</span><span class="s2">)</span>
+            <span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">g2 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">dummyexc</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">SomeError</span><span class="s2">, </span><span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">actions</span><span class="s2">, [</span>
+            <span class="s2">(</span><span class="s4">'switch'</span><span class="s2">, (</span><span class="s1">main</span><span class="s2">, </span><span class="s1">g1</span><span class="s2">)),</span>
+            <span class="s2">(</span><span class="s4">'switch'</span><span class="s2">, (</span><span class="s1">g1</span><span class="s2">, </span><span class="s1">main</span><span class="s2">)),</span>
+            <span class="s2">(</span><span class="s4">'switch'</span><span class="s2">, (</span><span class="s1">main</span><span class="s2">, </span><span class="s1">g2</span><span class="s2">)),</span>
+            <span class="s2">(</span><span class="s4">'throw'</span><span class="s2">, (</span><span class="s1">g2</span><span class="s2">, </span><span class="s1">main</span><span class="s2">)),</span>
+        <span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_b_exception_disables_tracing</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+        <span class="s0">def </span><span class="s1">dummy</span><span class="s2">():</span>
+            <span class="s1">main</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">dummy</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">GreenletTracer</span><span class="s2">(</span><span class="s1">error_on_trace</span><span class="s2">=</span><span class="s0">True</span><span class="s2">) </span><span class="s0">as </span><span class="s1">actions</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">SomeError</span><span class="s2">, </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">gettrace</span><span class="s2">(), </span><span class="s0">None</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">actions</span><span class="s2">, [</span>
+            <span class="s2">(</span><span class="s4">'switch'</span><span class="s2">, (</span><span class="s1">main</span><span class="s2">, </span><span class="s1">g</span><span class="s2">)),</span>
+        <span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_set_same_tracer_twice</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># https://github.com/python-greenlet/greenlet/issues/332</span>
+        <span class="s3"># Our logic in asserting that the tracefunction should</span>
+        <span class="s3"># gain a reference was incorrect if the same tracefunction was set</span>
+        <span class="s3"># twice.</span>
+        <span class="s1">tracer </span><span class="s2">= </span><span class="s1">GreenletTracer</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">tracer</span><span class="s2">:</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">settrace</span><span class="s2">(</span><span class="s1">tracer</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">PythonTracer</span><span class="s2">(</span><span class="s1">object</span><span class="s2">):</span>
+    <span class="s1">oldtrace </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">actions </span><span class="s2">= []</span>
+
+    <span class="s0">def </span><span class="s1">__call__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">frame</span><span class="s2">, </span><span class="s1">event</span><span class="s2">, </span><span class="s1">arg</span><span class="s2">):</span>
+        <span class="s3"># Record the co_name so we have an idea what function we're in.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">actions</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s1">event</span><span class="s2">, </span><span class="s1">frame</span><span class="s2">.</span><span class="s1">f_code</span><span class="s2">.</span><span class="s1">co_name</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">__enter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">oldtrace </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">setprofile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">actions</span>
+
+    <span class="s0">def </span><span class="s1">__exit__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">):</span>
+        <span class="s1">sys</span><span class="s2">.</span><span class="s1">setprofile</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">oldtrace</span><span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">tpt_callback</span><span class="s2">():</span>
+    <span class="s0">return </span><span class="s6">42</span>
+
+<span class="s0">class </span><span class="s1">TestPythonTracing</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Tests of the interaction of ``sys.settrace()`` 
+    with greenlet facilities. 
+ 
+    NOTE: Most of this is probably CPython specific. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">maxDiff </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">test_trace_events_trivial</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">PythonTracer</span><span class="s2">() </span><span class="s0">as </span><span class="s1">actions</span><span class="s2">:</span>
+            <span class="s1">tpt_callback</span><span class="s2">()</span>
+        <span class="s3"># If we use the sys.settrace instead of setprofile, we get</span>
+        <span class="s3"># this:</span>
+
+        <span class="s3"># self.assertEqual(actions, [</span>
+        <span class="s3">#     ('call', 'tpt_callback'),</span>
+        <span class="s3">#     ('call', '__exit__'),</span>
+        <span class="s3"># ])</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">actions</span><span class="s2">, [</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'__enter__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'c_call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+        <span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">_trace_switch</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">glet</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">PythonTracer</span><span class="s2">() </span><span class="s0">as </span><span class="s1">actions</span><span class="s2">:</span>
+            <span class="s1">glet</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s1">actions</span>
+
+    <span class="s0">def </span><span class="s1">_check_trace_events_func_already_set</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">glet</span><span class="s2">):</span>
+        <span class="s1">actions </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_trace_switch</span><span class="s2">(</span><span class="s1">glet</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">actions</span><span class="s2">, [</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'__enter__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'c_call'</span><span class="s2">, </span><span class="s4">'_trace_switch'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'run'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'run'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'c_return'</span><span class="s2">, </span><span class="s4">'_trace_switch'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'c_call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+        <span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">test_trace_events_into_greenlet_func_already_set</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">run</span><span class="s2">():</span>
+            <span class="s0">return </span><span class="s1">tpt_callback</span><span class="s2">()</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_trace_events_func_already_set</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">run</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_trace_events_into_greenlet_subclass_already_set</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">X</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s0">return </span><span class="s1">tpt_callback</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_trace_events_func_already_set</span><span class="s2">(</span><span class="s1">X</span><span class="s2">())</span>
+
+    <span class="s0">def </span><span class="s1">_check_trace_events_from_greenlet_sets_profiler</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">g</span><span class="s2">, </span><span class="s1">tracer</span><span class="s2">):</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">tpt_callback</span><span class="s2">()</span>
+        <span class="s1">tracer</span><span class="s2">.</span><span class="s1">__exit__</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">tracer</span><span class="s2">.</span><span class="s1">actions</span><span class="s2">, [</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'__enter__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'run'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'c_call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+        <span class="s2">])</span>
+
+
+    <span class="s0">def </span><span class="s1">test_trace_events_from_greenlet_func_sets_profiler</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">tracer </span><span class="s2">= </span><span class="s1">PythonTracer</span><span class="s2">()</span>
+        <span class="s0">def </span><span class="s1">run</span><span class="s2">():</span>
+            <span class="s1">tracer</span><span class="s2">.</span><span class="s1">__enter__</span><span class="s2">()</span>
+            <span class="s0">return </span><span class="s1">tpt_callback</span><span class="s2">()</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_trace_events_from_greenlet_sets_profiler</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">run</span><span class="s2">),</span>
+                                                             <span class="s1">tracer</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_trace_events_from_greenlet_subclass_sets_profiler</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">tracer </span><span class="s2">= </span><span class="s1">PythonTracer</span><span class="s2">()</span>
+        <span class="s0">class </span><span class="s1">X</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s1">tracer</span><span class="s2">.</span><span class="s1">__enter__</span><span class="s2">()</span>
+                <span class="s0">return </span><span class="s1">tpt_callback</span><span class="s2">()</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_check_trace_events_from_greenlet_sets_profiler</span><span class="s2">(</span><span class="s1">X</span><span class="s2">(), </span><span class="s1">tracer</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">unittest</span><span class="s2">.</span><span class="s1">skipIf</span><span class="s2">(*</span><span class="s1">DEBUG_BUILD_PY312</span><span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_trace_events_multiple_greenlets_switching</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">tracer </span><span class="s2">= </span><span class="s1">PythonTracer</span><span class="s2">()</span>
+
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s0">None</span>
+
+        <span class="s0">def </span><span class="s1">g1_run</span><span class="s2">():</span>
+            <span class="s1">tracer</span><span class="s2">.</span><span class="s1">__enter__</span><span class="s2">()</span>
+            <span class="s1">tpt_callback</span><span class="s2">()</span>
+            <span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">tpt_callback</span><span class="s2">()</span>
+            <span class="s0">return </span><span class="s6">42</span>
+
+        <span class="s0">def </span><span class="s1">g2_run</span><span class="s2">():</span>
+            <span class="s1">tpt_callback</span><span class="s2">()</span>
+            <span class="s1">tracer</span><span class="s2">.</span><span class="s1">__exit__</span><span class="s2">()</span>
+            <span class="s1">tpt_callback</span><span class="s2">()</span>
+            <span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">g1_run</span><span class="s2">)</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">g2_run</span><span class="s2">)</span>
+
+        <span class="s1">x </span><span class="s2">= </span><span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s6">42</span><span class="s2">)</span>
+        <span class="s1">tpt_callback</span><span class="s2">() </span><span class="s3"># ensure not in the trace</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">tracer</span><span class="s2">.</span><span class="s1">actions</span><span class="s2">, [</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'__enter__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'c_call'</span><span class="s2">, </span><span class="s4">'g1_run'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'g2_run'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'c_call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+        <span class="s2">])</span>
+
+    <span class="s2">@</span><span class="s1">unittest</span><span class="s2">.</span><span class="s1">skipIf</span><span class="s2">(*</span><span class="s1">DEBUG_BUILD_PY312</span><span class="s2">)</span>
+    <span class="s0">def </span><span class="s1">test_trace_events_multiple_greenlets_switching_siblings</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># Like the first version, but get both greenlets running first</span>
+        <span class="s3"># as &quot;siblings&quot; and then establish the tracing.</span>
+        <span class="s1">tracer </span><span class="s2">= </span><span class="s1">PythonTracer</span><span class="s2">()</span>
+
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s0">None</span>
+
+        <span class="s0">def </span><span class="s1">g1_run</span><span class="s2">():</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">tracer</span><span class="s2">.</span><span class="s1">__enter__</span><span class="s2">()</span>
+            <span class="s1">tpt_callback</span><span class="s2">()</span>
+            <span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">tpt_callback</span><span class="s2">()</span>
+            <span class="s0">return </span><span class="s6">42</span>
+
+        <span class="s0">def </span><span class="s1">g2_run</span><span class="s2">():</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+            <span class="s1">tpt_callback</span><span class="s2">()</span>
+            <span class="s1">tracer</span><span class="s2">.</span><span class="s1">__exit__</span><span class="s2">()</span>
+            <span class="s1">tpt_callback</span><span class="s2">()</span>
+            <span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">g1_run</span><span class="s2">)</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">g2_run</span><span class="s2">)</span>
+
+        <span class="s3"># Start g1</span>
+        <span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s3"># And it immediately returns control to us.</span>
+        <span class="s3"># Start g2</span>
+        <span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s3"># Which also returns. Now kick of the real part of the</span>
+        <span class="s3"># test.</span>
+        <span class="s1">x </span><span class="s2">= </span><span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s6">42</span><span class="s2">)</span>
+
+        <span class="s1">tpt_callback</span><span class="s2">() </span><span class="s3"># ensure not in the trace</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">tracer</span><span class="s2">.</span><span class="s1">actions</span><span class="s2">, [</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'__enter__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'c_call'</span><span class="s2">, </span><span class="s4">'g1_run'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'return'</span><span class="s2">, </span><span class="s4">'tpt_callback'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+            <span class="s2">(</span><span class="s4">'c_call'</span><span class="s2">, </span><span class="s4">'__exit__'</span><span class="s2">),</span>
+        <span class="s2">])</span>
+
+
+<span class="s0">if </span><span class="s1">__name__ </span><span class="s2">== </span><span class="s4">'__main__'</span><span class="s2">:</span>
+    <span class="s1">unittest</span><span class="s2">.</span><span class="s1">main</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

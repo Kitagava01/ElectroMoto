@@ -1,0 +1,342 @@
+<html>
+<head>
+<title>leakcheck.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+leakcheck.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (c) 2018 gevent community</span>
+<span class="s0"># Copyright (c) 2021 greenlet community</span>
+<span class="s0">#</span>
+<span class="s0"># This was originally part of gevent's test suite. The main author</span>
+<span class="s0"># (Jason Madden) vendored a copy of it into greenlet.</span>
+<span class="s0">#</span>
+<span class="s0"># Permission is hereby granted, free of charge, to any person obtaining a copy</span>
+<span class="s0"># of this software and associated documentation files (the &quot;Software&quot;), to deal</span>
+<span class="s0"># in the Software without restriction, including without limitation the rights</span>
+<span class="s0"># to use, copy, modify, merge, publish, distribute, sublicense, and/or sell</span>
+<span class="s0"># copies of the Software, and to permit persons to whom the Software is</span>
+<span class="s0"># furnished to do so, subject to the following conditions:</span>
+<span class="s0">#</span>
+<span class="s0"># The above copyright notice and this permission notice shall be included in</span>
+<span class="s0"># all copies or substantial portions of the Software.</span>
+<span class="s0">#</span>
+<span class="s0"># THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR</span>
+<span class="s0"># IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,</span>
+<span class="s0"># FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE</span>
+<span class="s0"># AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER</span>
+<span class="s0"># LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,</span>
+<span class="s0"># OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN</span>
+<span class="s0"># THE SOFTWARE.</span>
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">print_function</span>
+
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">gc</span>
+
+<span class="s2">from </span><span class="s1">functools </span><span class="s2">import </span><span class="s1">wraps</span>
+<span class="s2">import </span><span class="s1">unittest</span>
+
+
+<span class="s2">import </span><span class="s1">objgraph</span>
+
+<span class="s0"># graphviz 0.18 (Nov 7 2021), available only on Python 3.6 and newer,</span>
+<span class="s0"># has added type hints (sigh). It wants to use ``typing.Literal`` for</span>
+<span class="s0"># some stuff, but that's only available on Python 3.9+. If that's not</span>
+<span class="s0"># found, it creates a ``unittest.mock.MagicMock`` object and annotates</span>
+<span class="s0"># with that. These are GC'able objects, and doing almost *anything*</span>
+<span class="s0"># with them results in an explosion of objects. For example, trying to</span>
+<span class="s0"># compare them for equality creates new objects. This causes our</span>
+<span class="s0"># leakchecks to fail, with reports like:</span>
+<span class="s0">#</span>
+<span class="s0"># greenlet.tests.leakcheck.LeakCheckError: refcount increased by [337, 1333, 343, 430, 530, 643, 769]</span>
+<span class="s0"># _Call          1820      +546</span>
+<span class="s0"># dict           4094       +76</span>
+<span class="s0"># MagicProxy      585       +73</span>
+<span class="s0"># tuple          2693       +66</span>
+<span class="s0"># _CallList        24        +3</span>
+<span class="s0"># weakref        1441        +1</span>
+<span class="s0"># function       5996        +1</span>
+<span class="s0"># type            736        +1</span>
+<span class="s0"># cell            592        +1</span>
+<span class="s0"># MagicMock         8        +1</span>
+<span class="s0">#</span>
+<span class="s0"># To avoid this, we *could* filter this type of object out early. In</span>
+<span class="s0"># principle it could leak, but we don't use mocks in greenlet, so it</span>
+<span class="s0"># doesn't leak from us. However, a further issue is that ``MagicMock``</span>
+<span class="s0"># objects have subobjects that are also GC'able, like ``_Call``, and</span>
+<span class="s0"># those create new mocks of their own too. So we'd have to filter them</span>
+<span class="s0"># as well, and they're not public. That's OK, we can workaround the</span>
+<span class="s0"># problem by being very careful to never compare by equality or other</span>
+<span class="s0"># user-defined operators, only using object identity or other builtin</span>
+<span class="s0"># functions.</span>
+
+<span class="s1">RUNNING_ON_GITHUB_ACTIONS </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">environ</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'GITHUB_ACTIONS'</span><span class="s3">)</span>
+<span class="s1">RUNNING_ON_TRAVIS </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">environ</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'TRAVIS'</span><span class="s3">) </span><span class="s2">or </span><span class="s1">RUNNING_ON_GITHUB_ACTIONS</span>
+<span class="s1">RUNNING_ON_APPVEYOR </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">environ</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'APPVEYOR'</span><span class="s3">)</span>
+<span class="s1">RUNNING_ON_CI </span><span class="s3">= </span><span class="s1">RUNNING_ON_TRAVIS </span><span class="s2">or </span><span class="s1">RUNNING_ON_APPVEYOR</span>
+<span class="s1">RUNNING_ON_MANYLINUX </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">environ</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'GREENLET_MANYLINUX'</span><span class="s3">)</span>
+<span class="s1">SKIP_LEAKCHECKS </span><span class="s3">= </span><span class="s1">RUNNING_ON_MANYLINUX </span><span class="s2">or </span><span class="s1">os</span><span class="s3">.</span><span class="s1">environ</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'GREENLET_SKIP_LEAKCHECKS'</span><span class="s3">)</span>
+<span class="s1">SKIP_FAILING_LEAKCHECKS </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">environ</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'GREENLET_SKIP_FAILING_LEAKCHECKS'</span><span class="s3">)</span>
+<span class="s1">ONLY_FAILING_LEAKCHECKS </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">environ</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">'GREENLET_ONLY_FAILING_LEAKCHECKS'</span><span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">ignores_leakcheck</span><span class="s3">(</span><span class="s1">func</span><span class="s3">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Ignore the given object during leakchecks. 
+ 
+    Can be applied to a method, in which case the method will run, but 
+    will not be subject to leak checks. 
+ 
+    If applied to a class, the entire class will be skipped during leakchecks. This 
+    is intended to be used for classes that are very slow and cause problems such as 
+    test timeouts; typically it will be used for classes that are subclasses of a base 
+    class and specify variants of behaviour (such as pool sizes). 
+    &quot;&quot;&quot;</span>
+    <span class="s1">func</span><span class="s3">.</span><span class="s1">ignore_leakcheck </span><span class="s3">= </span><span class="s2">True</span>
+    <span class="s2">return </span><span class="s1">func</span>
+
+<span class="s2">def </span><span class="s1">fails_leakcheck</span><span class="s3">(</span><span class="s1">func</span><span class="s3">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Mark that the function is known to leak. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">func</span><span class="s3">.</span><span class="s1">fails_leakcheck </span><span class="s3">= </span><span class="s2">True</span>
+    <span class="s2">if </span><span class="s1">SKIP_FAILING_LEAKCHECKS</span><span class="s3">:</span>
+        <span class="s1">func </span><span class="s3">= </span><span class="s1">unittest</span><span class="s3">.</span><span class="s1">skip</span><span class="s3">(</span><span class="s4">&quot;Skipping known failures&quot;</span><span class="s3">)(</span><span class="s1">func</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">func</span>
+
+<span class="s2">class </span><span class="s1">LeakCheckError</span><span class="s3">(</span><span class="s1">AssertionError</span><span class="s3">):</span>
+    <span class="s2">pass</span>
+
+<span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">sys</span><span class="s3">, </span><span class="s4">'getobjects'</span><span class="s3">):</span>
+    <span class="s0"># In a Python build with ``--with-trace-refs``, make objgraph</span>
+    <span class="s0"># trace *all* the objects, not just those that are tracked by the</span>
+    <span class="s0"># GC</span>
+    <span class="s2">class </span><span class="s1">_MockGC</span><span class="s3">(</span><span class="s1">object</span><span class="s3">):</span>
+        <span class="s2">def </span><span class="s1">get_objects</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">getobjects</span><span class="s3">(</span><span class="s6">0</span><span class="s3">) </span><span class="s0"># pylint:disable=no-member</span>
+        <span class="s2">def </span><span class="s1">__getattr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">gc</span><span class="s3">, </span><span class="s1">name</span><span class="s3">)</span>
+    <span class="s1">objgraph</span><span class="s3">.</span><span class="s1">gc </span><span class="s3">= </span><span class="s1">_MockGC</span><span class="s3">()</span>
+    <span class="s1">fails_strict_leakcheck </span><span class="s3">= </span><span class="s1">fails_leakcheck</span>
+<span class="s2">else</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">fails_strict_leakcheck</span><span class="s3">(</span><span class="s1">func</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Decorator for a function that is known to fail when running 
+        strict (``sys.getobjects()``) leakchecks. 
+ 
+        This type of leakcheck finds all objects, even those, such as 
+        strings, which are not tracked by the garbage collector. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">func</span>
+
+<span class="s2">class </span><span class="s1">ignores_types_in_strict_leakcheck</span><span class="s3">(</span><span class="s1">object</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">types</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">types </span><span class="s3">= </span><span class="s1">types</span>
+    <span class="s2">def </span><span class="s1">__call__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">func</span><span class="s3">):</span>
+        <span class="s1">func</span><span class="s3">.</span><span class="s1">leakcheck_ignore_types </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">types</span>
+        <span class="s2">return </span><span class="s1">func</span>
+
+<span class="s2">class </span><span class="s1">_RefCountChecker</span><span class="s3">(</span><span class="s1">object</span><span class="s3">):</span>
+
+    <span class="s0"># Some builtin things that we ignore</span>
+    <span class="s0"># XXX: Those things were ignored by gevent, but they're important here,</span>
+    <span class="s0"># presumably.</span>
+    <span class="s1">IGNORED_TYPES </span><span class="s3">= () </span><span class="s0">#(tuple, dict, types.FrameType, types.TracebackType)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">testcase</span><span class="s3">, </span><span class="s1">function</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">testcase </span><span class="s3">= </span><span class="s1">testcase</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">function </span><span class="s3">= </span><span class="s1">function</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">deltas </span><span class="s3">= []</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">peak_stats </span><span class="s3">= {}</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">ignored_types </span><span class="s3">= ()</span>
+
+        <span class="s0"># The very first time we are called, we have already been</span>
+        <span class="s0"># self.setUp() by the test runner, so we don't need to do it again.</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">needs_setUp </span><span class="s3">= </span><span class="s2">False</span>
+
+    <span class="s2">def </span><span class="s1">_include_object_p</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">obj</span><span class="s3">):</span>
+        <span class="s0"># pylint:disable=too-many-return-statements</span>
+        <span class="s0">#</span>
+        <span class="s0"># See the comment block at the top. We must be careful to</span>
+        <span class="s0"># avoid invoking user-defined operations.</span>
+        <span class="s2">if </span><span class="s1">obj </span><span class="s2">is </span><span class="s1">self</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+        <span class="s1">kind </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span>
+        <span class="s0"># ``self._include_object_p == obj`` returns NotImplemented</span>
+        <span class="s0"># for non-function objects, which causes the interpreter</span>
+        <span class="s0"># to try to reverse the order of arguments...which leads</span>
+        <span class="s0"># to the explosion of mock objects. We don't want that, so we implement</span>
+        <span class="s0"># the check manually.</span>
+        <span class="s2">if </span><span class="s1">kind </span><span class="s3">== </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_include_object_p</span><span class="s3">):</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s0"># pylint:disable=not-callable</span>
+                <span class="s1">exact_method_equals </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_include_object_p</span><span class="s3">.</span><span class="s1">__eq__</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">AttributeError</span><span class="s3">:</span>
+                <span class="s0"># Python 2.7 methods may only have __cmp__, and that raises a</span>
+                <span class="s0"># TypeError for non-method arguments</span>
+                <span class="s0"># pylint:disable=no-member</span>
+                <span class="s1">exact_method_equals </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_include_object_p</span><span class="s3">.</span><span class="s1">__cmp__</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">) == </span><span class="s6">0</span>
+
+            <span class="s2">if </span><span class="s1">exact_method_equals </span><span class="s2">is not </span><span class="s1">NotImplemented </span><span class="s2">and </span><span class="s1">exact_method_equals</span><span class="s3">:</span>
+                <span class="s2">return False</span>
+
+        <span class="s0"># Similarly, we need to check identity in our __dict__ to avoid mock explosions.</span>
+        <span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__dict__</span><span class="s3">.</span><span class="s1">values</span><span class="s3">():</span>
+            <span class="s2">if </span><span class="s1">obj </span><span class="s2">is </span><span class="s1">x</span><span class="s3">:</span>
+                <span class="s2">return False</span>
+
+
+        <span class="s2">if </span><span class="s1">kind </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ignored_types </span><span class="s2">or </span><span class="s1">kind </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">IGNORED_TYPES</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">return True</span>
+
+    <span class="s2">def </span><span class="s1">_growth</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">objgraph</span><span class="s3">.</span><span class="s1">growth</span><span class="s3">(</span><span class="s1">limit</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">peak_stats</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">peak_stats</span><span class="s3">,</span>
+                               <span class="s1">filter</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_include_object_p</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_report_diff</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">growth</span><span class="s3">):</span>
+        <span class="s2">if not </span><span class="s1">growth</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s4">&quot;&lt;Unable to calculate growth&gt;&quot;</span>
+
+        <span class="s1">lines </span><span class="s3">= []</span>
+        <span class="s1">width </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">name</span><span class="s3">) </span><span class="s2">for </span><span class="s1">name</span><span class="s3">, </span><span class="s1">_</span><span class="s3">, </span><span class="s1">_ </span><span class="s2">in </span><span class="s1">growth</span><span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">name</span><span class="s3">, </span><span class="s1">count</span><span class="s3">, </span><span class="s1">delta </span><span class="s2">in </span><span class="s1">growth</span><span class="s3">:</span>
+            <span class="s1">lines</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">'%-*s%9d %+9d' </span><span class="s3">% (</span><span class="s1">width</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">count</span><span class="s3">, </span><span class="s1">delta</span><span class="s3">))</span>
+
+        <span class="s1">diff </span><span class="s3">= </span><span class="s4">'</span><span class="s2">\n</span><span class="s4">'</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">lines</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">diff</span>
+
+
+    <span class="s2">def </span><span class="s1">_run_test</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">):</span>
+        <span class="s1">gc_enabled </span><span class="s3">= </span><span class="s1">gc</span><span class="s3">.</span><span class="s1">isenabled</span><span class="s3">()</span>
+        <span class="s1">gc</span><span class="s3">.</span><span class="s1">disable</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">needs_setUp</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">testcase</span><span class="s3">.</span><span class="s1">setUp</span><span class="s3">()</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">testcase</span><span class="s3">.</span><span class="s1">skipTearDown </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">function</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">testcase</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+        <span class="s2">finally</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">testcase</span><span class="s3">.</span><span class="s1">tearDown</span><span class="s3">()</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">testcase</span><span class="s3">.</span><span class="s1">doCleanups</span><span class="s3">()</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">testcase</span><span class="s3">.</span><span class="s1">skipTearDown </span><span class="s3">= </span><span class="s2">True</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">needs_setUp </span><span class="s3">= </span><span class="s2">True</span>
+            <span class="s2">if </span><span class="s1">gc_enabled</span><span class="s3">:</span>
+                <span class="s1">gc</span><span class="s3">.</span><span class="s1">enable</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_growth_after</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0"># Grab post snapshot</span>
+        <span class="s0"># pylint:disable=no-member</span>
+        <span class="s2">if </span><span class="s4">'urlparse' </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">modules</span><span class="s3">:</span>
+            <span class="s1">sys</span><span class="s3">.</span><span class="s1">modules</span><span class="s3">[</span><span class="s4">'urlparse'</span><span class="s3">].</span><span class="s1">clear_cache</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s4">'urllib.parse' </span><span class="s2">in </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">modules</span><span class="s3">:</span>
+            <span class="s1">sys</span><span class="s3">.</span><span class="s1">modules</span><span class="s3">[</span><span class="s4">'urllib.parse'</span><span class="s3">].</span><span class="s1">clear_cache</span><span class="s3">()</span>
+
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_growth</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_check_deltas</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">growth</span><span class="s3">):</span>
+        <span class="s0"># Return false when we have decided there is no leak,</span>
+        <span class="s0"># true if we should keep looping, raises an assertion</span>
+        <span class="s0"># if we have decided there is a leak.</span>
+
+        <span class="s1">deltas </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">deltas</span>
+        <span class="s2">if not </span><span class="s1">deltas</span><span class="s3">:</span>
+            <span class="s0"># We haven't run yet, no data, keep looping</span>
+            <span class="s2">return True</span>
+
+        <span class="s2">if </span><span class="s1">gc</span><span class="s3">.</span><span class="s1">garbage</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">LeakCheckError</span><span class="s3">(</span><span class="s4">&quot;Generated uncollectable garbage %r&quot; </span><span class="s3">% (</span><span class="s1">gc</span><span class="s3">.</span><span class="s1">garbage</span><span class="s3">,))</span>
+
+
+        <span class="s0"># the following configurations are classified as &quot;no leak&quot;</span>
+        <span class="s0"># [0, 0]</span>
+        <span class="s0"># [x, 0, 0]</span>
+        <span class="s0"># [... a, b, c, d]  where a+b+c+d = 0</span>
+        <span class="s0">#</span>
+        <span class="s0"># the following configurations are classified as &quot;leak&quot;</span>
+        <span class="s0"># [... z, z, z]  where z &gt; 0</span>
+
+        <span class="s2">if </span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">2</span><span class="s3">:] == [</span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">] </span><span class="s2">and </span><span class="s1">len</span><span class="s3">(</span><span class="s1">deltas</span><span class="s3">) </span><span class="s2">in </span><span class="s3">(</span><span class="s6">2</span><span class="s3">, </span><span class="s6">3</span><span class="s3">):</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">if </span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">3</span><span class="s3">:] == [</span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">]:</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">deltas</span><span class="s3">) &gt;= </span><span class="s6">4 </span><span class="s2">and </span><span class="s1">sum</span><span class="s3">(</span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">4</span><span class="s3">:]) == </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">deltas</span><span class="s3">) &gt;= </span><span class="s6">3 </span><span class="s2">and </span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">] &gt; </span><span class="s6">0 </span><span class="s2">and </span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">] == </span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">2</span><span class="s3">] </span><span class="s2">and </span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">2</span><span class="s3">] == </span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">3</span><span class="s3">]:</span>
+            <span class="s1">diff </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_report_diff</span><span class="s3">(</span><span class="s1">growth</span><span class="s3">)</span>
+            <span class="s2">raise </span><span class="s1">LeakCheckError</span><span class="s3">(</span><span class="s4">'refcount increased by %r</span><span class="s2">\n</span><span class="s4">%s' </span><span class="s3">% (</span><span class="s1">deltas</span><span class="s3">, </span><span class="s1">diff</span><span class="s3">))</span>
+
+        <span class="s0"># OK, we don't know for sure yet. Let's search for more</span>
+        <span class="s2">if </span><span class="s1">sum</span><span class="s3">(</span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">3</span><span class="s3">:]) &lt;= </span><span class="s6">0 </span><span class="s2">or </span><span class="s1">sum</span><span class="s3">(</span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">4</span><span class="s3">:]) &lt;= </span><span class="s6">0 </span><span class="s2">or </span><span class="s1">deltas</span><span class="s3">[-</span><span class="s6">4</span><span class="s3">:].</span><span class="s1">count</span><span class="s3">(</span><span class="s6">0</span><span class="s3">) &gt;= </span><span class="s6">2</span><span class="s3">:</span>
+            <span class="s0"># this is suspicious, so give a few more runs</span>
+            <span class="s1">limit </span><span class="s3">= </span><span class="s6">11</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">limit </span><span class="s3">= </span><span class="s6">7</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">deltas</span><span class="s3">) &gt;= </span><span class="s1">limit</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">LeakCheckError</span><span class="s3">(</span><span class="s4">'refcount increased by %r</span><span class="s2">\n</span><span class="s4">%s'</span>
+                                 <span class="s3">% (</span><span class="s1">deltas</span><span class="s3">,</span>
+                                    <span class="s1">self</span><span class="s3">.</span><span class="s1">_report_diff</span><span class="s3">(</span><span class="s1">growth</span><span class="s3">)))</span>
+
+        <span class="s0"># We couldn't decide yet, keep going</span>
+        <span class="s2">return True</span>
+
+    <span class="s2">def </span><span class="s1">__call__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">):</span>
+        <span class="s2">for </span><span class="s1">_ </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s6">3</span><span class="s3">):</span>
+            <span class="s1">gc</span><span class="s3">.</span><span class="s1">collect</span><span class="s3">()</span>
+
+        <span class="s1">expect_failure </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">function</span><span class="s3">, </span><span class="s4">'fails_leakcheck'</span><span class="s3">, </span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">expect_failure</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">testcase</span><span class="s3">.</span><span class="s1">expect_greenlet_leak </span><span class="s3">= </span><span class="s2">True</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">ignored_types </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">function</span><span class="s3">, </span><span class="s4">&quot;leakcheck_ignore_types&quot;</span><span class="s3">, ())</span>
+
+        <span class="s0"># Capture state before; the incremental will be</span>
+        <span class="s0"># updated by each call to _growth_after</span>
+        <span class="s1">growth </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_growth</span><span class="s3">()</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">while </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_check_deltas</span><span class="s3">(</span><span class="s1">growth</span><span class="s3">):</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_run_test</span><span class="s3">(</span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">)</span>
+
+                <span class="s1">growth </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_growth_after</span><span class="s3">()</span>
+
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">deltas</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">sum</span><span class="s3">((</span><span class="s1">stat</span><span class="s3">[</span><span class="s6">2</span><span class="s3">] </span><span class="s2">for </span><span class="s1">stat </span><span class="s2">in </span><span class="s1">growth</span><span class="s3">)))</span>
+        <span class="s2">except </span><span class="s1">LeakCheckError</span><span class="s3">:</span>
+            <span class="s2">if not </span><span class="s1">expect_failure</span><span class="s3">:</span>
+                <span class="s2">raise</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">expect_failure</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">LeakCheckError</span><span class="s3">(</span><span class="s4">&quot;Expected %s to leak but it did not.&quot; </span><span class="s3">% (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">function</span><span class="s3">,))</span>
+
+<span class="s2">def </span><span class="s1">wrap_refcount</span><span class="s3">(</span><span class="s1">method</span><span class="s3">):</span>
+    <span class="s2">if </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">method</span><span class="s3">, </span><span class="s4">'ignore_leakcheck'</span><span class="s3">, </span><span class="s2">False</span><span class="s3">) </span><span class="s2">or </span><span class="s1">SKIP_LEAKCHECKS</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">method</span>
+
+    <span class="s3">@</span><span class="s1">wraps</span><span class="s3">(</span><span class="s1">method</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">wrapper</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">): </span><span class="s0"># pylint:disable=too-many-branches</span>
+        <span class="s2">if </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s4">'ignore_leakcheck'</span><span class="s3">, </span><span class="s2">False</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">unittest</span><span class="s3">.</span><span class="s1">SkipTest</span><span class="s3">(</span><span class="s4">&quot;This class ignored during leakchecks&quot;</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">ONLY_FAILING_LEAKCHECKS </span><span class="s2">and not </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">method</span><span class="s3">, </span><span class="s4">'fails_leakcheck'</span><span class="s3">, </span><span class="s2">False</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">unittest</span><span class="s3">.</span><span class="s1">SkipTest</span><span class="s3">(</span><span class="s4">&quot;Only running tests that fail leakchecks.&quot;</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">_RefCountChecker</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">method</span><span class="s3">)(</span><span class="s1">args</span><span class="s3">, </span><span class="s1">kwargs</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">wrapper</span>
+</pre>
+</body>
+</html>

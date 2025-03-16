@@ -1,0 +1,60 @@
+<html>
+<head>
+<title>seeders.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+seeders.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">base </span><span class="s0">import </span><span class="s1">ComponentBuilder</span>
+
+
+<span class="s0">class </span><span class="s1">SeederSelector</span><span class="s2">(</span><span class="s1">ComponentBuilder</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">, </span><span class="s1">parser</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">possible </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">options</span><span class="s2">(</span><span class="s3">&quot;virtualenv.seed&quot;</span><span class="s2">)</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">, </span><span class="s1">parser</span><span class="s2">, </span><span class="s3">&quot;seeder&quot;</span><span class="s2">, </span><span class="s1">possible</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">add_selector_arg_parse</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">, </span><span class="s1">choices</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">parser</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+            <span class="s3">f&quot;--</span><span class="s0">{</span><span class="s1">name</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">,</span>
+            <span class="s1">choices</span><span class="s2">=</span><span class="s1">choices</span><span class="s2">,</span>
+            <span class="s1">default</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_default</span><span class="s2">(),</span>
+            <span class="s1">required</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+            <span class="s1">help</span><span class="s2">=</span><span class="s3">&quot;seed packages install method&quot;</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">parser</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+            <span class="s3">&quot;--no-seed&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;--without-pip&quot;</span><span class="s2">,</span>
+            <span class="s1">help</span><span class="s2">=</span><span class="s3">&quot;do not install seed packages&quot;</span><span class="s2">,</span>
+            <span class="s1">action</span><span class="s2">=</span><span class="s3">&quot;store_true&quot;</span><span class="s2">,</span>
+            <span class="s1">dest</span><span class="s2">=</span><span class="s3">&quot;no_seed&quot;</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">staticmethod</span>
+    <span class="s0">def </span><span class="s1">_get_default</span><span class="s2">():</span>
+        <span class="s0">return </span><span class="s3">&quot;app-data&quot;</span>
+
+    <span class="s0">def </span><span class="s1">handle_selected_arg_parse</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">options</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">super</span><span class="s2">().</span><span class="s1">handle_selected_arg_parse</span><span class="s2">(</span><span class="s1">options</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">create</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">options</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_impl_class</span><span class="s2">(</span><span class="s1">options</span><span class="s2">)</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s3">&quot;SeederSelector&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

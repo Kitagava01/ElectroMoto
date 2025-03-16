@@ -1,0 +1,133 @@
+<html>
+<head>
+<title>describe.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+describe.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">abc </span><span class="s0">import </span><span class="s1">ABC</span>
+<span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">OrderedDict</span>
+<span class="s0">from </span><span class="s1">pathlib </span><span class="s0">import </span><span class="s1">Path</span>
+
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s2">.</span><span class="s1">info </span><span class="s0">import </span><span class="s1">IS_WIN</span>
+
+
+<span class="s0">class </span><span class="s1">Describe</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Given a host interpreter tell us information about what the created interpreter might look like.&quot;&quot;&quot;</span>
+
+    <span class="s1">suffix </span><span class="s2">= </span><span class="s4">&quot;.exe&quot; </span><span class="s0">if </span><span class="s1">IS_WIN </span><span class="s0">else </span><span class="s4">&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">dest</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter </span><span class="s2">= </span><span class="s1">interpreter</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">dest </span><span class="s2">= </span><span class="s1">dest</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_stdlib </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_stdlib_platform </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_system_stdlib </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_conf_vars </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">bin_dir</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">script_dir</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">script_dir</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dest </span><span class="s2">/ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">install_path</span><span class="s2">(</span><span class="s4">&quot;scripts&quot;</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">purelib</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dest </span><span class="s2">/ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">install_path</span><span class="s2">(</span><span class="s4">&quot;purelib&quot;</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">platlib</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dest </span><span class="s2">/ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">install_path</span><span class="s2">(</span><span class="s4">&quot;platlib&quot;</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">libs</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">list</span><span class="s2">(</span><span class="s1">OrderedDict</span><span class="s2">(((</span><span class="s1">self</span><span class="s2">.</span><span class="s1">platlib</span><span class="s2">, </span><span class="s0">None</span><span class="s2">), (</span><span class="s1">self</span><span class="s2">.</span><span class="s1">purelib</span><span class="s2">, </span><span class="s0">None</span><span class="s2">))).</span><span class="s1">keys</span><span class="s2">())</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">stdlib</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stdlib </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_stdlib </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">sysconfig_path</span><span class="s2">(</span><span class="s4">&quot;stdlib&quot;</span><span class="s2">, </span><span class="s1">config_var</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_config_vars</span><span class="s2">))</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stdlib</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">stdlib_platform</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stdlib_platform </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_stdlib_platform </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">sysconfig_path</span><span class="s2">(</span><span class="s4">&quot;platstdlib&quot;</span><span class="s2">, </span><span class="s1">config_var</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_config_vars</span><span class="s2">))</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stdlib_platform</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">_config_vars</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_conf_vars </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_conf_vars </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_calc_config_vars</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dest</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_conf_vars</span>
+
+    <span class="s0">def </span><span class="s1">_calc_config_vars</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">to</span><span class="s2">):</span>
+        <span class="s1">sys_vars </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">sysconfig_vars</span>
+        <span class="s0">return </span><span class="s2">{</span><span class="s1">k</span><span class="s2">: (</span><span class="s1">to </span><span class="s0">if </span><span class="s1">v </span><span class="s0">is not None and </span><span class="s1">v</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">prefix</span><span class="s2">) </span><span class="s0">else </span><span class="s1">v</span><span class="s2">) </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">sys_vars</span><span class="s2">.</span><span class="s1">items</span><span class="s2">()}</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">can_describe</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):  </span><span class="s5"># noqa: ARG003</span>
+        <span class="s3">&quot;&quot;&quot;Knows means it knows how the output will look.&quot;&quot;&quot;</span>
+        <span class="s0">return True</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">env_name</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">dest</span><span class="s2">.</span><span class="s1">parts</span><span class="s2">[-</span><span class="s6">1</span><span class="s2">]</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">exe</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">bin_dir </span><span class="s2">/ </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">exe_stem</span><span class="s2">()</span><span class="s0">}{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">suffix</span><span class="s0">}</span><span class="s4">&quot;</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">exe_stem</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot;Executable name without suffix - there seems to be no standard way to get this without creating it.&quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s0">def </span><span class="s1">script</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">script_dir </span><span class="s2">/ </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">name</span><span class="s0">}{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">suffix</span><span class="s0">}</span><span class="s4">&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">Python3Supports</span><span class="s2">(</span><span class="s1">Describe</span><span class="s2">, </span><span class="s1">ABC</span><span class="s2">):</span>
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">can_describe</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">version_info</span><span class="s2">.</span><span class="s1">major </span><span class="s2">== </span><span class="s6">3 </span><span class="s0">and </span><span class="s1">super</span><span class="s2">().</span><span class="s1">can_describe</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)  </span><span class="s5"># noqa: PLR2004</span>
+
+
+<span class="s0">class </span><span class="s1">PosixSupports</span><span class="s2">(</span><span class="s1">Describe</span><span class="s2">, </span><span class="s1">ABC</span><span class="s2">):</span>
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">can_describe</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">os </span><span class="s2">== </span><span class="s4">&quot;posix&quot; </span><span class="s0">and </span><span class="s1">super</span><span class="s2">().</span><span class="s1">can_describe</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">WindowsSupports</span><span class="s2">(</span><span class="s1">Describe</span><span class="s2">, </span><span class="s1">ABC</span><span class="s2">):</span>
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">can_describe</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">os </span><span class="s2">== </span><span class="s4">&quot;nt&quot; </span><span class="s0">and </span><span class="s1">super</span><span class="s2">().</span><span class="s1">can_describe</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s4">&quot;Describe&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;PosixSupports&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;Python3Supports&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;WindowsSupports&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

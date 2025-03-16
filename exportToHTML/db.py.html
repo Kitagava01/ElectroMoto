@@ -1,0 +1,93 @@
+<html>
+<head>
+<title>db.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #cf8e6d;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+db.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># This module is part of GitPython and is released under the</span>
+<span class="s0"># 3-Clause BSD License: https://opensource.org/license/bsd-3-clause/</span>
+
+<span class="s2">&quot;&quot;&quot;Module with our own gitdb implementation - it uses the git command.&quot;&quot;&quot;</span>
+
+<span class="s1">__all__ </span><span class="s3">= [</span><span class="s4">&quot;GitCmdObjectDB&quot;</span><span class="s3">, </span><span class="s4">&quot;GitDB&quot;</span><span class="s3">]</span>
+
+<span class="s5">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">base </span><span class="s5">import </span><span class="s1">OInfo</span><span class="s3">, </span><span class="s1">OStream</span>
+<span class="s5">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">db </span><span class="s5">import </span><span class="s1">GitDB</span><span class="s3">, </span><span class="s1">LooseObjectDB</span>
+<span class="s5">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">exc </span><span class="s5">import </span><span class="s1">BadObject</span>
+
+<span class="s5">from </span><span class="s1">git</span><span class="s3">.</span><span class="s1">util </span><span class="s5">import </span><span class="s1">bin_to_hex</span><span class="s3">, </span><span class="s1">hex_to_bin</span>
+<span class="s5">from </span><span class="s1">git</span><span class="s3">.</span><span class="s1">exc </span><span class="s5">import </span><span class="s1">GitCommandError</span>
+
+<span class="s0"># typing-------------------------------------------------</span>
+
+<span class="s5">from </span><span class="s1">typing </span><span class="s5">import </span><span class="s1">TYPE_CHECKING</span>
+
+<span class="s5">from </span><span class="s1">git</span><span class="s3">.</span><span class="s1">types </span><span class="s5">import </span><span class="s1">PathLike</span>
+
+<span class="s5">if </span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s5">from </span><span class="s1">git</span><span class="s3">.</span><span class="s1">cmd </span><span class="s5">import </span><span class="s1">Git</span>
+
+<span class="s0"># --------------------------------------------------------</span>
+
+
+<span class="s5">class </span><span class="s1">GitCmdObjectDB</span><span class="s3">(</span><span class="s1">LooseObjectDB</span><span class="s3">):</span>
+    <span class="s2">&quot;&quot;&quot;A database representing the default git object store, which includes loose 
+    objects, pack files and an alternates file. 
+ 
+    It will create objects only in the loose object database. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s5">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">root_path</span><span class="s3">: </span><span class="s1">PathLike</span><span class="s3">, </span><span class="s1">git</span><span class="s3">: </span><span class="s4">&quot;Git&quot;</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s5">None</span><span class="s3">:</span>
+        <span class="s2">&quot;&quot;&quot;Initialize this instance with the root and a git command.&quot;&quot;&quot;</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">root_path</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_git </span><span class="s3">= </span><span class="s1">git</span>
+
+    <span class="s5">def </span><span class="s1">info</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">binsha</span><span class="s3">: </span><span class="s1">bytes</span><span class="s3">) </span><span class="s1">-&gt; OInfo</span><span class="s3">:</span>
+        <span class="s2">&quot;&quot;&quot;Get a git object header (using git itself).&quot;&quot;&quot;</span>
+        <span class="s1">hexsha</span><span class="s3">, </span><span class="s1">typename</span><span class="s3">, </span><span class="s1">size </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_git</span><span class="s3">.</span><span class="s1">get_object_header</span><span class="s3">(</span><span class="s1">bin_to_hex</span><span class="s3">(</span><span class="s1">binsha</span><span class="s3">))</span>
+        <span class="s5">return </span><span class="s1">OInfo</span><span class="s3">(</span><span class="s1">hex_to_bin</span><span class="s3">(</span><span class="s1">hexsha</span><span class="s3">), </span><span class="s1">typename</span><span class="s3">, </span><span class="s1">size</span><span class="s3">)</span>
+
+    <span class="s5">def </span><span class="s1">stream</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">binsha</span><span class="s3">: </span><span class="s1">bytes</span><span class="s3">) </span><span class="s1">-&gt; OStream</span><span class="s3">:</span>
+        <span class="s2">&quot;&quot;&quot;Get git object data as a stream supporting ``read()`` (using git itself).&quot;&quot;&quot;</span>
+        <span class="s1">hexsha</span><span class="s3">, </span><span class="s1">typename</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">stream </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_git</span><span class="s3">.</span><span class="s1">stream_object_data</span><span class="s3">(</span><span class="s1">bin_to_hex</span><span class="s3">(</span><span class="s1">binsha</span><span class="s3">))</span>
+        <span class="s5">return </span><span class="s1">OStream</span><span class="s3">(</span><span class="s1">hex_to_bin</span><span class="s3">(</span><span class="s1">hexsha</span><span class="s3">), </span><span class="s1">typename</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">stream</span><span class="s3">)</span>
+
+    <span class="s0"># { Interface</span>
+
+    <span class="s5">def </span><span class="s1">partial_to_complete_sha_hex</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">partial_hexsha</span><span class="s3">: </span><span class="s1">str</span><span class="s3">) </span><span class="s1">-&gt; bytes</span><span class="s3">:</span>
+        <span class="s2">&quot;&quot;&quot; 
+        :return: 
+            Full binary 20 byte sha from the given partial hexsha 
+ 
+        :raise gitdb.exc.AmbiguousObjectName: 
+ 
+        :raise gitdb.exc.BadObject: 
+ 
+        :note: 
+            Currently we only raise :exc:`~gitdb.exc.BadObject` as git does not 
+            communicate ambiguous objects separately. 
+        &quot;&quot;&quot;</span>
+        <span class="s5">try</span><span class="s3">:</span>
+            <span class="s1">hexsha</span><span class="s3">, </span><span class="s1">_typename</span><span class="s3">, </span><span class="s1">_size </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_git</span><span class="s3">.</span><span class="s1">get_object_header</span><span class="s3">(</span><span class="s1">partial_hexsha</span><span class="s3">)</span>
+            <span class="s5">return </span><span class="s1">hex_to_bin</span><span class="s3">(</span><span class="s1">hexsha</span><span class="s3">)</span>
+        <span class="s5">except </span><span class="s3">(</span><span class="s1">GitCommandError</span><span class="s3">, </span><span class="s1">ValueError</span><span class="s3">) </span><span class="s5">as </span><span class="s1">e</span><span class="s3">:</span>
+            <span class="s5">raise </span><span class="s1">BadObject</span><span class="s3">(</span><span class="s1">partial_hexsha</span><span class="s3">) </span><span class="s5">from </span><span class="s1">e</span>
+        <span class="s0"># END handle exceptions</span>
+
+    <span class="s0"># } END interface</span>
+</pre>
+</body>
+</html>

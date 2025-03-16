@@ -1,0 +1,69 @@
+<html>
+<head>
+<title>_soft.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_soft.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">from </span><span class="s1">contextlib </span><span class="s0">import </span><span class="s1">suppress</span>
+<span class="s0">from </span><span class="s1">errno </span><span class="s0">import </span><span class="s1">EACCES</span><span class="s2">, </span><span class="s1">EEXIST</span>
+<span class="s0">from </span><span class="s1">pathlib </span><span class="s0">import </span><span class="s1">Path</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">_api </span><span class="s0">import </span><span class="s1">BaseFileLock</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">_util </span><span class="s0">import </span><span class="s1">ensure_directory_exists</span><span class="s2">, </span><span class="s1">raise_on_not_writable_file</span>
+
+
+<span class="s0">class </span><span class="s1">SoftFileLock</span><span class="s2">(</span><span class="s1">BaseFileLock</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Simply watches the existence of the lock file.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">_acquire</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">raise_on_not_writable_file</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock_file</span><span class="s2">)</span>
+        <span class="s1">ensure_directory_exists</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock_file</span><span class="s2">)</span>
+        <span class="s4"># first check for exists and read-only mode as the open will mask this case as EEXIST</span>
+        <span class="s1">flags </span><span class="s2">= (</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">O_WRONLY  </span><span class="s4"># open for writing only</span>
+            <span class="s2">| </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_CREAT</span>
+            <span class="s2">| </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_EXCL  </span><span class="s4"># together with above raise EEXIST if the file specified by filename exists</span>
+            <span class="s2">| </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_TRUNC  </span><span class="s4"># truncate the file to zero byte</span>
+        <span class="s2">)</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">file_handler </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock_file</span><span class="s2">, </span><span class="s1">flags</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_context</span><span class="s2">.</span><span class="s1">mode</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">OSError </span><span class="s0">as </span><span class="s1">exception</span><span class="s2">:  </span><span class="s4"># re-raise unless expected exception</span>
+            <span class="s0">if not </span><span class="s2">(</span>
+                <span class="s1">exception</span><span class="s2">.</span><span class="s1">errno </span><span class="s2">== </span><span class="s1">EEXIST  </span><span class="s4"># lock already exist</span>
+                <span class="s0">or </span><span class="s2">(</span><span class="s1">exception</span><span class="s2">.</span><span class="s1">errno </span><span class="s2">== </span><span class="s1">EACCES </span><span class="s0">and </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s5">&quot;win32&quot;</span><span class="s2">)  </span><span class="s4"># has no access to this lock</span>
+            <span class="s2">):  </span><span class="s4"># pragma: win32 no cover</span>
+                <span class="s0">raise</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_context</span><span class="s2">.</span><span class="s1">lock_file_fd </span><span class="s2">= </span><span class="s1">file_handler</span>
+
+    <span class="s0">def </span><span class="s1">_release</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">assert </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_context</span><span class="s2">.</span><span class="s1">lock_file_fd </span><span class="s0">is not None  </span><span class="s4"># noqa: S101</span>
+        <span class="s1">os</span><span class="s2">.</span><span class="s1">close</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_context</span><span class="s2">.</span><span class="s1">lock_file_fd</span><span class="s2">)  </span><span class="s4"># the lock file is definitely not None</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_context</span><span class="s2">.</span><span class="s1">lock_file_fd </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s0">with </span><span class="s1">suppress</span><span class="s2">(</span><span class="s1">OSError</span><span class="s2">):  </span><span class="s4"># the file is already deleted and that's what we want</span>
+            <span class="s1">Path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock_file</span><span class="s2">).</span><span class="s1">unlink</span><span class="s2">()</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s5">&quot;SoftFileLock&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

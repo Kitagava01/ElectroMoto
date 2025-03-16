@@ -1,0 +1,150 @@
+<html>
+<head>
+<title>test_throw.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_throw.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">sys</span>
+
+
+<span class="s0">from </span><span class="s1">greenlet </span><span class="s0">import </span><span class="s1">greenlet</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">TestCase</span>
+
+<span class="s0">def </span><span class="s1">switch</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">):</span>
+    <span class="s0">return </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">ThrowTests</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">test_class</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+            <span class="s0">except </span><span class="s1">RuntimeError</span><span class="s2">:</span>
+                <span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+                <span class="s0">return</span>
+            <span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;fail&quot;</span><span class="s2">)</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">(</span><span class="s1">RuntimeError</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_val</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+            <span class="s0">except </span><span class="s1">RuntimeError</span><span class="s2">:</span>
+                <span class="s1">val </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">exc_info</span><span class="s2">()[</span><span class="s4">1</span><span class="s2">]</span>
+                <span class="s0">if </span><span class="s1">str</span><span class="s2">(</span><span class="s1">val</span><span class="s2">) == </span><span class="s3">&quot;ciao&quot;</span><span class="s2">:</span>
+                    <span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+                    <span class="s0">return</span>
+            <span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;fail&quot;</span><span class="s2">)</span>
+
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">(</span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s3">&quot;ciao&quot;</span><span class="s2">))</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">(</span><span class="s1">RuntimeError</span><span class="s2">, </span><span class="s3">&quot;ciao&quot;</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_kill</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">f</span><span class="s2">():</span>
+            <span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+            <span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;fail&quot;</span><span class="s2">)</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;ok&quot;</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">))</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">()    </span><span class="s5"># immediately eaten by the already-dead greenlet</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_throw_goes_to_original_parent</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">main </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+
+        <span class="s0">def </span><span class="s1">f1</span><span class="s2">():</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">main</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;f1 ready to catch&quot;</span><span class="s2">)</span>
+            <span class="s0">except </span><span class="s1">IndexError</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s3">&quot;caught&quot;</span>
+            <span class="s0">return </span><span class="s3">&quot;normal exit&quot;</span>
+
+        <span class="s0">def </span><span class="s1">f2</span><span class="s2">():</span>
+            <span class="s1">main</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s3">&quot;from f2&quot;</span><span class="s2">)</span>
+
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f1</span><span class="s2">)</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f2</span><span class="s2">, </span><span class="s1">parent</span><span class="s2">=</span><span class="s1">g1</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">IndexError</span><span class="s2">):</span>
+            <span class="s1">g2</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">(</span><span class="s1">IndexError</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">g2</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">g1</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">)</span>
+
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f1</span><span class="s2">)</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f2</span><span class="s2">, </span><span class="s1">parent</span><span class="s2">=</span><span class="s1">g1</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;f1 ready to catch&quot;</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g2</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">(</span><span class="s1">IndexError</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;caught&quot;</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">g2</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">g1</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">)</span>
+
+        <span class="s1">g1 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f1</span><span class="s2">)</span>
+        <span class="s1">g2 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">f2</span><span class="s2">, </span><span class="s1">parent</span><span class="s2">=</span><span class="s1">g1</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;f1 ready to catch&quot;</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;from f2&quot;</span><span class="s2">)</span>
+        <span class="s1">res </span><span class="s2">= </span><span class="s1">g2</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">(</span><span class="s1">IndexError</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">res</span><span class="s2">, </span><span class="s3">&quot;caught&quot;</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">g2</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">g1</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_non_traceback_param</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">throw</span><span class="s2">(</span>
+                <span class="s1">Exception</span><span class="s2">,</span>
+                <span class="s1">Exception</span><span class="s2">(),</span>
+                <span class="s1">self</span>
+            <span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">),</span>
+                         <span class="s3">&quot;throw() third argument must be a traceback object&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_instance_of_wrong_type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">throw</span><span class="s2">(</span>
+                <span class="s1">Exception</span><span class="s2">(),</span>
+                <span class="s1">BaseException</span><span class="s2">()</span>
+            <span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">),</span>
+                         <span class="s3">&quot;instance exception may not have a separate value&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_not_throwable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">throw</span><span class="s2">(</span>
+                <span class="s3">&quot;abc&quot;</span>
+            <span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">),</span>
+                         <span class="s3">&quot;exceptions must be classes, or instances, not str&quot;</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

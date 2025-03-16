@@ -1,0 +1,58 @@
+<html>
+<head>
+<title>index.html</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #d5b778;}
+.s3 { color: #bababa;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+index.html</font>
+</center></td></tr></table>
+<pre><span class="s0">&lt;!--{% extends 'base.html' %}--&gt;</span>
+
+<span class="s0">&lt;!--{% block title %}Главная - Магазин Электромотоциклов{% endblock %}--&gt;</span>
+
+<span class="s0">&lt;!--{% block content %}--&gt;</span>
+<span class="s0">&lt;!--&lt;h2&gt;Наши электромотоциклы&lt;/h2&gt;--&gt;</span>
+<span class="s0">&lt;!--&lt;div class=&quot;product-list&quot;&gt;--&gt;</span>
+<span class="s0">&lt;!--    {% for product in products %}--&gt;</span>
+<span class="s0">&lt;!--    &lt;div class=&quot;product-item&quot;&gt;--&gt;</span>
+<span class="s0">&lt;!--        &lt;a href=&quot;{{ url_for('product_detail', product_id=product.id) }}&quot;&gt;--&gt;</span>
+<span class="s0">&lt;!--            &lt;img src=&quot;{{ url_for('static', filename='images/' + product.image) }}&quot; alt=&quot;{{ product.name }}&quot;&gt;--&gt;</span>
+<span class="s0">&lt;!--            &lt;h3&gt;{{ product.name }}&lt;/h3&gt;--&gt;</span>
+<span class="s0">&lt;!--            &lt;p&gt;Цена: {{ product.price }} руб.&lt;/p&gt;--&gt;</span>
+<span class="s0">&lt;!--        &lt;/a&gt;--&gt;</span>
+<span class="s0">&lt;!--    &lt;/div&gt;--&gt;</span>
+<span class="s0">&lt;!--    {% endfor %}--&gt;</span>
+<span class="s0">&lt;!--&lt;/div&gt;--&gt;</span>
+<span class="s0">&lt;!--{% endblock %}--&gt;</span>
+
+<span class="s2">&lt;!DOCTYPE </span><span class="s3">html</span><span class="s2">&gt;</span>
+<span class="s2">&lt;html </span><span class="s3">lang</span><span class="s4">=&quot;ru&quot;</span><span class="s2">&gt;</span>
+<span class="s2">&lt;head&gt;</span>
+    <span class="s2">&lt;meta </span><span class="s3">charset</span><span class="s4">=&quot;UTF-8&quot;</span><span class="s2">&gt;</span>
+    <span class="s2">&lt;title&gt;</span><span class="s1">Магазин Электромотоциклов</span><span class="s2">&lt;/title&gt;</span>
+<span class="s2">&lt;/head&gt;</span>
+<span class="s2">&lt;body&gt;</span>
+    <span class="s2">&lt;h1&gt;</span><span class="s1">Добро пожаловать в наш магазин!</span><span class="s2">&lt;/h1&gt;</span>
+    <span class="s2">&lt;ul&gt;</span>
+        <span class="s1">{% for product in products %}</span>
+        <span class="s2">&lt;li&gt;</span>
+            <span class="s1">{{ product.name }} - {{ product.price }} руб.</span>
+            <span class="s2">&lt;a </span><span class="s3">href</span><span class="s4">=&quot;{{ url_for('add_to_cart', product_id=product.id) }}&quot;</span><span class="s2">&gt;</span><span class="s1">Купить</span><span class="s2">&lt;/a&gt;</span>
+        <span class="s2">&lt;/li&gt;</span>
+        <span class="s1">{% endfor %}</span>
+    <span class="s2">&lt;/ul&gt;</span>
+<span class="s2">&lt;/body&gt;</span>
+<span class="s2">&lt;/html&gt;</span>
+</pre>
+</body>
+</html>

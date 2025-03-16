@@ -1,0 +1,72 @@
+<html>
+<head>
+<title>activator.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+activator.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">from </span><span class="s1">abc </span><span class="s0">import </span><span class="s1">ABC</span><span class="s2">, </span><span class="s1">abstractmethod</span>
+
+
+<span class="s0">class </span><span class="s1">Activator</span><span class="s2">(</span><span class="s1">ABC</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Generates activate script for the virtual environment.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">options</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Create a new activator generator. 
+ 
+        :param options: the parsed options as defined within :meth:`add_parser_arguments` 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">flag_prompt </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">basename</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">getcwd</span><span class="s2">()) </span><span class="s0">if </span><span class="s1">options</span><span class="s2">.</span><span class="s1">prompt </span><span class="s2">== </span><span class="s4">&quot;.&quot; </span><span class="s0">else </span><span class="s1">options</span><span class="s2">.</span><span class="s1">prompt</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">supports</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):  </span><span class="s5"># noqa: ARG003</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Check if the activation script is supported in the given interpreter. 
+ 
+        :param interpreter: the interpreter we need to support 
+        :return: ``True`` if supported, ``False`` otherwise 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return True</span>
+
+    <span class="s2">@</span><span class="s1">classmethod  </span><span class="s5"># noqa: B027</span>
+    <span class="s0">def </span><span class="s1">add_parser_arguments</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">parser</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Add CLI arguments for this activation script. 
+ 
+        :param parser: the CLI parser 
+        :param interpreter: the interpreter this virtual environment is based of 
+        &quot;&quot;&quot;</span>
+
+    <span class="s2">@</span><span class="s1">abstractmethod</span>
+    <span class="s0">def </span><span class="s1">generate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">creator</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot; 
+        Generate activate script for the given creator. 
+ 
+        :param creator: the creator (based of :class:`virtualenv.create.creator.Creator`) we used to create this \ 
+        virtual environment 
+        &quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s4">&quot;Activator&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

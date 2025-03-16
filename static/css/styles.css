@@ -1,0 +1,332 @@
+/* Основные стили для тела страницы */
+body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background-color: #f0f8ff; /* Светло-голубой фон */
+    color: #333;
+    margin: 0;
+    padding: 0;
+}
+
+/* Стили для заголовка */
+header {
+    background-color: #4682b4; /* Синий фон для заголовка */
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    position: fixed;
+    width: 100%;
+    top: 0;
+    z-index: 1000;
+}
+
+/* Стили для ссылки в заголовке */
+header h1 a {
+    color: #ffffff; /* Белый текст */
+    text-decoration: none;
+    font-weight: 300;
+}
+
+/* Стили для навигации */
+nav {
+    padding: 10px;
+    margin-top: 10px;
+}
+
+/* Стили для ссылок в навигации */
+nav a {
+    color: #ffffff; /* Белый текст */
+    text-decoration: none;
+    margin: 0 15px;
+    font-weight: 500;
+}
+
+/* Стили для основного контента */
+main {
+    padding: 170px 20px; /* Увеличенное расстояние от верха */
+}
+
+/* Стили для списка продуктов */
+.product-list {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+/* Стили для элемента продукта */
+.product-item {
+    width: 30%;
+    box-sizing: border-box;
+    margin-bottom: 20px;
+    text-align: center;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 1rem;
+    transition: transform 0.3s ease;
+}
+
+/* Стили для элемента продукта при наведении */
+.product-item:hover {
+    transform: translateY(-5px); /* Эффект поднятия при наведении */
+}
+
+/* Стили для изображения продукта */
+.product-item img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px; /* Закругленные углы для изображения */
+}
+
+/* Стили для заголовка продукта */
+.product-item h3 {
+    margin: 10px 0;
+    color: #4682b4; /* Синий цвет для заголовка */
+}
+
+/* Стили для параграфов в элементе продукта */
+.product-item p {
+    margin: 5px 0;
+    color: #555; /* Серый цвет для текста */
+}
+
+/* Стили для кнопки в элементе продукта */
+.product-item .btn {
+    background-color: #4682b4;
+    color: #ffffff;
+    border: none;
+    padding: 5px 10px;
+    text-decoration: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+/* Стили для кнопки при наведении */
+.product-item .btn:hover {
+    background-color: #1e6bb8;
+}
+
+/* Стили для изображения на детальной странице продукта */
+.product-detail img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px; /* Закругленные углы для изображения */
+}
+
+/* Стили для детальной страницы продукта */
+.product-detail {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+    background-color: #ffffff;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Стили для подвала */
+footer {
+    background-color: #4682b4; /* Синий фон для подвала */
+    color: #ffffff; /* Белый текст */
+    text-align: center;
+    padding: 10px;
+    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+    position: fixed;
+    width: 100%;
+    bottom: 0;
+}
+
+/* Стили для кнопки на детальной странице продукта */
+.product-detail button {
+    background-color: #007bff;
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s ease;
+}
+
+/* Стили для кнопки на детальной странице продукта при наведении */
+.product-detail button:hover {
+    background-color: #0056b3;
+}
+
+/* Стили для вторичной кнопки */
+.btn-secondary {
+    background-color: #6c757d;
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    text-decoration: none;
+    transition: background-color 0.3s ease;
+}
+
+/* Стили для вторичной кнопки при наведении */
+.btn-secondary:hover {
+    background-color: #5a6268;
+}
+
+/* Стили для верхнего отступа */
+.mt-3 {
+    margin-top: 1rem;
+}
+
+/* Стили для доступности продукта */
+.availability {
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+/* Стили для доступности продукта в наличии */
+.availability.в_наличии {
+    color: green;
+}
+
+
+/* Стили для доступности продукта под заказ */
+.availability.под_заказ {
+    color: orange;
+}
+
+/* Стили для опций */
+.options {
+    margin-top: 20px;
+}
+
+/* Стили для меток опций */
+.options label {
+    display: block;
+    margin-bottom: 10px;
+}
+
+/* Стили для карусели */
+.carousel {
+    position: relative;
+    max-width: 100%;
+    margin: 0 auto;
+    overflow: hidden;
+}
+
+/* Стили для изображений в карусели */
+.carousel-image {
+    width: 100%;
+    height: auto;
+    max-height: 400px;
+    object-fit: contain;
+    display: none; /* Изображения скрыты по умолчанию */
+    border-radius: 8px; /* Закругленные углы для изображения */
+}
+
+/* Стили для активного изображения в карусели */
+.carousel-image.active {
+    display: block; /* Активное изображение отображается */
+}
+
+/* Стили для кнопок карусели */
+.carousel-button {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: rgba(0, 0, 0, 0.5);
+    color: #ffffff;
+    border: none;
+    padding: 10px;
+    cursor: pointer;
+}
+
+/* Стили для кнопки "Назад" в карусели */
+.carousel-button.prev {
+    left: 10px;
+}
+
+/* Стили для кнопки "Вперед" в карусели */
+.carousel-button.next {
+    right: 10px;
+}
+
+/* Стили для контента страницы "О нас" */
+.about-content {
+    padding: 20px;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin: 20px auto;
+    max-width: 800px;
+    text-align: center;
+}
+
+/* Стили для заголовка в разделе "О нас" */
+.about-header {
+    margin-bottom: 20px;
+}
+
+/* Стили для заголовка второго уровня в разделе "О нас" */
+.about-header h2 {
+    font-size: 2rem;
+    margin-bottom: 10px;
+    color: #4682b4; /* Синий цвет для заголовка */
+}
+
+/* Стили для раздела в странице "О нас" */
+.about-section {
+    margin-bottom: 40px;
+}
+
+/* Стили для изображений в разделе "О нас" */
+.about-section img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px; /* Закругленные углы для изображения */
+    margin-bottom: 20px;
+}
+
+/* Стили для параграфов в разделе "О нас" */
+.about-section p {
+    font-size: 1.2rem;
+    line-height: 1.6;
+    margin-bottom: 20px;
+    color: #555; /* Серый цвет для текста */
+}
+
+/* Стили для z-index */
+.z-2 {
+    z-index: 2;
+}
+/* Общие стили */
+body {
+    font-family: 'Arial', sans-serif;
+}
+
+.card {
+    transition: transform 0.3s ease;
+}
+
+.card:hover {
+    transform: scale(1.05);
+}
+
+.availability {
+    font-weight: bold;
+}
+
+.availability.под\ заказ {
+    color: orange;
+}
+
+.availability.не\ доступно\ к\ заказу {
+    color: red;
+}
+/* Стили для мобильных устройств */
+@media (max-width: 768px) {
+    .navbar-brand {
+        font-size: 1.2rem;
+    }
+
+    .card {
+        margin-bottom: 20px;
+    }
+}

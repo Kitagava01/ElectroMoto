@@ -1,0 +1,71 @@
+<html>
+<head>
+<title>optimizer.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+optimizer.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;The optimizer tries to constant fold expressions and modify the AST 
+in place so that it should be faster to evaluate. 
+ 
+Because the AST does not contain all the scoping information and the 
+compiler has to find that out, we cannot do all the optimizations we 
+want. For example, loop unrolling doesn't work because unrolled loops 
+would have a different scope. The solution would be a second syntax tree 
+that stored the scoping rules. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">typing </span><span class="s2">as </span><span class="s1">t</span>
+
+<span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">nodes</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">visitor </span><span class="s2">import </span><span class="s1">NodeTransformer</span>
+
+<span class="s2">if </span><span class="s1">t</span><span class="s3">.</span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">environment </span><span class="s2">import </span><span class="s1">Environment</span>
+
+
+<span class="s2">def </span><span class="s1">optimize</span><span class="s3">(</span><span class="s1">node</span><span class="s3">: </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Node</span><span class="s3">, </span><span class="s1">environment</span><span class="s3">: </span><span class="s4">&quot;Environment&quot;</span><span class="s3">) </span><span class="s1">-&gt; nodes</span><span class="s3">.</span><span class="s1">Node</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;The context hint can be used to perform an static optimization 
+    based on the context given.&quot;&quot;&quot;</span>
+    <span class="s1">optimizer </span><span class="s3">= </span><span class="s1">Optimizer</span><span class="s3">(</span><span class="s1">environment</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">t</span><span class="s3">.</span><span class="s1">cast</span><span class="s3">(</span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Node</span><span class="s3">, </span><span class="s1">optimizer</span><span class="s3">.</span><span class="s1">visit</span><span class="s3">(</span><span class="s1">node</span><span class="s3">))</span>
+
+
+<span class="s2">class </span><span class="s1">Optimizer</span><span class="s3">(</span><span class="s1">NodeTransformer</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">environment</span><span class="s3">: </span><span class="s4">&quot;t.Optional[Environment]&quot;</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">environment </span><span class="s3">= </span><span class="s1">environment</span>
+
+    <span class="s2">def </span><span class="s1">generic_visit</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">node</span><span class="s3">: </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Node</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">: </span><span class="s1">t</span><span class="s3">.</span><span class="s1">Any</span>
+    <span class="s3">) </span><span class="s1">-&gt; nodes</span><span class="s3">.</span><span class="s1">Node</span><span class="s3">:</span>
+        <span class="s1">node </span><span class="s3">= </span><span class="s1">super</span><span class="s3">().</span><span class="s1">generic_visit</span><span class="s3">(</span><span class="s1">node</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+
+        <span class="s5"># Do constant folding. Some other nodes besides Expr have</span>
+        <span class="s5"># as_const, but folding them causes errors later on.</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">node</span><span class="s3">, </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Expr</span><span class="s3">):</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Const</span><span class="s3">.</span><span class="s1">from_untrusted</span><span class="s3">(</span>
+                    <span class="s1">node</span><span class="s3">.</span><span class="s1">as_const</span><span class="s3">(</span><span class="s1">args</span><span class="s3">[</span><span class="s6">0</span><span class="s3">] </span><span class="s2">if </span><span class="s1">args </span><span class="s2">else None</span><span class="s3">),</span>
+                    <span class="s1">lineno</span><span class="s3">=</span><span class="s1">node</span><span class="s3">.</span><span class="s1">lineno</span><span class="s3">,</span>
+                    <span class="s1">environment</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">environment</span><span class="s3">,</span>
+                <span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">nodes</span><span class="s3">.</span><span class="s1">Impossible</span><span class="s3">:</span>
+                <span class="s2">pass</span>
+
+        <span class="s2">return </span><span class="s1">node</span>
+</pre>
+</body>
+</html>

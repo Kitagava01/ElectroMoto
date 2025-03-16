@@ -1,0 +1,193 @@
+<html>
+<head>
+<title>greenlet_exceptions.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #6aab73;}
+.s3 { color: #c77dbb;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+greenlet_exceptions.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_EXCEPTIONS_HPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_EXCEPTIONS_HPP</span>
+
+<span class="s0">#define </span><span class="s1">PY_SSIZE_T_CLEAN</span>
+<span class="s0">#include </span><span class="s1">&lt;Python.h&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;stdexcept&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;string&gt;</span>
+
+<span class="s0">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic push</span>
+<span class="s1">#    pragma clang diagnostic ignored </span><span class="s2">&quot;-Wunused-function&quot;</span>
+<span class="s0">#endif</span>
+
+<span class="s3">namespace </span><span class="s1">greenlet {</span>
+
+    <span class="s3">class </span><span class="s1">PyErrOccurred : </span><span class="s3">public </span><span class="s1">std::runtime_error</span>
+    <span class="s1">{</span>
+    <span class="s3">public</span><span class="s1">:</span>
+
+        <span class="s4">// CAUTION: In debug builds, may run arbitrary Python code.</span>
+        <span class="s0">static const </span><span class="s1">PyErrOccurred</span>
+        <span class="s1">from_current()</span>
+        <span class="s1">{</span>
+            <span class="s1">assert(PyErr_Occurred());</span>
+<span class="s0">#ifndef </span><span class="s1">NDEBUG</span>
+            <span class="s4">// This is not exception safe, and</span>
+            <span class="s4">// not necessarily safe in general (what if it switches?)</span>
+            <span class="s4">// But we only do this in debug mode, where we are in</span>
+            <span class="s4">// tight control of what exceptions are getting raised and</span>
+            <span class="s4">// can prevent those issues.</span>
+
+            <span class="s4">// You can't call PyObject_Str with a pending exception.</span>
+            <span class="s1">PyObject* typ;</span>
+            <span class="s1">PyObject* val;</span>
+            <span class="s1">PyObject* tb;</span>
+
+            <span class="s1">PyErr_Fetch(&amp;typ, &amp;val, &amp;tb);</span>
+            <span class="s1">PyObject* typs = PyObject_Str(typ);</span>
+            <span class="s1">PyObject* vals = PyObject_Str(val ? val : typ);</span>
+            <span class="s0">const char</span><span class="s1">* typ_msg = PyUnicode_AsUTF8(typs);</span>
+            <span class="s0">const char</span><span class="s1">* val_msg = PyUnicode_AsUTF8(vals);</span>
+            <span class="s1">PyErr_Restore(typ, val, tb);</span>
+
+            <span class="s1">std::string msg(typ_msg);</span>
+            <span class="s1">msg += </span><span class="s2">&quot;: &quot;</span><span class="s1">;</span>
+            <span class="s1">msg += val_msg;</span>
+            <span class="s1">PyErrOccurred ex(msg);</span>
+            <span class="s1">Py_XDECREF(typs);</span>
+            <span class="s1">Py_XDECREF(vals);</span>
+
+            <span class="s0">return </span><span class="s1">ex;</span>
+<span class="s0">#else</span>
+            <span class="s0">return </span><span class="s1">PyErrOccurred();</span>
+<span class="s0">#endif</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyErrOccurred() : std::runtime_error(</span><span class="s2">&quot;&quot;</span><span class="s1">)</span>
+        <span class="s1">{</span>
+            <span class="s1">assert(PyErr_Occurred());</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyErrOccurred(</span><span class="s0">const </span><span class="s1">std::string&amp; msg) : std::runtime_error(msg)</span>
+        <span class="s1">{</span>
+            <span class="s1">assert(PyErr_Occurred());</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyErrOccurred(PyObject* exc_kind, </span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">msg)</span>
+            <span class="s1">: std::runtime_error(msg)</span>
+        <span class="s1">{</span>
+            <span class="s1">PyErr_SetString(exc_kind, msg);</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyErrOccurred(PyObject* exc_kind, </span><span class="s0">const </span><span class="s1">std::string msg)</span>
+            <span class="s1">: std::runtime_error(msg)</span>
+        <span class="s1">{</span>
+            <span class="s4">// This copies the c_str, so we don't have any lifetime</span>
+            <span class="s4">// issues to worry about.</span>
+            <span class="s1">PyErr_SetString(exc_kind, msg.c_str());</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyErrOccurred(PyObject* exc_kind,</span>
+                      <span class="s0">const </span><span class="s1">std::string msg, </span><span class="s4">//This is the format</span>
+                                             <span class="s4">//string; that's not</span>
+                                             <span class="s4">//usually safe!</span>
+
+                      <span class="s1">PyObject* borrowed_obj_one, PyObject* borrowed_obj_two)</span>
+            <span class="s1">: std::runtime_error(msg)</span>
+        <span class="s1">{</span>
+
+            <span class="s4">//This is designed specifically for the</span>
+            <span class="s4">//``check_switch_allowed`` function.</span>
+
+            <span class="s4">// PyObject_Str and PyObject_Repr are safe to call with</span>
+            <span class="s4">// NULL pointers; they return the string &quot;&lt;NULL&gt;&quot; in that</span>
+            <span class="s4">// case.</span>
+            <span class="s4">// This function always returns null.</span>
+            <span class="s1">PyErr_Format(exc_kind,</span>
+                         <span class="s1">msg.c_str(),</span>
+                         <span class="s1">borrowed_obj_one, borrowed_obj_two);</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s3">class </span><span class="s1">TypeError : </span><span class="s3">public </span><span class="s1">PyErrOccurred</span>
+    <span class="s1">{</span>
+    <span class="s3">public</span><span class="s1">:</span>
+        <span class="s1">TypeError(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">what)</span>
+            <span class="s1">: PyErrOccurred(PyExc_TypeError, what)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+        <span class="s1">TypeError(</span><span class="s0">const </span><span class="s1">std::string what)</span>
+            <span class="s1">: PyErrOccurred(PyExc_TypeError, what)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s3">class </span><span class="s1">ValueError : </span><span class="s3">public </span><span class="s1">PyErrOccurred</span>
+    <span class="s1">{</span>
+    <span class="s3">public</span><span class="s1">:</span>
+        <span class="s1">ValueError(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">what)</span>
+            <span class="s1">: PyErrOccurred(PyExc_ValueError, what)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s3">class </span><span class="s1">AttributeError : </span><span class="s3">public </span><span class="s1">PyErrOccurred</span>
+    <span class="s1">{</span>
+    <span class="s3">public</span><span class="s1">:</span>
+        <span class="s1">AttributeError(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">what)</span>
+            <span class="s1">: PyErrOccurred(PyExc_AttributeError, what)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s4">/** 
+     * Calls `Py_FatalError` when constructed, so you can't actually 
+     * throw this. It just makes static analysis easier. 
+     */</span>
+    <span class="s3">class </span><span class="s1">PyFatalError : </span><span class="s3">public </span><span class="s1">std::runtime_error</span>
+    <span class="s1">{</span>
+    <span class="s3">public</span><span class="s1">:</span>
+        <span class="s1">PyFatalError(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">msg)</span>
+            <span class="s1">: std::runtime_error(msg)</span>
+        <span class="s1">{</span>
+            <span class="s1">Py_FatalError(msg);</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s0">static </span><span class="s3">inline </span><span class="s1">PyObject*</span>
+    <span class="s1">Require(PyObject* p, </span><span class="s0">const </span><span class="s1">std::string&amp; msg=</span><span class="s2">&quot;&quot;</span><span class="s1">)</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(!p) {</span>
+            <span class="s3">throw </span><span class="s1">PyErrOccurred(msg);</span>
+        <span class="s1">}</span>
+        <span class="s0">return </span><span class="s1">p;</span>
+    <span class="s1">};</span>
+
+    <span class="s0">static </span><span class="s3">inline </span><span class="s0">void</span>
+    <span class="s1">Require(</span><span class="s0">const int </span><span class="s1">retval)</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(retval &lt; </span><span class="s5">0</span><span class="s1">) {</span>
+            <span class="s3">throw </span><span class="s1">PyErrOccurred();</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+
+<span class="s1">};</span>
+<span class="s0">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic pop</span>
+<span class="s0">#endif</span>
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

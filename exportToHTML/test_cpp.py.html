@@ -1,0 +1,95 @@
+<html>
+<head>
+<title>test_cpp.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_cpp.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">print_function</span>
+<span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">absolute_import</span>
+
+<span class="s0">import </span><span class="s1">subprocess</span>
+<span class="s0">import </span><span class="s1">unittest</span>
+
+<span class="s0">import </span><span class="s1">greenlet</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">_test_extension_cpp</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">TestCase</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">WIN</span>
+
+<span class="s0">class </span><span class="s1">CPPTests</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">test_exception_switch</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">greenlets </span><span class="s2">= []</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s3">4</span><span class="s2">):</span>
+            <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">_test_extension_cpp</span><span class="s2">.</span><span class="s1">test_exception_switch</span><span class="s2">)</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">i</span><span class="s2">)</span>
+            <span class="s1">greenlets</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">g </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">greenlets</span><span class="s2">):</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(), </span><span class="s1">i</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_do_test_unhandled_exception</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">target</span><span class="s2">):</span>
+        <span class="s0">import </span><span class="s1">os</span>
+        <span class="s0">import </span><span class="s1">sys</span>
+        <span class="s1">script </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">dirname</span><span class="s2">(</span><span class="s1">__file__</span><span class="s2">),</span>
+            <span class="s4">'fail_cpp_exception.py'</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s1">args </span><span class="s2">= [</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">executable</span><span class="s2">, </span><span class="s1">script</span><span class="s2">, </span><span class="s1">target</span><span class="s2">.</span><span class="s1">__name__ </span><span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">target</span><span class="s2">, </span><span class="s1">str</span><span class="s2">) </span><span class="s0">else </span><span class="s1">target</span><span class="s2">]</span>
+        <span class="s1">__traceback_info__ </span><span class="s2">= </span><span class="s1">args</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">CalledProcessError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">subprocess</span><span class="s2">.</span><span class="s1">check_output</span><span class="s2">(</span>
+                <span class="s1">args</span><span class="s2">,</span>
+                <span class="s1">encoding</span><span class="s2">=</span><span class="s4">'utf-8'</span><span class="s2">,</span>
+                <span class="s1">stderr</span><span class="s2">=</span><span class="s1">subprocess</span><span class="s2">.</span><span class="s1">STDOUT</span>
+            <span class="s2">)</span>
+
+        <span class="s1">ex </span><span class="s2">= </span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span>
+        <span class="s1">expected_exit </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">get_expected_returncodes_for_aborted_process</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s1">ex</span><span class="s2">.</span><span class="s1">returncode</span><span class="s2">, </span><span class="s1">expected_exit</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span><span class="s4">'fail_cpp_exception is running'</span><span class="s2">, </span><span class="s1">ex</span><span class="s2">.</span><span class="s1">output</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">ex</span><span class="s2">.</span><span class="s1">output</span>
+
+
+    <span class="s0">def </span><span class="s1">test_unhandled_nonstd_exception_aborts</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># verify that plain unhandled throw aborts</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_do_test_unhandled_exception</span><span class="s2">(</span><span class="s1">_test_extension_cpp</span><span class="s2">.</span><span class="s1">test_exception_throw_nonstd</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_unhandled_std_exception_aborts</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># verify that plain unhandled throw aborts</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_do_test_unhandled_exception</span><span class="s2">(</span><span class="s1">_test_extension_cpp</span><span class="s2">.</span><span class="s1">test_exception_throw_std</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">unittest</span><span class="s2">.</span><span class="s1">skipIf</span><span class="s2">(</span><span class="s1">WIN</span><span class="s2">, </span><span class="s4">&quot;XXX: This does not crash on Windows&quot;</span><span class="s2">)</span>
+    <span class="s5"># Meaning the exception is getting lost somewhere...</span>
+    <span class="s0">def </span><span class="s1">test_unhandled_std_exception_as_greenlet_function_aborts</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># verify that plain unhandled throw aborts</span>
+        <span class="s1">output </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_do_test_unhandled_exception</span><span class="s2">(</span><span class="s4">'run_as_greenlet_target'</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIn</span><span class="s2">(</span>
+            <span class="s5"># We really expect this to be prefixed with &quot;greenlet: Unhandled C++ exception:&quot;</span>
+            <span class="s5"># as added by our handler for std::exception (see TUserGreenlet.cpp), but</span>
+            <span class="s5"># that's not correct everywhere --- our handler never runs before std::terminate</span>
+            <span class="s5"># gets called (for example, on arm32).</span>
+            <span class="s4">'Thrown from an extension.'</span><span class="s2">,</span>
+            <span class="s1">output</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_unhandled_exception_in_greenlet_aborts</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5"># verify that unhandled throw called in greenlet aborts too</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_do_test_unhandled_exception</span><span class="s2">(</span><span class="s4">'run_unhandled_exception_in_greenlet_aborts'</span><span class="s2">)</span>
+
+
+<span class="s0">if </span><span class="s1">__name__ </span><span class="s2">== </span><span class="s4">'__main__'</span><span class="s2">:</span>
+    <span class="s1">unittest</span><span class="s2">.</span><span class="s1">main</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

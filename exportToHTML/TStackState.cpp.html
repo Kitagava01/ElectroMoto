@@ -1,0 +1,288 @@
+<html>
+<head>
+<title>TStackState.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #6aab73;}
+.s3 { color: #c77dbb;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+.s6 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TStackState.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_STACK_STATE_CPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_STACK_STATE_CPP</span>
+
+<span class="s0">#include </span><span class="s2">&quot;TGreenlet.hpp&quot;</span>
+
+<span class="s3">namespace </span><span class="s1">greenlet {</span>
+
+<span class="s0">#ifdef </span><span class="s1">GREENLET_USE_STDIO</span>
+<span class="s0">#include </span><span class="s1">&lt;iostream&gt;</span>
+<span class="s3">using </span><span class="s1">std::cerr;</span>
+<span class="s3">using </span><span class="s1">std::endl;</span>
+
+<span class="s1">std::ostream&amp; </span><span class="s3">operator</span><span class="s1">&lt;&lt;(std::ostream&amp; os, </span><span class="s0">const </span><span class="s1">StackState&amp; s)</span>
+<span class="s1">{</span>
+    <span class="s1">os &lt;&lt; </span><span class="s2">&quot;StackState(stack_start=&quot; </span><span class="s1">&lt;&lt; (</span><span class="s0">void</span><span class="s1">*)s._stack_start</span>
+       <span class="s1">&lt;&lt; </span><span class="s2">&quot;, stack_stop=&quot; </span><span class="s1">&lt;&lt; (</span><span class="s0">void</span><span class="s1">*)s.stack_stop</span>
+       <span class="s1">&lt;&lt; </span><span class="s2">&quot;, stack_copy=&quot; </span><span class="s1">&lt;&lt; (</span><span class="s0">void</span><span class="s1">*)s.stack_copy</span>
+       <span class="s1">&lt;&lt; </span><span class="s2">&quot;, stack_saved=&quot; </span><span class="s1">&lt;&lt; s._stack_saved</span>
+       <span class="s1">&lt;&lt; </span><span class="s2">&quot;, stack_prev=&quot; </span><span class="s1">&lt;&lt; s.stack_prev</span>
+       <span class="s1">&lt;&lt; </span><span class="s2">&quot;, addr=&quot; </span><span class="s1">&lt;&lt; &amp;s</span>
+       <span class="s1">&lt;&lt; </span><span class="s2">&quot;)&quot;</span><span class="s1">;</span>
+    <span class="s0">return </span><span class="s1">os;</span>
+<span class="s1">}</span>
+<span class="s0">#endif</span>
+
+<span class="s1">StackState::StackState(</span><span class="s0">void</span><span class="s1">* mark, StackState&amp; current)</span>
+    <span class="s1">: _stack_start(nullptr),</span>
+      <span class="s1">stack_stop((</span><span class="s0">char</span><span class="s1">*)mark),</span>
+      <span class="s1">stack_copy(nullptr),</span>
+      <span class="s1">_stack_saved(</span><span class="s4">0</span><span class="s1">),</span>
+      <span class="s5">/* Skip a dying greenlet */</span>
+      <span class="s1">stack_prev(current._stack_start</span>
+                 <span class="s1">? &amp;current</span>
+                 <span class="s1">: current.stack_prev)</span>
+<span class="s1">{</span>
+<span class="s1">}</span>
+
+<span class="s1">StackState::StackState()</span>
+    <span class="s1">: _stack_start(nullptr),</span>
+      <span class="s1">stack_stop(nullptr),</span>
+      <span class="s1">stack_copy(nullptr),</span>
+      <span class="s1">_stack_saved(</span><span class="s4">0</span><span class="s1">),</span>
+      <span class="s1">stack_prev(nullptr)</span>
+<span class="s1">{</span>
+<span class="s1">}</span>
+
+<span class="s1">StackState::StackState(</span><span class="s0">const </span><span class="s1">StackState&amp; other)</span>
+<span class="s5">// can't use a delegating constructor because of</span>
+<span class="s5">// MSVC for Python 2.7</span>
+    <span class="s1">: _stack_start(nullptr),</span>
+      <span class="s1">stack_stop(nullptr),</span>
+      <span class="s1">stack_copy(nullptr),</span>
+      <span class="s1">_stack_saved(</span><span class="s4">0</span><span class="s1">),</span>
+      <span class="s1">stack_prev(nullptr)</span>
+<span class="s1">{</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s3">operator</span><span class="s1">=(other);</span>
+<span class="s1">}</span>
+
+<span class="s1">StackState&amp; StackState::</span><span class="s3">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">StackState&amp; other)</span>
+<span class="s1">{</span>
+    <span class="s0">if </span><span class="s1">(&amp;other == </span><span class="s3">this</span><span class="s1">) {</span>
+        <span class="s0">return </span><span class="s1">*</span><span class="s3">this</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s0">if </span><span class="s1">(other._stack_saved) {</span>
+        <span class="s3">throw </span><span class="s1">std::runtime_error(</span><span class="s2">&quot;Refusing to steal memory.&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s5">//If we have memory allocated, dispose of it</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">free_stack_copy();</span>
+
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start = other._stack_start;</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_stop = other.stack_stop;</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_copy = other.stack_copy;</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved = other._stack_saved;</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_prev = other.stack_prev;</span>
+    <span class="s0">return </span><span class="s1">*</span><span class="s3">this</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">void </span><span class="s1">StackState::free_stack_copy() noexcept</span>
+<span class="s1">{</span>
+    <span class="s1">PyMem_Free(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_copy);</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_copy = nullptr;</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved = </span><span class="s4">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">void </span><span class="s1">StackState::copy_heap_to_stack(</span><span class="s0">const </span><span class="s1">StackState&amp; current) noexcept</span>
+<span class="s1">{</span>
+
+    <span class="s5">/* Restore the heap copy back into the C stack */</span>
+    <span class="s0">if </span><span class="s1">(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved != </span><span class="s4">0</span><span class="s1">) {</span>
+        <span class="s1">memcpy(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start, </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_copy, </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved);</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">free_stack_copy();</span>
+    <span class="s1">}</span>
+    <span class="s1">StackState* owner = </span><span class="s3">const_cast</span><span class="s1">&lt;StackState*&gt;(&amp;current);</span>
+    <span class="s0">if </span><span class="s1">(!owner</span><span class="s6">-&gt;</span><span class="s1">_stack_start) {</span>
+        <span class="s1">owner = owner</span><span class="s6">-&gt;</span><span class="s1">stack_prev; </span><span class="s5">/* greenlet is dying, skip it */</span>
+    <span class="s1">}</span>
+    <span class="s0">while </span><span class="s1">(owner &amp;&amp; owner</span><span class="s6">-&gt;</span><span class="s1">stack_stop &lt;= </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_stop) {</span>
+        <span class="s5">// cerr &lt;&lt; &quot;\tOwner: &quot; &lt;&lt; owner &lt;&lt; endl;</span>
+        <span class="s1">owner = owner</span><span class="s6">-&gt;</span><span class="s1">stack_prev; </span><span class="s5">/* find greenlet with more stack */</span>
+    <span class="s1">}</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_prev = owner;</span>
+    <span class="s5">// cerr &lt;&lt; &quot;\tFinished with: &quot; &lt;&lt; *this &lt;&lt; endl;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">int </span><span class="s1">StackState::copy_stack_to_heap_up_to(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">stop) noexcept</span>
+<span class="s1">{</span>
+    <span class="s5">/* Save more of g's stack into the heap -- at least up to 'stop' 
+       g-&gt;stack_stop |________| 
+                     |        | 
+                     |    __ stop       . . . . . 
+                     |        |    ==&gt;  .       . 
+                     |________|          _______ 
+                     |        |         |       | 
+                     |        |         |       | 
+      g-&gt;stack_start |        |         |_______| g-&gt;stack_copy 
+     */</span>
+    <span class="s1">intptr_t sz1 = </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved;</span>
+    <span class="s1">intptr_t sz2 = stop - </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start;</span>
+    <span class="s1">assert(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start);</span>
+    <span class="s0">if </span><span class="s1">(sz2 &gt; sz1) {</span>
+        <span class="s0">char</span><span class="s1">* c = (</span><span class="s0">char</span><span class="s1">*)PyMem_Realloc(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_copy, sz2);</span>
+        <span class="s0">if </span><span class="s1">(!c) {</span>
+            <span class="s1">PyErr_NoMemory();</span>
+            <span class="s0">return </span><span class="s1">-</span><span class="s4">1</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s1">memcpy(c + sz1, </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start + sz1, sz2 - sz1);</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_copy = c;</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved = sz2;</span>
+    <span class="s1">}</span>
+    <span class="s0">return </span><span class="s4">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">int </span><span class="s1">StackState::copy_stack_to_heap(</span><span class="s0">char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">stackref,</span>
+                                          <span class="s0">const </span><span class="s1">StackState&amp; current) noexcept</span>
+<span class="s1">{</span>
+    <span class="s5">/* must free all the C stack up to target_stop */</span>
+    <span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">target_stop = </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_stop;</span>
+
+    <span class="s1">StackState* owner = </span><span class="s3">const_cast</span><span class="s1">&lt;StackState*&gt;(&amp;current);</span>
+    <span class="s1">assert(owner</span><span class="s6">-&gt;</span><span class="s1">_stack_saved == </span><span class="s4">0</span><span class="s1">); </span><span class="s5">// everything is present on the stack</span>
+    <span class="s0">if </span><span class="s1">(!owner</span><span class="s6">-&gt;</span><span class="s1">_stack_start) {</span>
+        <span class="s1">owner = owner</span><span class="s6">-&gt;</span><span class="s1">stack_prev; </span><span class="s5">/* not saved if dying */</span>
+    <span class="s1">}</span>
+    <span class="s0">else </span><span class="s1">{</span>
+        <span class="s1">owner</span><span class="s6">-&gt;</span><span class="s1">_stack_start = stackref;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">while </span><span class="s1">(owner</span><span class="s6">-&gt;</span><span class="s1">stack_stop &lt; target_stop) {</span>
+        <span class="s5">/* ts_current is entierely within the area to free */</span>
+        <span class="s0">if </span><span class="s1">(owner</span><span class="s6">-&gt;</span><span class="s1">copy_stack_to_heap_up_to(owner</span><span class="s6">-&gt;</span><span class="s1">stack_stop)) {</span>
+            <span class="s0">return </span><span class="s1">-</span><span class="s4">1</span><span class="s1">; </span><span class="s5">/* XXX */</span>
+        <span class="s1">}</span>
+        <span class="s1">owner = owner</span><span class="s6">-&gt;</span><span class="s1">stack_prev;</span>
+    <span class="s1">}</span>
+    <span class="s0">if </span><span class="s1">(owner != </span><span class="s3">this</span><span class="s1">) {</span>
+        <span class="s0">if </span><span class="s1">(owner</span><span class="s6">-&gt;</span><span class="s1">copy_stack_to_heap_up_to(target_stop)) {</span>
+            <span class="s0">return </span><span class="s1">-</span><span class="s4">1</span><span class="s1">; </span><span class="s5">/* XXX */</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+    <span class="s0">return </span><span class="s4">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">bool </span><span class="s1">StackState::started() </span><span class="s0">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_stop != nullptr;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">bool </span><span class="s1">StackState::main() </span><span class="s0">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_stop == (</span><span class="s0">char</span><span class="s1">*)-</span><span class="s4">1</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">bool </span><span class="s1">StackState::active() </span><span class="s0">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start != nullptr;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">void </span><span class="s1">StackState::set_active() noexcept</span>
+<span class="s1">{</span>
+    <span class="s1">assert(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start == nullptr);</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start = (</span><span class="s0">char</span><span class="s1">*)</span><span class="s4">1</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">void </span><span class="s1">StackState::set_inactive() noexcept</span>
+<span class="s1">{</span>
+    <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start = nullptr;</span>
+    <span class="s5">// XXX: What if we still have memory out there?</span>
+    <span class="s5">// That case is actually triggered by</span>
+    <span class="s5">// test_issue251_issue252_explicit_reference_not_collectable (greenlet.tests.test_leaks.TestLeaks)</span>
+    <span class="s5">// and</span>
+    <span class="s5">// test_issue251_issue252_need_to_collect_in_background</span>
+    <span class="s5">// (greenlet.tests.test_leaks.TestLeaks)</span>
+    <span class="s5">//</span>
+    <span class="s5">// Those objects never get deallocated, so the destructor never</span>
+    <span class="s5">// runs.</span>
+    <span class="s5">// It *seems* safe to clean up the memory here?</span>
+    <span class="s0">if </span><span class="s1">(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved) {</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">free_stack_copy();</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s1">intptr_t StackState::stack_saved() </span><span class="s0">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved;</span>
+<span class="s1">}</span>
+
+<span class="s3">inline </span><span class="s0">char</span><span class="s1">* StackState::stack_start() </span><span class="s0">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start;</span>
+<span class="s1">}</span>
+
+
+<span class="s3">inline </span><span class="s1">StackState StackState::make_main() noexcept</span>
+<span class="s1">{</span>
+    <span class="s1">StackState s;</span>
+    <span class="s1">s._stack_start = (</span><span class="s0">char</span><span class="s1">*)</span><span class="s4">1</span><span class="s1">;</span>
+    <span class="s1">s.stack_stop = (</span><span class="s0">char</span><span class="s1">*)-</span><span class="s4">1</span><span class="s1">;</span>
+    <span class="s0">return </span><span class="s1">s;</span>
+<span class="s1">}</span>
+
+<span class="s1">StackState::~StackState()</span>
+<span class="s1">{</span>
+    <span class="s0">if </span><span class="s1">(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved != </span><span class="s4">0</span><span class="s1">) {</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">free_stack_copy();</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s0">void </span><span class="s1">StackState::copy_from_stack(</span><span class="s0">void</span><span class="s1">* vdest, </span><span class="s0">const void</span><span class="s1">* vsrc, size_t n) </span><span class="s0">const</span>
+<span class="s1">{</span>
+    <span class="s0">char</span><span class="s1">* dest = </span><span class="s3">static_cast</span><span class="s1">&lt;</span><span class="s0">char</span><span class="s1">*&gt;(vdest);</span>
+    <span class="s0">const char</span><span class="s1">* src = </span><span class="s3">static_cast</span><span class="s1">&lt;</span><span class="s0">const char</span><span class="s1">*&gt;(vsrc);</span>
+    <span class="s0">if </span><span class="s1">(src + n &lt;= </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start</span>
+        <span class="s1">|| src &gt;= </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start + </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved</span>
+        <span class="s1">|| </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved == </span><span class="s4">0</span><span class="s1">) {</span>
+        <span class="s5">// Nothing we're copying was spilled from the stack</span>
+        <span class="s1">memcpy(dest, src, n);</span>
+        <span class="s0">return</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">if </span><span class="s1">(src &lt; </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start) {</span>
+        <span class="s5">// Copy the part before the saved stack.</span>
+        <span class="s5">// We know src + n &gt; _stack_start due to the test above.</span>
+        <span class="s0">const </span><span class="s1">size_t nbefore = </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start - src;</span>
+        <span class="s1">memcpy(dest, src, nbefore);</span>
+        <span class="s1">dest += nbefore;</span>
+        <span class="s1">src += nbefore;</span>
+        <span class="s1">n -= nbefore;</span>
+    <span class="s1">}</span>
+    <span class="s5">// We know src &gt;= _stack_start after the before-copy, and</span>
+    <span class="s5">// src &lt; _stack_start + _stack_saved due to the first if condition</span>
+    <span class="s1">size_t nspilled = std::min&lt;size_t&gt;(n, </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start + </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_saved - src);</span>
+    <span class="s1">memcpy(dest, </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">stack_copy + (src - </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">_stack_start), nspilled);</span>
+    <span class="s1">dest += nspilled;</span>
+    <span class="s1">src += nspilled;</span>
+    <span class="s1">n -= nspilled;</span>
+    <span class="s0">if </span><span class="s1">(n &gt; </span><span class="s4">0</span><span class="s1">) {</span>
+        <span class="s5">// Copy the part after the saved stack</span>
+        <span class="s1">memcpy(dest, src, n);</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s1">}; </span><span class="s5">// namespace greenlet</span>
+
+<span class="s0">#endif </span><span class="s5">// GREENLET_STACK_STATE_CPP</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,341 @@
+<html>
+<head>
+<title>idtracking.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+idtracking.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">nodes</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">visitor </span><span class="s0">import </span><span class="s1">NodeVisitor</span>
+
+<span class="s1">VAR_LOAD_PARAMETER </span><span class="s2">= </span><span class="s3">&quot;param&quot;</span>
+<span class="s1">VAR_LOAD_RESOLVE </span><span class="s2">= </span><span class="s3">&quot;resolve&quot;</span>
+<span class="s1">VAR_LOAD_ALIAS </span><span class="s2">= </span><span class="s3">&quot;alias&quot;</span>
+<span class="s1">VAR_LOAD_UNDEFINED </span><span class="s2">= </span><span class="s3">&quot;undefined&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">find_symbols</span><span class="s2">(</span>
+    <span class="s1">nodes</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Iterable</span><span class="s2">[</span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Node</span><span class="s2">], </span><span class="s1">parent_symbols</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s3">&quot;Symbols&quot;</span><span class="s2">] = </span><span class="s0">None</span>
+<span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;Symbols&quot;</span><span class="s2">:</span>
+    <span class="s1">sym </span><span class="s2">= </span><span class="s1">Symbols</span><span class="s2">(</span><span class="s1">parent</span><span class="s2">=</span><span class="s1">parent_symbols</span><span class="s2">)</span>
+    <span class="s1">visitor </span><span class="s2">= </span><span class="s1">FrameSymbolVisitor</span><span class="s2">(</span><span class="s1">sym</span><span class="s2">)</span>
+    <span class="s0">for </span><span class="s1">node </span><span class="s0">in </span><span class="s1">nodes</span><span class="s2">:</span>
+        <span class="s1">visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">sym</span>
+
+
+<span class="s0">def </span><span class="s1">symbols_for_node</span><span class="s2">(</span>
+    <span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Node</span><span class="s2">, </span><span class="s1">parent_symbols</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s3">&quot;Symbols&quot;</span><span class="s2">] = </span><span class="s0">None</span>
+<span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;Symbols&quot;</span><span class="s2">:</span>
+    <span class="s1">sym </span><span class="s2">= </span><span class="s1">Symbols</span><span class="s2">(</span><span class="s1">parent</span><span class="s2">=</span><span class="s1">parent_symbols</span><span class="s2">)</span>
+    <span class="s1">sym</span><span class="s2">.</span><span class="s1">analyze_node</span><span class="s2">(</span><span class="s1">node</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">sym</span>
+
+
+<span class="s0">class </span><span class="s1">Symbols</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">parent</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s3">&quot;Symbols&quot;</span><span class="s2">] = </span><span class="s0">None</span><span class="s2">, </span><span class="s1">level</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">int</span><span class="s2">] = </span><span class="s0">None</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">level </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">parent </span><span class="s0">is None</span><span class="s2">:</span>
+                <span class="s1">level </span><span class="s2">= </span><span class="s4">0</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">level </span><span class="s2">= </span><span class="s1">parent</span><span class="s2">.</span><span class="s1">level </span><span class="s2">+ </span><span class="s4">1</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">level</span><span class="s2">: </span><span class="s1">int </span><span class="s2">= </span><span class="s1">level</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">parent </span><span class="s2">= </span><span class="s1">parent</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">] = {}</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">] = {}</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">stores</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Set</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s1">set</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">analyze_node</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Node</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">visitor </span><span class="s2">= </span><span class="s1">RootVisitor</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+        <span class="s1">visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_define_ref</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">load</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]]] = </span><span class="s0">None</span>
+    <span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s1">ident </span><span class="s2">= </span><span class="s3">f&quot;l_</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">level</span><span class="s0">}</span><span class="s3">_</span><span class="s0">{</span><span class="s1">name</span><span class="s0">}</span><span class="s3">&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">[</span><span class="s1">name</span><span class="s2">] = </span><span class="s1">ident</span>
+        <span class="s0">if </span><span class="s1">load </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">[</span><span class="s1">ident</span><span class="s2">] = </span><span class="s1">load</span>
+        <span class="s0">return </span><span class="s1">ident</span>
+
+    <span class="s0">def </span><span class="s1">find_load</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">target</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]:</span>
+        <span class="s0">if </span><span class="s1">target </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">[</span><span class="s1">target</span><span class="s2">]</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parent </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">find_load</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">find_ref</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s0">if </span><span class="s1">name </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">[</span><span class="s1">name</span><span class="s2">]</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parent </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">find_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)</span>
+
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">ref</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s1">rv </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">find_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">rv </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span>
+                <span class="s3">&quot;Tried to resolve a name to a reference that was&quot;</span>
+                <span class="s3">f&quot; unknown to the frame (</span><span class="s0">{</span><span class="s1">name</span><span class="s0">!r}</span><span class="s3">)&quot;</span>
+            <span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s0">def </span><span class="s1">copy</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;Symbols&quot;</span><span class="s2">:</span>
+        <span class="s1">rv </span><span class="s2">= </span><span class="s1">object</span><span class="s2">.</span><span class="s1">__new__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">__class__</span><span class="s2">)</span>
+        <span class="s1">rv</span><span class="s2">.</span><span class="s1">__dict__</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">__dict__</span><span class="s2">)</span>
+        <span class="s1">rv</span><span class="s2">.</span><span class="s1">refs </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+        <span class="s1">rv</span><span class="s2">.</span><span class="s1">loads </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+        <span class="s1">rv</span><span class="s2">.</span><span class="s1">stores </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">stores</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s0">def </span><span class="s1">store</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">stores</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)</span>
+
+        <span class="s5"># If we have not see the name referenced yet, we need to figure</span>
+        <span class="s5"># out what to set it to.</span>
+        <span class="s0">if </span><span class="s1">name </span><span class="s0">not in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">:</span>
+            <span class="s5"># If there is a parent scope we check if the name has a</span>
+            <span class="s5"># reference there.  If it does it means we might have to alias</span>
+            <span class="s5"># to a variable there.</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parent </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s1">outer_ref </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">find_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">outer_ref </span><span class="s0">is not None</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">_define_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">, </span><span class="s1">load</span><span class="s2">=(</span><span class="s1">VAR_LOAD_ALIAS</span><span class="s2">, </span><span class="s1">outer_ref</span><span class="s2">))</span>
+                    <span class="s0">return</span>
+
+            <span class="s5"># Otherwise we can just set it to undefined.</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_define_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">, </span><span class="s1">load</span><span class="s2">=(</span><span class="s1">VAR_LOAD_UNDEFINED</span><span class="s2">, </span><span class="s0">None</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">declare_parameter</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">stores</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_define_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">, </span><span class="s1">load</span><span class="s2">=(</span><span class="s1">VAR_LOAD_PARAMETER</span><span class="s2">, </span><span class="s0">None</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">load</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">find_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">) </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_define_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">, </span><span class="s1">load</span><span class="s2">=(</span><span class="s1">VAR_LOAD_RESOLVE</span><span class="s2">, </span><span class="s1">name</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">branch_update</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">branch_symbols</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Sequence</span><span class="s2">[</span><span class="s3">&quot;Symbols&quot;</span><span class="s2">]) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">stores</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">int</span><span class="s2">] = {}</span>
+        <span class="s0">for </span><span class="s1">branch </span><span class="s0">in </span><span class="s1">branch_symbols</span><span class="s2">:</span>
+            <span class="s0">for </span><span class="s1">target </span><span class="s0">in </span><span class="s1">branch</span><span class="s2">.</span><span class="s1">stores</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">target </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">stores</span><span class="s2">:</span>
+                    <span class="s0">continue</span>
+                <span class="s1">stores</span><span class="s2">[</span><span class="s1">target</span><span class="s2">] = </span><span class="s1">stores</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">target</span><span class="s2">, </span><span class="s4">0</span><span class="s2">) + </span><span class="s4">1</span>
+
+        <span class="s0">for </span><span class="s1">sym </span><span class="s0">in </span><span class="s1">branch_symbols</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">sym</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">sym</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">stores</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">sym</span><span class="s2">.</span><span class="s1">stores</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">name</span><span class="s2">, </span><span class="s1">branch_count </span><span class="s0">in </span><span class="s1">stores</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+            <span class="s0">if </span><span class="s1">branch_count </span><span class="s2">== </span><span class="s1">len</span><span class="s2">(</span><span class="s1">branch_symbols</span><span class="s2">):</span>
+                <span class="s0">continue</span>
+
+            <span class="s1">target </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">find_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)  </span><span class="s5"># type: ignore</span>
+            <span class="s0">assert </span><span class="s1">target </span><span class="s0">is not None</span><span class="s2">, </span><span class="s3">&quot;should not happen&quot;</span>
+
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parent </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s1">outer_target </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">find_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">outer_target </span><span class="s0">is not None</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">[</span><span class="s1">target</span><span class="s2">] = (</span><span class="s1">VAR_LOAD_ALIAS</span><span class="s2">, </span><span class="s1">outer_target</span><span class="s2">)</span>
+                    <span class="s0">continue</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">[</span><span class="s1">target</span><span class="s2">] = (</span><span class="s1">VAR_LOAD_RESOLVE</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">dump_stores</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s1">rv</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">] = {}</span>
+        <span class="s1">node</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s3">&quot;Symbols&quot;</span><span class="s2">] = </span><span class="s1">self</span>
+
+        <span class="s0">while </span><span class="s1">node </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">for </span><span class="s1">name </span><span class="s0">in </span><span class="s1">sorted</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">stores</span><span class="s2">):</span>
+                <span class="s0">if </span><span class="s1">name </span><span class="s0">not in </span><span class="s1">rv</span><span class="s2">:</span>
+                    <span class="s1">rv</span><span class="s2">[</span><span class="s1">name</span><span class="s2">] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">find_ref</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)  </span><span class="s5"># type: ignore</span>
+
+            <span class="s1">node </span><span class="s2">= </span><span class="s1">node</span><span class="s2">.</span><span class="s1">parent</span>
+
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s0">def </span><span class="s1">dump_param_targets</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Set</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s1">rv </span><span class="s2">= </span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s1">node</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s3">&quot;Symbols&quot;</span><span class="s2">] = </span><span class="s1">self</span>
+
+        <span class="s0">while </span><span class="s1">node </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">for </span><span class="s1">target</span><span class="s2">, (</span><span class="s1">instr</span><span class="s2">, </span><span class="s1">_</span><span class="s2">) </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+                <span class="s0">if </span><span class="s1">instr </span><span class="s2">== </span><span class="s1">VAR_LOAD_PARAMETER</span><span class="s2">:</span>
+                    <span class="s1">rv</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+
+            <span class="s1">node </span><span class="s2">= </span><span class="s1">node</span><span class="s2">.</span><span class="s1">parent</span>
+
+        <span class="s0">return </span><span class="s1">rv</span>
+
+
+<span class="s0">class </span><span class="s1">RootVisitor</span><span class="s2">(</span><span class="s1">NodeVisitor</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">symbols</span><span class="s2">: </span><span class="s3">&quot;Symbols&quot;</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor </span><span class="s2">= </span><span class="s1">FrameSymbolVisitor</span><span class="s2">(</span><span class="s1">symbols</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_simple_visit</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Node</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">child </span><span class="s0">in </span><span class="s1">node</span><span class="s2">.</span><span class="s1">iter_child_nodes</span><span class="s2">():</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">child</span><span class="s2">)</span>
+
+    <span class="s1">visit_Template </span><span class="s2">= </span><span class="s1">_simple_visit</span>
+    <span class="s1">visit_Block </span><span class="s2">= </span><span class="s1">_simple_visit</span>
+    <span class="s1">visit_Macro </span><span class="s2">= </span><span class="s1">_simple_visit</span>
+    <span class="s1">visit_FilterBlock </span><span class="s2">= </span><span class="s1">_simple_visit</span>
+    <span class="s1">visit_Scope </span><span class="s2">= </span><span class="s1">_simple_visit</span>
+    <span class="s1">visit_If </span><span class="s2">= </span><span class="s1">_simple_visit</span>
+    <span class="s1">visit_ScopedEvalContextModifier </span><span class="s2">= </span><span class="s1">_simple_visit</span>
+
+    <span class="s0">def </span><span class="s1">visit_AssignBlock</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">AssignBlock</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">child </span><span class="s0">in </span><span class="s1">node</span><span class="s2">.</span><span class="s1">body</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">child</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_CallBlock</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">CallBlock</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">child </span><span class="s0">in </span><span class="s1">node</span><span class="s2">.</span><span class="s1">iter_child_nodes</span><span class="s2">(</span><span class="s1">exclude</span><span class="s2">=(</span><span class="s3">&quot;call&quot;</span><span class="s2">,)):</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">child</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_OverlayScope</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">OverlayScope</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">child </span><span class="s0">in </span><span class="s1">node</span><span class="s2">.</span><span class="s1">body</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">child</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_For</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">For</span><span class="s2">, </span><span class="s1">for_branch</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= </span><span class="s3">&quot;body&quot;</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">for_branch </span><span class="s2">== </span><span class="s3">&quot;body&quot;</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">target</span><span class="s2">, </span><span class="s1">store_as_param</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+            <span class="s1">branch </span><span class="s2">= </span><span class="s1">node</span><span class="s2">.</span><span class="s1">body</span>
+        <span class="s0">elif </span><span class="s1">for_branch </span><span class="s2">== </span><span class="s3">&quot;else&quot;</span><span class="s2">:</span>
+            <span class="s1">branch </span><span class="s2">= </span><span class="s1">node</span><span class="s2">.</span><span class="s1">else_</span>
+        <span class="s0">elif </span><span class="s1">for_branch </span><span class="s2">== </span><span class="s3">&quot;test&quot;</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">target</span><span class="s2">, </span><span class="s1">store_as_param</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">node</span><span class="s2">.</span><span class="s1">test </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">test</span><span class="s2">)</span>
+            <span class="s0">return</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s3">&quot;Unknown for branch&quot;</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">branch</span><span class="s2">:</span>
+            <span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s1">branch</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">item</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_With</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">With</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">target </span><span class="s0">in </span><span class="s1">node</span><span class="s2">.</span><span class="s1">targets</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">child </span><span class="s0">in </span><span class="s1">node</span><span class="s2">.</span><span class="s1">body</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">sym_visitor</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">child</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">generic_visit</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Node</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span><span class="s2">(</span><span class="s3">f&quot;Cannot find symbols for </span><span class="s0">{</span><span class="s1">type</span><span class="s2">(</span><span class="s1">node</span><span class="s2">).</span><span class="s1">__name__</span><span class="s0">!r}</span><span class="s3">&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">FrameSymbolVisitor</span><span class="s2">(</span><span class="s1">NodeVisitor</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;A visitor for `Frame.inspect`.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">symbols</span><span class="s2">: </span><span class="s3">&quot;Symbols&quot;</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols </span><span class="s2">= </span><span class="s1">symbols</span>
+
+    <span class="s0">def </span><span class="s1">visit_Name</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Name</span><span class="s2">, </span><span class="s1">store_as_param</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;All assignments to names go through this function.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">store_as_param </span><span class="s0">or </span><span class="s1">node</span><span class="s2">.</span><span class="s1">ctx </span><span class="s2">== </span><span class="s3">&quot;param&quot;</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span><span class="s2">.</span><span class="s1">declare_parameter</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">node</span><span class="s2">.</span><span class="s1">ctx </span><span class="s2">== </span><span class="s3">&quot;store&quot;</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span><span class="s2">.</span><span class="s1">store</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+        <span class="s0">elif </span><span class="s1">node</span><span class="s2">.</span><span class="s1">ctx </span><span class="s2">== </span><span class="s3">&quot;load&quot;</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span><span class="s2">.</span><span class="s1">load</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_NSRef</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">NSRef</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span><span class="s2">.</span><span class="s1">load</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_If</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">If</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">test</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s1">original_symbols </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span>
+
+        <span class="s0">def </span><span class="s1">inner_visit</span><span class="s2">(</span><span class="s1">nodes</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Iterable</span><span class="s2">[</span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Node</span><span class="s2">]) </span><span class="s1">-&gt; </span><span class="s3">&quot;Symbols&quot;</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols </span><span class="s2">= </span><span class="s1">rv </span><span class="s2">= </span><span class="s1">original_symbols</span><span class="s2">.</span><span class="s1">copy</span><span class="s2">()</span>
+
+            <span class="s0">for </span><span class="s1">subnode </span><span class="s0">in </span><span class="s1">nodes</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">subnode</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols </span><span class="s2">= </span><span class="s1">original_symbols</span>
+            <span class="s0">return </span><span class="s1">rv</span>
+
+        <span class="s1">body_symbols </span><span class="s2">= </span><span class="s1">inner_visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">body</span><span class="s2">)</span>
+        <span class="s1">elif_symbols </span><span class="s2">= </span><span class="s1">inner_visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">elif_</span><span class="s2">)</span>
+        <span class="s1">else_symbols </span><span class="s2">= </span><span class="s1">inner_visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">else_ </span><span class="s0">or </span><span class="s2">())</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span><span class="s2">.</span><span class="s1">branch_update</span><span class="s2">([</span><span class="s1">body_symbols</span><span class="s2">, </span><span class="s1">elif_symbols</span><span class="s2">, </span><span class="s1">else_symbols</span><span class="s2">])</span>
+
+    <span class="s0">def </span><span class="s1">visit_Macro</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Macro</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span><span class="s2">.</span><span class="s1">store</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_Import</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Import</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">generic_visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span><span class="s2">.</span><span class="s1">store</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">target</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_FromImport</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">FromImport</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">generic_visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">name </span><span class="s0">in </span><span class="s1">node</span><span class="s2">.</span><span class="s1">names</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">name</span><span class="s2">, </span><span class="s1">tuple</span><span class="s2">):</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span><span class="s2">.</span><span class="s1">store</span><span class="s2">(</span><span class="s1">name</span><span class="s2">[</span><span class="s4">1</span><span class="s2">])</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">symbols</span><span class="s2">.</span><span class="s1">store</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_Assign</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Assign</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Visit assignments in the correct order.&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">node</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">target</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_For</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">For</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Visiting stops at for blocks.  However the block sequence 
+        is visited as part of the outer scope. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">iter</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_CallBlock</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">CallBlock</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">call</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_FilterBlock</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">FilterBlock</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">filter</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_With</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">With</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">target </span><span class="s0">in </span><span class="s1">node</span><span class="s2">.</span><span class="s1">values</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_AssignBlock</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">AssignBlock</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Stop visiting at block assigns.&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">visit</span><span class="s2">(</span><span class="s1">node</span><span class="s2">.</span><span class="s1">target</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">visit_Scope</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Scope</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Stop visiting at scopes.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">visit_Block</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">Block</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Stop visiting at blocks.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">visit_OverlayScope</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">node</span><span class="s2">: </span><span class="s1">nodes</span><span class="s2">.</span><span class="s1">OverlayScope</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Do not visit into overlay scopes.&quot;&quot;&quot;</span>
+</pre>
+</body>
+</html>

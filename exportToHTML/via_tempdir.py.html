@@ -1,0 +1,53 @@
+<html>
+<head>
+<title>via_tempdir.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+via_tempdir.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">from </span><span class="s1">tempfile </span><span class="s0">import </span><span class="s1">mkdtemp</span>
+
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">path </span><span class="s0">import </span><span class="s1">safe_delete</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">via_disk_folder </span><span class="s0">import </span><span class="s1">AppDataDiskFolder</span>
+
+
+<span class="s0">class </span><span class="s1">TempAppData</span><span class="s2">(</span><span class="s1">AppDataDiskFolder</span><span class="s2">):</span>
+    <span class="s1">transient </span><span class="s2">= </span><span class="s0">True</span>
+    <span class="s1">can_update </span><span class="s2">= </span><span class="s0">False</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">folder</span><span class="s2">=</span><span class="s1">mkdtemp</span><span class="s2">())</span>
+        <span class="s1">logging</span><span class="s2">.</span><span class="s1">debug</span><span class="s2">(</span><span class="s3">&quot;created temporary app data folder %s&quot;</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">reset</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s4">&quot;&quot;&quot;This is a temporary folder, is already empty to start with.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">close</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">logging</span><span class="s2">.</span><span class="s1">debug</span><span class="s2">(</span><span class="s3">&quot;remove temporary app data folder %s&quot;</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s1">safe_delete</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">lock</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">embed_update_log</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s3">&quot;TempAppData&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

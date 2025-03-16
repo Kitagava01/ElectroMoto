@@ -1,0 +1,1643 @@
+<html>
+<head>
+<title>collections.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+collections.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># orm/collections.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+<span class="s0"># mypy: allow-untyped-defs, allow-untyped-calls</span>
+
+<span class="s2">&quot;&quot;&quot;Support for collections of mapped entities. 
+ 
+The collections package supplies the machinery used to inform the ORM of 
+collection membership changes.  An instrumentation via decoration approach is 
+used, allowing arbitrary types (including built-ins) to be used as entity 
+collections without requiring inheritance from a base class. 
+ 
+Instrumentation decoration relays membership change events to the 
+:class:`.CollectionAttributeImpl` that is currently managing the collection. 
+The decorators observe function call arguments and return values, tracking 
+entities entering or leaving the collection.  Two decorator approaches are 
+provided.  One is a bundle of generic decorators that map function arguments 
+and return values to events:: 
+ 
+  from sqlalchemy.orm.collections import collection 
+  class MyClass: 
+      # ... 
+ 
+      @collection.adds(1) 
+      def store(self, item): 
+          self.data.append(item) 
+ 
+      @collection.removes_return() 
+      def pop(self): 
+          return self.data.pop() 
+ 
+ 
+The second approach is a bundle of targeted decorators that wrap appropriate 
+append and remove notifiers around the mutation methods present in the 
+standard Python ``list``, ``set`` and ``dict`` interfaces.  These could be 
+specified in terms of generic decorator recipes, but are instead hand-tooled 
+for increased efficiency.  The targeted decorators occasionally implement 
+adapter-like behavior, such as mapping bulk-set methods (``extend``, 
+``update``, ``__setslice__``, etc.) into the series of atomic mutation events 
+that the ORM requires. 
+ 
+The targeted decorators are used internally for automatic instrumentation of 
+entity collection classes.  Every collection class goes through a 
+transformation process roughly like so: 
+ 
+1. If the class is a built-in, substitute a trivial sub-class 
+2. Is this class already instrumented? 
+3. Add in generic decorators 
+4. Sniff out the collection interface through duck-typing 
+5. Add targeted decoration to any undecorated interface method 
+ 
+This process modifies the class at runtime, decorating methods and adding some 
+bookkeeping properties.  This isn't possible (or desirable) for built-in 
+classes like ``list``, so trivial sub-classes are substituted to hold 
+decoration:: 
+ 
+  class InstrumentedList(list): 
+      pass 
+ 
+Collection classes can be specified in ``relationship(collection_class=)`` as 
+types or a function that returns an instance.  Collection classes are 
+inspected and instrumented during the mapper compilation phase.  The 
+collection_class callable will be executed once to produce a specimen 
+instance, and the type of that specimen will be instrumented.  Functions that 
+return built-in types like ``lists`` will be adapted to produce instrumented 
+instances. 
+ 
+When extending a known type like ``list``, additional decorations are not 
+generally not needed.  Odds are, the extension method will delegate to a 
+method that's already instrumented.  For example:: 
+ 
+  class QueueIsh(list): 
+     def push(self, item): 
+         self.append(item) 
+     def shift(self): 
+         return self.pop(0) 
+ 
+There's no need to decorate these methods.  ``append`` and ``pop`` are already 
+instrumented as part of the ``list`` interface.  Decorating them would fire 
+duplicate events, which should be avoided. 
+ 
+The targeted decoration tries not to rely on other methods in the underlying 
+collection class, but some are unavoidable.  Many depend on 'read' methods 
+being present to properly instrument a 'write', for example, ``__setitem__`` 
+needs ``__getitem__``.  &quot;Bulk&quot; methods like ``update`` and ``extend`` may also 
+reimplemented in terms of atomic appends and removes, so the ``extend`` 
+decoration will actually perform many ``append`` operations and not call the 
+underlying method at all. 
+ 
+Tight control over bulk operation and the firing of events is also possible by 
+implementing the instrumentation internally in your methods.  The basic 
+instrumentation package works under the general assumption that collection 
+mutation will not raise unusual exceptions.  If you want to closely 
+orchestrate append and remove events with exception management, internal 
+instrumentation may be the answer.  Within your method, 
+``collection_adapter(self)`` will retrieve an object that you can use for 
+explicit control over triggering append and remove events. 
+ 
+The owning object and :class:`.CollectionAttributeImpl` are also reachable 
+through the adapter, allowing for some very sophisticated behavior. 
+ 
+&quot;&quot;&quot;</span>
+<span class="s3">from </span><span class="s1">__future__ </span><span class="s3">import </span><span class="s1">annotations</span>
+
+<span class="s3">import </span><span class="s1">operator</span>
+<span class="s3">import </span><span class="s1">threading</span>
+<span class="s3">import </span><span class="s1">typing</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Any</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Callable</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">cast</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Collection</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Dict</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Iterable</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">List</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">NoReturn</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Optional</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Set</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Tuple</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Type</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">TYPE_CHECKING</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">TypeVar</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Union</span>
+<span class="s3">import </span><span class="s1">weakref</span>
+
+<span class="s3">from </span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s1">NO_KEY</span>
+<span class="s3">from </span><span class="s4">.. </span><span class="s3">import </span><span class="s1">exc </span><span class="s3">as </span><span class="s1">sa_exc</span>
+<span class="s3">from </span><span class="s4">.. </span><span class="s3">import </span><span class="s1">util</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">sql</span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s1">NO_ARG</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">util</span><span class="s4">.</span><span class="s1">compat </span><span class="s3">import </span><span class="s1">inspect_getfullargspec</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">util</span><span class="s4">.</span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Protocol</span>
+
+<span class="s3">if </span><span class="s1">typing</span><span class="s4">.</span><span class="s1">TYPE_CHECKING</span><span class="s4">:</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">attributes </span><span class="s3">import </span><span class="s1">AttributeEventToken</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">attributes </span><span class="s3">import </span><span class="s1">CollectionAttributeImpl</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">attribute_keyed_dict</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">column_keyed_dict</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">keyfunc_mapping</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">KeyFuncDict  </span><span class="s0"># noqa: F401</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">state </span><span class="s3">import </span><span class="s1">InstanceState</span>
+
+
+<span class="s1">__all__ </span><span class="s4">= [</span>
+    <span class="s5">&quot;collection&quot;</span><span class="s4">,</span>
+    <span class="s5">&quot;collection_adapter&quot;</span><span class="s4">,</span>
+    <span class="s5">&quot;keyfunc_mapping&quot;</span><span class="s4">,</span>
+    <span class="s5">&quot;column_keyed_dict&quot;</span><span class="s4">,</span>
+    <span class="s5">&quot;attribute_keyed_dict&quot;</span><span class="s4">,</span>
+    <span class="s5">&quot;KeyFuncDict&quot;</span><span class="s4">,</span>
+    <span class="s0"># old names in &lt; 2.0</span>
+    <span class="s5">&quot;mapped_collection&quot;</span><span class="s4">,</span>
+    <span class="s5">&quot;column_mapped_collection&quot;</span><span class="s4">,</span>
+    <span class="s5">&quot;attribute_mapped_collection&quot;</span><span class="s4">,</span>
+    <span class="s5">&quot;MappedCollection&quot;</span><span class="s4">,</span>
+<span class="s4">]</span>
+
+<span class="s1">__instrumentation_mutex </span><span class="s4">= </span><span class="s1">threading</span><span class="s4">.</span><span class="s1">Lock</span><span class="s4">()</span>
+
+
+<span class="s1">_CollectionFactoryType </span><span class="s4">= </span><span class="s1">Callable</span><span class="s4">[[], </span><span class="s5">&quot;_AdaptedCollectionProtocol&quot;</span><span class="s4">]</span>
+
+<span class="s1">_T </span><span class="s4">= </span><span class="s1">TypeVar</span><span class="s4">(</span><span class="s5">&quot;_T&quot;</span><span class="s4">, </span><span class="s1">bound</span><span class="s4">=</span><span class="s1">Any</span><span class="s4">)</span>
+<span class="s1">_KT </span><span class="s4">= </span><span class="s1">TypeVar</span><span class="s4">(</span><span class="s5">&quot;_KT&quot;</span><span class="s4">, </span><span class="s1">bound</span><span class="s4">=</span><span class="s1">Any</span><span class="s4">)</span>
+<span class="s1">_VT </span><span class="s4">= </span><span class="s1">TypeVar</span><span class="s4">(</span><span class="s5">&quot;_VT&quot;</span><span class="s4">, </span><span class="s1">bound</span><span class="s4">=</span><span class="s1">Any</span><span class="s4">)</span>
+<span class="s1">_COL </span><span class="s4">= </span><span class="s1">TypeVar</span><span class="s4">(</span><span class="s5">&quot;_COL&quot;</span><span class="s4">, </span><span class="s1">bound</span><span class="s4">=</span><span class="s5">&quot;Collection[Any]&quot;</span><span class="s4">)</span>
+<span class="s1">_FN </span><span class="s4">= </span><span class="s1">TypeVar</span><span class="s4">(</span><span class="s5">&quot;_FN&quot;</span><span class="s4">, </span><span class="s1">bound</span><span class="s4">=</span><span class="s5">&quot;Callable[..., Any]&quot;</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">_CollectionConverterProtocol</span><span class="s4">(</span><span class="s1">Protocol</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">__call__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">collection</span><span class="s4">: </span><span class="s1">_COL</span><span class="s4">) </span><span class="s1">-&gt; _COL</span><span class="s4">: ...</span>
+
+
+<span class="s3">class </span><span class="s1">_AdaptedCollectionProtocol</span><span class="s4">(</span><span class="s1">Protocol</span><span class="s4">):</span>
+    <span class="s1">_sa_adapter</span><span class="s4">: </span><span class="s1">CollectionAdapter</span>
+    <span class="s1">_sa_appender</span><span class="s4">: </span><span class="s1">Callable</span><span class="s4">[..., </span><span class="s1">Any</span><span class="s4">]</span>
+    <span class="s1">_sa_remover</span><span class="s4">: </span><span class="s1">Callable</span><span class="s4">[..., </span><span class="s1">Any</span><span class="s4">]</span>
+    <span class="s1">_sa_iterator</span><span class="s4">: </span><span class="s1">Callable</span><span class="s4">[..., </span><span class="s1">Iterable</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]]</span>
+    <span class="s1">_sa_converter</span><span class="s4">: </span><span class="s1">_CollectionConverterProtocol</span>
+
+
+<span class="s3">class </span><span class="s1">collection</span><span class="s4">:</span>
+    <span class="s2">&quot;&quot;&quot;Decorators for entity collection classes. 
+ 
+    The decorators fall into two groups: annotations and interception recipes. 
+ 
+    The annotating decorators (appender, remover, iterator, converter, 
+    internally_instrumented) indicate the method's purpose and take no 
+    arguments.  They are not written with parens:: 
+ 
+        @collection.appender 
+        def append(self, append): ... 
+ 
+    The recipe decorators all require parens, even those that take no 
+    arguments:: 
+ 
+        @collection.adds('entity') 
+        def insert(self, position, entity): ... 
+ 
+        @collection.removes_return() 
+        def popitem(self): ... 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0"># Bundled as a class solely for ease of use: packaging, doc strings,</span>
+    <span class="s0"># importability.</span>
+
+    <span class="s4">@</span><span class="s1">staticmethod</span>
+    <span class="s3">def </span><span class="s1">appender</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Tag the method as the collection appender. 
+ 
+        The appender method is called with one positional argument: the value 
+        to append. The method will be automatically decorated with 'adds(1)' 
+        if not already decorated:: 
+ 
+            @collection.appender 
+            def add(self, append): ... 
+ 
+            # or, equivalently 
+            @collection.appender 
+            @collection.adds(1) 
+            def add(self, append): ... 
+ 
+            # for mapping type, an 'append' may kick out a previous value 
+            # that occupies that slot.  consider d['a'] = 'foo'- any previous 
+            # value in d['a'] is discarded. 
+            @collection.appender 
+            @collection.replaces(1) 
+            def add(self, entity): 
+                key = some_key_func(entity) 
+                previous = None 
+                if key in self: 
+                    previous = self[key] 
+                self[key] = entity 
+                return previous 
+ 
+        If the value to append is not allowed in the collection, you may 
+        raise an exception.  Something to remember is that the appender 
+        will be called for each object mapped by a database query.  If the 
+        database contains rows that violate your collection semantics, you 
+        will need to get creative to fix the problem, as access via the 
+        collection will not work. 
+ 
+        If the appender method is internally instrumented, you must also 
+        receive the keyword argument '_sa_initiator' and ensure its 
+        promulgation to collection events. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrument_role </span><span class="s4">= </span><span class="s5">&quot;appender&quot;</span>
+        <span class="s3">return </span><span class="s1">fn</span>
+
+    <span class="s4">@</span><span class="s1">staticmethod</span>
+    <span class="s3">def </span><span class="s1">remover</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Tag the method as the collection remover. 
+ 
+        The remover method is called with one positional argument: the value 
+        to remove. The method will be automatically decorated with 
+        :meth:`removes_return` if not already decorated:: 
+ 
+            @collection.remover 
+            def zap(self, entity): ... 
+ 
+            # or, equivalently 
+            @collection.remover 
+            @collection.removes_return() 
+            def zap(self, ): ... 
+ 
+        If the value to remove is not present in the collection, you may 
+        raise an exception or return None to ignore the error. 
+ 
+        If the remove method is internally instrumented, you must also 
+        receive the keyword argument '_sa_initiator' and ensure its 
+        promulgation to collection events. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrument_role </span><span class="s4">= </span><span class="s5">&quot;remover&quot;</span>
+        <span class="s3">return </span><span class="s1">fn</span>
+
+    <span class="s4">@</span><span class="s1">staticmethod</span>
+    <span class="s3">def </span><span class="s1">iterator</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Tag the method as the collection remover. 
+ 
+        The iterator method is called with no arguments.  It is expected to 
+        return an iterator over all collection members:: 
+ 
+            @collection.iterator 
+            def __iter__(self): ... 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrument_role </span><span class="s4">= </span><span class="s5">&quot;iterator&quot;</span>
+        <span class="s3">return </span><span class="s1">fn</span>
+
+    <span class="s4">@</span><span class="s1">staticmethod</span>
+    <span class="s3">def </span><span class="s1">internally_instrumented</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Tag the method as instrumented. 
+ 
+        This tag will prevent any decoration from being applied to the 
+        method. Use this if you are orchestrating your own calls to 
+        :func:`.collection_adapter` in one of the basic SQLAlchemy 
+        interface methods, or to prevent an automatic ABC method 
+        decoration from wrapping your implementation:: 
+ 
+            # normally an 'extend' method on a list-like class would be 
+            # automatically intercepted and re-implemented in terms of 
+            # SQLAlchemy events and append().  your implementation will 
+            # never be called, unless: 
+            @collection.internally_instrumented 
+            def extend(self, items): ... 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrumented </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s3">return </span><span class="s1">fn</span>
+
+    <span class="s4">@</span><span class="s1">staticmethod</span>
+    <span class="s4">@</span><span class="s1">util</span><span class="s4">.</span><span class="s1">deprecated</span><span class="s4">(</span>
+        <span class="s5">&quot;1.3&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;The :meth:`.collection.converter` handler is deprecated and will &quot;</span>
+        <span class="s5">&quot;be removed in a future release.  Please refer to the &quot;</span>
+        <span class="s5">&quot;:class:`.AttributeEvents.bulk_replace` listener interface in &quot;</span>
+        <span class="s5">&quot;conjunction with the :func:`.event.listen` function.&quot;</span><span class="s4">,</span>
+    <span class="s4">)</span>
+    <span class="s3">def </span><span class="s1">converter</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Tag the method as the collection converter. 
+ 
+        This optional method will be called when a collection is being 
+        replaced entirely, as in:: 
+ 
+            myobj.acollection = [newvalue1, newvalue2] 
+ 
+        The converter method will receive the object being assigned and should 
+        return an iterable of values suitable for use by the ``appender`` 
+        method.  A converter must not assign values or mutate the collection, 
+        its sole job is to adapt the value the user provides into an iterable 
+        of values for the ORM's use. 
+ 
+        The default converter implementation will use duck-typing to do the 
+        conversion.  A dict-like collection will be convert into an iterable 
+        of dictionary values, and other types will simply be iterated:: 
+ 
+            @collection.converter 
+            def convert(self, other): ... 
+ 
+        If the duck-typing of the object does not match the type of this 
+        collection, a TypeError is raised. 
+ 
+        Supply an implementation of this method if you want to expand the 
+        range of possible types that can be assigned in bulk or perform 
+        validation on the values about to be assigned. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrument_role </span><span class="s4">= </span><span class="s5">&quot;converter&quot;</span>
+        <span class="s3">return </span><span class="s1">fn</span>
+
+    <span class="s4">@</span><span class="s1">staticmethod</span>
+    <span class="s3">def </span><span class="s1">adds</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Mark the method as adding an entity to the collection. 
+ 
+        Adds &quot;add to collection&quot; handling to the method.  The decorator 
+        argument indicates which method argument holds the SQLAlchemy-relevant 
+        value.  Arguments can be specified positionally (i.e. integer) or by 
+        name:: 
+ 
+            @collection.adds(1) 
+            def push(self, item): ... 
+ 
+            @collection.adds('entity') 
+            def do_stuff(self, thing, entity=None): ... 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s3">def </span><span class="s1">decorator</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+            <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrument_before </span><span class="s4">= (</span><span class="s5">&quot;fire_append_event&quot;</span><span class="s4">, </span><span class="s1">arg</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">fn</span>
+
+        <span class="s3">return </span><span class="s1">decorator</span>
+
+    <span class="s4">@</span><span class="s1">staticmethod</span>
+    <span class="s3">def </span><span class="s1">replaces</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Mark the method as replacing an entity in the collection. 
+ 
+        Adds &quot;add to collection&quot; and &quot;remove from collection&quot; handling to 
+        the method.  The decorator argument indicates which method argument 
+        holds the SQLAlchemy-relevant value to be added, and return value, if 
+        any will be considered the value to remove. 
+ 
+        Arguments can be specified positionally (i.e. integer) or by name:: 
+ 
+            @collection.replaces(2) 
+            def __setitem__(self, index, item): ... 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s3">def </span><span class="s1">decorator</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+            <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrument_before </span><span class="s4">= (</span><span class="s5">&quot;fire_append_event&quot;</span><span class="s4">, </span><span class="s1">arg</span><span class="s4">)</span>
+            <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrument_after </span><span class="s4">= </span><span class="s5">&quot;fire_remove_event&quot;</span>
+            <span class="s3">return </span><span class="s1">fn</span>
+
+        <span class="s3">return </span><span class="s1">decorator</span>
+
+    <span class="s4">@</span><span class="s1">staticmethod</span>
+    <span class="s3">def </span><span class="s1">removes</span><span class="s4">(</span><span class="s1">arg</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Mark the method as removing an entity in the collection. 
+ 
+        Adds &quot;remove from collection&quot; handling to the method.  The decorator 
+        argument indicates which method argument holds the SQLAlchemy-relevant 
+        value to be removed. Arguments can be specified positionally (i.e. 
+        integer) or by name:: 
+ 
+            @collection.removes(1) 
+            def zap(self, item): ... 
+ 
+        For methods where the value to remove is not known at call-time, use 
+        collection.removes_return. 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s3">def </span><span class="s1">decorator</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+            <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrument_before </span><span class="s4">= (</span><span class="s5">&quot;fire_remove_event&quot;</span><span class="s4">, </span><span class="s1">arg</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">fn</span>
+
+        <span class="s3">return </span><span class="s1">decorator</span>
+
+    <span class="s4">@</span><span class="s1">staticmethod</span>
+    <span class="s3">def </span><span class="s1">removes_return</span><span class="s4">():</span>
+        <span class="s2">&quot;&quot;&quot;Mark the method as removing an entity in the collection. 
+ 
+        Adds &quot;remove from collection&quot; handling to the method.  The return 
+        value of the method, if any, is considered the value to remove.  The 
+        method arguments are not inspected:: 
+ 
+            @collection.removes_return() 
+            def pop(self): ... 
+ 
+        For methods where the value to remove is known at call-time, use 
+        collection.remove. 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s3">def </span><span class="s1">decorator</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+            <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrument_after </span><span class="s4">= </span><span class="s5">&quot;fire_remove_event&quot;</span>
+            <span class="s3">return </span><span class="s1">fn</span>
+
+        <span class="s3">return </span><span class="s1">decorator</span>
+
+
+<span class="s3">if </span><span class="s1">TYPE_CHECKING</span><span class="s4">:</span>
+
+    <span class="s3">def </span><span class="s1">collection_adapter</span><span class="s4">(</span><span class="s1">collection</span><span class="s4">: </span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]) </span><span class="s1">-&gt; CollectionAdapter</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Fetch the :class:`.CollectionAdapter` for a collection.&quot;&quot;&quot;</span>
+
+<span class="s3">else</span><span class="s4">:</span>
+    <span class="s1">collection_adapter </span><span class="s4">= </span><span class="s1">operator</span><span class="s4">.</span><span class="s1">attrgetter</span><span class="s4">(</span><span class="s5">&quot;_sa_adapter&quot;</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">CollectionAdapter</span><span class="s4">:</span>
+    <span class="s2">&quot;&quot;&quot;Bridges between the ORM and arbitrary Python collections. 
+ 
+    Proxies base-level collection operations (append, remove, iterate) 
+    to the underlying Python collection, and emits add/remove events for 
+    entities entering or leaving the collection. 
+ 
+    The ORM uses :class:`.CollectionAdapter` exclusively for interaction with 
+    entity collections. 
+ 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s4">= (</span>
+        <span class="s5">&quot;attr&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;_key&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;_data&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;owner_state&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;_converter&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;invalidated&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;empty&quot;</span><span class="s4">,</span>
+    <span class="s4">)</span>
+
+    <span class="s1">attr</span><span class="s4">: </span><span class="s1">CollectionAttributeImpl</span>
+    <span class="s1">_key</span><span class="s4">: </span><span class="s1">str</span>
+
+    <span class="s0"># this is actually a weakref; see note in constructor</span>
+    <span class="s1">_data</span><span class="s4">: </span><span class="s1">Callable</span><span class="s4">[..., </span><span class="s1">_AdaptedCollectionProtocol</span><span class="s4">]</span>
+
+    <span class="s1">owner_state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]</span>
+    <span class="s1">_converter</span><span class="s4">: </span><span class="s1">_CollectionConverterProtocol</span>
+    <span class="s1">invalidated</span><span class="s4">: </span><span class="s1">bool</span>
+    <span class="s1">empty</span><span class="s4">: </span><span class="s1">bool</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">attr</span><span class="s4">: </span><span class="s1">CollectionAttributeImpl</span><span class="s4">,</span>
+        <span class="s1">owner_state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">data</span><span class="s4">: </span><span class="s1">_AdaptedCollectionProtocol</span><span class="s4">,</span>
+    <span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">attr </span><span class="s4">= </span><span class="s1">attr</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_key </span><span class="s4">= </span><span class="s1">attr</span><span class="s4">.</span><span class="s1">key</span>
+
+        <span class="s0"># this weakref stays referenced throughout the lifespan of</span>
+        <span class="s0"># CollectionAdapter.  so while the weakref can return None, this</span>
+        <span class="s0"># is realistically only during garbage collection of this object, so</span>
+        <span class="s0"># we type this as a callable that returns _AdaptedCollectionProtocol</span>
+        <span class="s0"># in all cases.</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_data </span><span class="s4">= </span><span class="s1">weakref</span><span class="s4">.</span><span class="s1">ref</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)  </span><span class="s0"># type: ignore</span>
+
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state </span><span class="s4">= </span><span class="s1">owner_state</span>
+        <span class="s1">data</span><span class="s4">.</span><span class="s1">_sa_adapter </span><span class="s4">= </span><span class="s1">self</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_converter </span><span class="s4">= </span><span class="s1">data</span><span class="s4">.</span><span class="s1">_sa_converter</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">invalidated </span><span class="s4">= </span><span class="s3">False</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">empty </span><span class="s4">= </span><span class="s3">False</span>
+
+    <span class="s3">def </span><span class="s1">_warn_invalidated</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">util</span><span class="s4">.</span><span class="s1">warn</span><span class="s4">(</span><span class="s5">&quot;This collection has been invalidated.&quot;</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">data</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; _AdaptedCollectionProtocol</span><span class="s4">:</span>
+        <span class="s2">&quot;The entity collection being adapted.&quot;</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">()</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">_referenced_by_owner</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; bool</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;return True if the owner state still refers to this collection. 
+ 
+        This will return False within a bulk replace operation, 
+        where this collection is the one being replaced. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">dict</span><span class="s4">[</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_key</span><span class="s4">] </span><span class="s3">is </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">bulk_appender</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_appender</span>
+
+    <span class="s3">def </span><span class="s1">append_with_event</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">AttributeEventToken</span><span class="s4">] = </span><span class="s3">None</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Add an entity to the collection, firing mutation events.&quot;&quot;&quot;</span>
+
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_appender</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s1">initiator</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_set_empty</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">user_data</span><span class="s4">):</span>
+        <span class="s3">assert </span><span class="s4">(</span>
+            <span class="s3">not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span>
+        <span class="s4">), </span><span class="s5">&quot;This collection adapter is already in the 'empty' state&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">empty </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">_empty_collections</span><span class="s4">[</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_key</span><span class="s4">] = </span><span class="s1">user_data</span>
+
+    <span class="s3">def </span><span class="s1">_reset_empty</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">assert </span><span class="s4">(</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span>
+        <span class="s4">), </span><span class="s5">&quot;This collection adapter is not in the 'empty' state&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">empty </span><span class="s4">= </span><span class="s3">False</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">dict</span><span class="s4">[</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_key</span><span class="s4">] = (</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">_empty_collections</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_key</span><span class="s4">)</span>
+        <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_refuse_empty</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; NoReturn</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">sa_exc</span><span class="s4">.</span><span class="s1">InvalidRequestError</span><span class="s4">(</span>
+            <span class="s5">&quot;This is a special 'empty' collection which cannot accommodate &quot;</span>
+            <span class="s5">&quot;internal mutation operations&quot;</span>
+        <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">append_without_event</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Add or restore an entity to the collection, firing no events.&quot;&quot;&quot;</span>
+
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_refuse_empty</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_appender</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">False</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">append_multiple_without_event</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">items</span><span class="s4">: </span><span class="s1">Iterable</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Add or restore an entity to the collection, firing no events.&quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_refuse_empty</span><span class="s4">()</span>
+        <span class="s1">appender </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_appender</span>
+        <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">items</span><span class="s4">:</span>
+            <span class="s1">appender</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">False</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">bulk_remover</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_remover</span>
+
+    <span class="s3">def </span><span class="s1">remove_with_event</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">AttributeEventToken</span><span class="s4">] = </span><span class="s3">None</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Remove an entity from the collection, firing mutation events.&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_remover</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s1">initiator</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">remove_without_event</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Remove an entity from the collection, firing no events.&quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_refuse_empty</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_remover</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">False</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">clear_with_event</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">AttributeEventToken</span><span class="s4">] = </span><span class="s3">None</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Empty the collection, firing a mutation event for each entity.&quot;&quot;&quot;</span>
+
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_refuse_empty</span><span class="s4">()</span>
+        <span class="s1">remover </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_remover</span>
+        <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">list</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+            <span class="s1">remover</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s1">initiator</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">clear_without_event</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Empty the collection, firing no events.&quot;&quot;&quot;</span>
+
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_refuse_empty</span><span class="s4">()</span>
+        <span class="s1">remover </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_remover</span>
+        <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">list</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+            <span class="s1">remover</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">False</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__iter__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Iterate over entities in the collection.&quot;&quot;&quot;</span>
+
+        <span class="s3">return </span><span class="s1">iter</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_iterator</span><span class="s4">())</span>
+
+    <span class="s3">def </span><span class="s1">__len__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Count entities in the collection.&quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">len</span><span class="s4">(</span><span class="s1">list</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_data</span><span class="s4">().</span><span class="s1">_sa_iterator</span><span class="s4">()))</span>
+
+    <span class="s3">def </span><span class="s1">__bool__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return True</span>
+
+    <span class="s3">def </span><span class="s1">_fire_append_wo_mutation_event_bulk</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">items</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">key</span><span class="s4">=</span><span class="s1">NO_KEY</span>
+    <span class="s4">):</span>
+        <span class="s3">if not </span><span class="s1">items</span><span class="s4">:</span>
+            <span class="s3">return</span>
+
+        <span class="s3">if </span><span class="s1">initiator </span><span class="s3">is not False</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">invalidated</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_warn_invalidated</span><span class="s4">()</span>
+
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_reset_empty</span><span class="s4">()</span>
+
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">items</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">fire_append_wo_mutation_event</span><span class="s4">(</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">,</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">dict</span><span class="s4">,</span>
+                    <span class="s1">item</span><span class="s4">,</span>
+                    <span class="s1">initiator</span><span class="s4">,</span>
+                    <span class="s1">key</span><span class="s4">,</span>
+                <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">fire_append_wo_mutation_event</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">key</span><span class="s4">=</span><span class="s1">NO_KEY</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Notify that a entity is entering the collection but is already 
+        present. 
+ 
+ 
+        Initiator is a token owned by the InstrumentedAttribute that 
+        initiated the membership mutation, and should be left as None 
+        unless you are passing along an initiator value from a chained 
+        operation. 
+ 
+        .. versionadded:: 1.4.15 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">initiator </span><span class="s3">is not False</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">invalidated</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_warn_invalidated</span><span class="s4">()</span>
+
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_reset_empty</span><span class="s4">()</span>
+
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">fire_append_wo_mutation_event</span><span class="s4">(</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">dict</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">, </span><span class="s1">key</span>
+            <span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">item</span>
+
+    <span class="s3">def </span><span class="s1">fire_append_event</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">key</span><span class="s4">=</span><span class="s1">NO_KEY</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Notify that a entity has entered the collection. 
+ 
+        Initiator is a token owned by the InstrumentedAttribute that 
+        initiated the membership mutation, and should be left as None 
+        unless you are passing along an initiator value from a chained 
+        operation. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">initiator </span><span class="s3">is not False</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">invalidated</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_warn_invalidated</span><span class="s4">()</span>
+
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_reset_empty</span><span class="s4">()</span>
+
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">fire_append_event</span><span class="s4">(</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">dict</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">, </span><span class="s1">key</span>
+            <span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">item</span>
+
+    <span class="s3">def </span><span class="s1">_fire_remove_event_bulk</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">items</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">key</span><span class="s4">=</span><span class="s1">NO_KEY</span><span class="s4">):</span>
+        <span class="s3">if not </span><span class="s1">items</span><span class="s4">:</span>
+            <span class="s3">return</span>
+
+        <span class="s3">if </span><span class="s1">initiator </span><span class="s3">is not False</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">invalidated</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_warn_invalidated</span><span class="s4">()</span>
+
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_reset_empty</span><span class="s4">()</span>
+
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">items</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">fire_remove_event</span><span class="s4">(</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">,</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">dict</span><span class="s4">,</span>
+                    <span class="s1">item</span><span class="s4">,</span>
+                    <span class="s1">initiator</span><span class="s4">,</span>
+                    <span class="s1">key</span><span class="s4">,</span>
+                <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">fire_remove_event</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">key</span><span class="s4">=</span><span class="s1">NO_KEY</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Notify that a entity has been removed from the collection. 
+ 
+        Initiator is the InstrumentedAttribute that initiated the membership 
+        mutation, and should be left as None unless you are passing along 
+        an initiator value from a chained operation. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">initiator </span><span class="s3">is not False</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">invalidated</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_warn_invalidated</span><span class="s4">()</span>
+
+            <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_reset_empty</span><span class="s4">()</span>
+
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">fire_remove_event</span><span class="s4">(</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">dict</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">, </span><span class="s1">key</span>
+            <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">fire_pre_remove_event</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">, </span><span class="s1">key</span><span class="s4">=</span><span class="s1">NO_KEY</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Notify that an entity is about to be removed from the collection. 
+ 
+        Only called if the entity cannot be removed after calling 
+        fire_remove_event(). 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">invalidated</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_warn_invalidated</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">fire_pre_remove_event</span><span class="s4">(</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">,</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">dict</span><span class="s4">,</span>
+            <span class="s1">initiator</span><span class="s4">=</span><span class="s1">initiator</span><span class="s4">,</span>
+            <span class="s1">key</span><span class="s4">=</span><span class="s1">key</span><span class="s4">,</span>
+        <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__getstate__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s4">{</span>
+            <span class="s5">&quot;key&quot;</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_key</span><span class="s4">,</span>
+            <span class="s5">&quot;owner_state&quot;</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">,</span>
+            <span class="s5">&quot;owner_cls&quot;</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state</span><span class="s4">.</span><span class="s1">class_</span><span class="s4">,</span>
+            <span class="s5">&quot;data&quot;</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">data</span><span class="s4">,</span>
+            <span class="s5">&quot;invalidated&quot;</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">invalidated</span><span class="s4">,</span>
+            <span class="s5">&quot;empty&quot;</span><span class="s4">: </span><span class="s1">self</span><span class="s4">.</span><span class="s1">empty</span><span class="s4">,</span>
+        <span class="s4">}</span>
+
+    <span class="s3">def </span><span class="s1">__setstate__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">d</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_key </span><span class="s4">= </span><span class="s1">d</span><span class="s4">[</span><span class="s5">&quot;key&quot;</span><span class="s4">]</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">owner_state </span><span class="s4">= </span><span class="s1">d</span><span class="s4">[</span><span class="s5">&quot;owner_state&quot;</span><span class="s4">]</span>
+
+        <span class="s0"># see note in constructor regarding this type: ignore</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_data </span><span class="s4">= </span><span class="s1">weakref</span><span class="s4">.</span><span class="s1">ref</span><span class="s4">(</span><span class="s1">d</span><span class="s4">[</span><span class="s5">&quot;data&quot;</span><span class="s4">])  </span><span class="s0"># type: ignore</span>
+
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_converter </span><span class="s4">= </span><span class="s1">d</span><span class="s4">[</span><span class="s5">&quot;data&quot;</span><span class="s4">].</span><span class="s1">_sa_converter</span>
+        <span class="s1">d</span><span class="s4">[</span><span class="s5">&quot;data&quot;</span><span class="s4">].</span><span class="s1">_sa_adapter </span><span class="s4">= </span><span class="s1">self</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">invalidated </span><span class="s4">= </span><span class="s1">d</span><span class="s4">[</span><span class="s5">&quot;invalidated&quot;</span><span class="s4">]</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">attr </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">d</span><span class="s4">[</span><span class="s5">&quot;owner_cls&quot;</span><span class="s4">], </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_key</span><span class="s4">).</span><span class="s1">impl</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">empty </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s5">&quot;empty&quot;</span><span class="s4">, </span><span class="s3">False</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">bulk_replace</span><span class="s4">(</span><span class="s1">values</span><span class="s4">, </span><span class="s1">existing_adapter</span><span class="s4">, </span><span class="s1">new_adapter</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Load a new collection, firing events based on prior like membership. 
+ 
+    Appends instances in ``values`` onto the ``new_adapter``. Events will be 
+    fired for any instance not present in the ``existing_adapter``.  Any 
+    instances in ``existing_adapter`` not present in ``values`` will have 
+    remove events fired upon them. 
+ 
+    :param values: An iterable of collection member instances 
+ 
+    :param existing_adapter: A :class:`.CollectionAdapter` of 
+     instances to be replaced 
+ 
+    :param new_adapter: An empty :class:`.CollectionAdapter` 
+     to load with ``values`` 
+ 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">assert </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">values</span><span class="s4">, </span><span class="s1">list</span><span class="s4">)</span>
+
+    <span class="s1">idset </span><span class="s4">= </span><span class="s1">util</span><span class="s4">.</span><span class="s1">IdentitySet</span>
+    <span class="s1">existing_idset </span><span class="s4">= </span><span class="s1">idset</span><span class="s4">(</span><span class="s1">existing_adapter </span><span class="s3">or </span><span class="s4">())</span>
+    <span class="s1">constants </span><span class="s4">= </span><span class="s1">existing_idset</span><span class="s4">.</span><span class="s1">intersection</span><span class="s4">(</span><span class="s1">values </span><span class="s3">or </span><span class="s4">())</span>
+    <span class="s1">additions </span><span class="s4">= </span><span class="s1">idset</span><span class="s4">(</span><span class="s1">values </span><span class="s3">or </span><span class="s4">()).</span><span class="s1">difference</span><span class="s4">(</span><span class="s1">constants</span><span class="s4">)</span>
+    <span class="s1">removals </span><span class="s4">= </span><span class="s1">existing_idset</span><span class="s4">.</span><span class="s1">difference</span><span class="s4">(</span><span class="s1">constants</span><span class="s4">)</span>
+
+    <span class="s1">appender </span><span class="s4">= </span><span class="s1">new_adapter</span><span class="s4">.</span><span class="s1">bulk_appender</span><span class="s4">()</span>
+
+    <span class="s3">for </span><span class="s1">member </span><span class="s3">in </span><span class="s1">values </span><span class="s3">or </span><span class="s4">():</span>
+        <span class="s3">if </span><span class="s1">member </span><span class="s3">in </span><span class="s1">additions</span><span class="s4">:</span>
+            <span class="s1">appender</span><span class="s4">(</span><span class="s1">member</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s1">initiator</span><span class="s4">)</span>
+        <span class="s3">elif </span><span class="s1">member </span><span class="s3">in </span><span class="s1">constants</span><span class="s4">:</span>
+            <span class="s1">appender</span><span class="s4">(</span><span class="s1">member</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">False</span><span class="s4">)</span>
+
+    <span class="s3">if </span><span class="s1">existing_adapter</span><span class="s4">:</span>
+        <span class="s1">existing_adapter</span><span class="s4">.</span><span class="s1">_fire_append_wo_mutation_event_bulk</span><span class="s4">(</span>
+            <span class="s1">constants</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">=</span><span class="s1">initiator</span>
+        <span class="s4">)</span>
+        <span class="s1">existing_adapter</span><span class="s4">.</span><span class="s1">_fire_remove_event_bulk</span><span class="s4">(</span><span class="s1">removals</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">=</span><span class="s1">initiator</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">prepare_instrumentation</span><span class="s4">(</span>
+    <span class="s1">factory</span><span class="s4">: </span><span class="s1">Union</span><span class="s4">[</span><span class="s1">Type</span><span class="s4">[</span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]], </span><span class="s1">_CollectionFactoryType</span><span class="s4">],</span>
+<span class="s4">) </span><span class="s1">-&gt; _CollectionFactoryType</span><span class="s4">:</span>
+    <span class="s2">&quot;&quot;&quot;Prepare a callable for future use as a collection class factory. 
+ 
+    Given a collection class factory (either a type or no-arg callable), 
+    return another factory that will produce compatible instances when 
+    called. 
+ 
+    This function is responsible for converting collection_class=list 
+    into the run-time behavior of collection_class=InstrumentedList. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">impl_factory</span><span class="s4">: </span><span class="s1">_CollectionFactoryType</span>
+
+    <span class="s0"># Convert a builtin to 'Instrumented*'</span>
+    <span class="s3">if </span><span class="s1">factory </span><span class="s3">in </span><span class="s1">__canned_instrumentation</span><span class="s4">:</span>
+        <span class="s1">impl_factory </span><span class="s4">= </span><span class="s1">__canned_instrumentation</span><span class="s4">[</span><span class="s1">factory</span><span class="s4">]</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s1">impl_factory </span><span class="s4">= </span><span class="s1">cast</span><span class="s4">(</span><span class="s1">_CollectionFactoryType</span><span class="s4">, </span><span class="s1">factory</span><span class="s4">)</span>
+
+    <span class="s1">cls</span><span class="s4">: </span><span class="s1">Union</span><span class="s4">[</span><span class="s1">_CollectionFactoryType</span><span class="s4">, </span><span class="s1">Type</span><span class="s4">[</span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]]]</span>
+
+    <span class="s0"># Create a specimen</span>
+    <span class="s1">cls </span><span class="s4">= </span><span class="s1">type</span><span class="s4">(</span><span class="s1">impl_factory</span><span class="s4">())</span>
+
+    <span class="s0"># Did factory callable return a builtin?</span>
+    <span class="s3">if </span><span class="s1">cls </span><span class="s3">in </span><span class="s1">__canned_instrumentation</span><span class="s4">:</span>
+        <span class="s0"># if so, just convert.</span>
+        <span class="s0"># in previous major releases, this codepath wasn't working and was</span>
+        <span class="s0"># not covered by tests.   prior to that it supplied a &quot;wrapper&quot;</span>
+        <span class="s0"># function that would return the class, though the rationale for this</span>
+        <span class="s0"># case is not known</span>
+        <span class="s1">impl_factory </span><span class="s4">= </span><span class="s1">__canned_instrumentation</span><span class="s4">[</span><span class="s1">cls</span><span class="s4">]</span>
+        <span class="s1">cls </span><span class="s4">= </span><span class="s1">type</span><span class="s4">(</span><span class="s1">impl_factory</span><span class="s4">())</span>
+
+    <span class="s0"># Instrument the class if needed.</span>
+    <span class="s3">if </span><span class="s1">__instrumentation_mutex</span><span class="s4">.</span><span class="s1">acquire</span><span class="s4">():</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s5">&quot;_sa_instrumented&quot;</span><span class="s4">, </span><span class="s3">None</span><span class="s4">) != </span><span class="s1">id</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+                <span class="s1">_instrument_class</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">)</span>
+        <span class="s3">finally</span><span class="s4">:</span>
+            <span class="s1">__instrumentation_mutex</span><span class="s4">.</span><span class="s1">release</span><span class="s4">()</span>
+
+    <span class="s3">return </span><span class="s1">impl_factory</span>
+
+
+<span class="s3">def </span><span class="s1">_instrument_class</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Modify methods in a class and install instrumentation.&quot;&quot;&quot;</span>
+
+    <span class="s0"># In the normal call flow, a request for any of the 3 basic collection</span>
+    <span class="s0"># types is transformed into one of our trivial subclasses</span>
+    <span class="s0"># (e.g. InstrumentedList).  Catch anything else that sneaks in here...</span>
+    <span class="s3">if </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__module__ </span><span class="s4">== </span><span class="s5">&quot;__builtin__&quot;</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">sa_exc</span><span class="s4">.</span><span class="s1">ArgumentError</span><span class="s4">(</span>
+            <span class="s5">&quot;Can not instrument a built-in type. Use a &quot;</span>
+            <span class="s5">&quot;subclass, even a trivial one.&quot;</span>
+        <span class="s4">)</span>
+
+    <span class="s1">roles</span><span class="s4">, </span><span class="s1">methods </span><span class="s4">= </span><span class="s1">_locate_roles_and_methods</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">)</span>
+
+    <span class="s1">_setup_canned_roles</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">, </span><span class="s1">methods</span><span class="s4">)</span>
+
+    <span class="s1">_assert_required_roles</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">, </span><span class="s1">methods</span><span class="s4">)</span>
+
+    <span class="s1">_set_collection_attributes</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">, </span><span class="s1">methods</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_locate_roles_and_methods</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;search for _sa_instrument_role-decorated methods in 
+    method resolution order, assign to roles. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">roles</span><span class="s4">: </span><span class="s1">Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">str</span><span class="s4">] = {}</span>
+    <span class="s1">methods</span><span class="s4">: </span><span class="s1">Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">str</span><span class="s4">], </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">int</span><span class="s4">], </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">str</span><span class="s4">]]] = {}</span>
+
+    <span class="s3">for </span><span class="s1">supercls </span><span class="s3">in </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__mro__</span><span class="s4">:</span>
+        <span class="s3">for </span><span class="s1">name</span><span class="s4">, </span><span class="s1">method </span><span class="s3">in </span><span class="s1">vars</span><span class="s4">(</span><span class="s1">supercls</span><span class="s4">).</span><span class="s1">items</span><span class="s4">():</span>
+            <span class="s3">if not </span><span class="s1">callable</span><span class="s4">(</span><span class="s1">method</span><span class="s4">):</span>
+                <span class="s3">continue</span>
+
+            <span class="s0"># note role declarations</span>
+            <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">method</span><span class="s4">, </span><span class="s5">&quot;_sa_instrument_role&quot;</span><span class="s4">):</span>
+                <span class="s1">role </span><span class="s4">= </span><span class="s1">method</span><span class="s4">.</span><span class="s1">_sa_instrument_role</span>
+                <span class="s3">assert </span><span class="s1">role </span><span class="s3">in </span><span class="s4">(</span>
+                    <span class="s5">&quot;appender&quot;</span><span class="s4">,</span>
+                    <span class="s5">&quot;remover&quot;</span><span class="s4">,</span>
+                    <span class="s5">&quot;iterator&quot;</span><span class="s4">,</span>
+                    <span class="s5">&quot;converter&quot;</span><span class="s4">,</span>
+                <span class="s4">)</span>
+                <span class="s1">roles</span><span class="s4">.</span><span class="s1">setdefault</span><span class="s4">(</span><span class="s1">role</span><span class="s4">, </span><span class="s1">name</span><span class="s4">)</span>
+
+            <span class="s0"># transfer instrumentation requests from decorated function</span>
+            <span class="s0"># to the combined queue</span>
+            <span class="s1">before</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">int</span><span class="s4">]] = </span><span class="s3">None</span>
+            <span class="s1">after</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">str</span><span class="s4">] = </span><span class="s3">None</span>
+
+            <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">method</span><span class="s4">, </span><span class="s5">&quot;_sa_instrument_before&quot;</span><span class="s4">):</span>
+                <span class="s1">op</span><span class="s4">, </span><span class="s1">argument </span><span class="s4">= </span><span class="s1">method</span><span class="s4">.</span><span class="s1">_sa_instrument_before</span>
+                <span class="s3">assert </span><span class="s1">op </span><span class="s3">in </span><span class="s4">(</span><span class="s5">&quot;fire_append_event&quot;</span><span class="s4">, </span><span class="s5">&quot;fire_remove_event&quot;</span><span class="s4">)</span>
+                <span class="s1">before </span><span class="s4">= </span><span class="s1">op</span><span class="s4">, </span><span class="s1">argument</span>
+            <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">method</span><span class="s4">, </span><span class="s5">&quot;_sa_instrument_after&quot;</span><span class="s4">):</span>
+                <span class="s1">op </span><span class="s4">= </span><span class="s1">method</span><span class="s4">.</span><span class="s1">_sa_instrument_after</span>
+                <span class="s3">assert </span><span class="s1">op </span><span class="s3">in </span><span class="s4">(</span><span class="s5">&quot;fire_append_event&quot;</span><span class="s4">, </span><span class="s5">&quot;fire_remove_event&quot;</span><span class="s4">)</span>
+                <span class="s1">after </span><span class="s4">= </span><span class="s1">op</span>
+            <span class="s3">if </span><span class="s1">before</span><span class="s4">:</span>
+                <span class="s1">methods</span><span class="s4">[</span><span class="s1">name</span><span class="s4">] = </span><span class="s1">before </span><span class="s4">+ (</span><span class="s1">after</span><span class="s4">,)</span>
+            <span class="s3">elif </span><span class="s1">after</span><span class="s4">:</span>
+                <span class="s1">methods</span><span class="s4">[</span><span class="s1">name</span><span class="s4">] = </span><span class="s3">None</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">after</span>
+    <span class="s3">return </span><span class="s1">roles</span><span class="s4">, </span><span class="s1">methods</span>
+
+
+<span class="s3">def </span><span class="s1">_setup_canned_roles</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">, </span><span class="s1">methods</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;see if this class has &quot;canned&quot; roles based on a known 
+    collection type (dict, set, list).  Apply those roles 
+    as needed to the &quot;roles&quot; dictionary, and also 
+    prepare &quot;decorator&quot; methods 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">collection_type </span><span class="s4">= </span><span class="s1">util</span><span class="s4">.</span><span class="s1">duck_type_collection</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">)</span>
+    <span class="s3">if </span><span class="s1">collection_type </span><span class="s3">in </span><span class="s1">__interfaces</span><span class="s4">:</span>
+        <span class="s3">assert </span><span class="s1">collection_type </span><span class="s3">is not None</span>
+        <span class="s1">canned_roles</span><span class="s4">, </span><span class="s1">decorators </span><span class="s4">= </span><span class="s1">__interfaces</span><span class="s4">[</span><span class="s1">collection_type</span><span class="s4">]</span>
+        <span class="s3">for </span><span class="s1">role</span><span class="s4">, </span><span class="s1">name </span><span class="s3">in </span><span class="s1">canned_roles</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+            <span class="s1">roles</span><span class="s4">.</span><span class="s1">setdefault</span><span class="s4">(</span><span class="s1">role</span><span class="s4">, </span><span class="s1">name</span><span class="s4">)</span>
+
+        <span class="s0"># apply ABC auto-decoration to methods that need it</span>
+        <span class="s3">for </span><span class="s1">method</span><span class="s4">, </span><span class="s1">decorator </span><span class="s3">in </span><span class="s1">decorators</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+            <span class="s1">fn </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">method</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s4">(</span>
+                <span class="s1">fn</span>
+                <span class="s3">and </span><span class="s1">method </span><span class="s3">not in </span><span class="s1">methods</span>
+                <span class="s3">and not </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">, </span><span class="s5">&quot;_sa_instrumented&quot;</span><span class="s4">)</span>
+            <span class="s4">):</span>
+                <span class="s1">setattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">method</span><span class="s4">, </span><span class="s1">decorator</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">))</span>
+
+
+<span class="s3">def </span><span class="s1">_assert_required_roles</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">, </span><span class="s1">methods</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;ensure all roles are present, and apply implicit instrumentation if 
+    needed 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s5">&quot;appender&quot; </span><span class="s3">not in </span><span class="s1">roles </span><span class="s3">or not </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">[</span><span class="s5">&quot;appender&quot;</span><span class="s4">]):</span>
+        <span class="s3">raise </span><span class="s1">sa_exc</span><span class="s4">.</span><span class="s1">ArgumentError</span><span class="s4">(</span>
+            <span class="s5">&quot;Type %s must elect an appender method to be &quot;</span>
+            <span class="s5">&quot;a collection class&quot; </span><span class="s4">% </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__name__</span>
+        <span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">roles</span><span class="s4">[</span><span class="s5">&quot;appender&quot;</span><span class="s4">] </span><span class="s3">not in </span><span class="s1">methods </span><span class="s3">and not </span><span class="s1">hasattr</span><span class="s4">(</span>
+        <span class="s1">getattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">[</span><span class="s5">&quot;appender&quot;</span><span class="s4">]), </span><span class="s5">&quot;_sa_instrumented&quot;</span>
+    <span class="s4">):</span>
+        <span class="s1">methods</span><span class="s4">[</span><span class="s1">roles</span><span class="s4">[</span><span class="s5">&quot;appender&quot;</span><span class="s4">]] = (</span><span class="s5">&quot;fire_append_event&quot;</span><span class="s4">, </span><span class="s6">1</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+
+    <span class="s3">if </span><span class="s5">&quot;remover&quot; </span><span class="s3">not in </span><span class="s1">roles </span><span class="s3">or not </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">[</span><span class="s5">&quot;remover&quot;</span><span class="s4">]):</span>
+        <span class="s3">raise </span><span class="s1">sa_exc</span><span class="s4">.</span><span class="s1">ArgumentError</span><span class="s4">(</span>
+            <span class="s5">&quot;Type %s must elect a remover method to be &quot;</span>
+            <span class="s5">&quot;a collection class&quot; </span><span class="s4">% </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__name__</span>
+        <span class="s4">)</span>
+    <span class="s3">elif </span><span class="s1">roles</span><span class="s4">[</span><span class="s5">&quot;remover&quot;</span><span class="s4">] </span><span class="s3">not in </span><span class="s1">methods </span><span class="s3">and not </span><span class="s1">hasattr</span><span class="s4">(</span>
+        <span class="s1">getattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">[</span><span class="s5">&quot;remover&quot;</span><span class="s4">]), </span><span class="s5">&quot;_sa_instrumented&quot;</span>
+    <span class="s4">):</span>
+        <span class="s1">methods</span><span class="s4">[</span><span class="s1">roles</span><span class="s4">[</span><span class="s5">&quot;remover&quot;</span><span class="s4">]] = (</span><span class="s5">&quot;fire_remove_event&quot;</span><span class="s4">, </span><span class="s6">1</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+
+    <span class="s3">if </span><span class="s5">&quot;iterator&quot; </span><span class="s3">not in </span><span class="s1">roles </span><span class="s3">or not </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">[</span><span class="s5">&quot;iterator&quot;</span><span class="s4">]):</span>
+        <span class="s3">raise </span><span class="s1">sa_exc</span><span class="s4">.</span><span class="s1">ArgumentError</span><span class="s4">(</span>
+            <span class="s5">&quot;Type %s must elect an iterator method to be &quot;</span>
+            <span class="s5">&quot;a collection class&quot; </span><span class="s4">% </span><span class="s1">cls</span><span class="s4">.</span><span class="s1">__name__</span>
+        <span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_set_collection_attributes</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">roles</span><span class="s4">, </span><span class="s1">methods</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;apply ad-hoc instrumentation from decorators, class-level defaults 
+    and implicit role declarations 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s3">for </span><span class="s1">method_name</span><span class="s4">, (</span><span class="s1">before</span><span class="s4">, </span><span class="s1">argument</span><span class="s4">, </span><span class="s1">after</span><span class="s4">) </span><span class="s3">in </span><span class="s1">methods</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+        <span class="s1">setattr</span><span class="s4">(</span>
+            <span class="s1">cls</span><span class="s4">,</span>
+            <span class="s1">method_name</span><span class="s4">,</span>
+            <span class="s1">_instrument_membership_mutator</span><span class="s4">(</span>
+                <span class="s1">getattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">method_name</span><span class="s4">), </span><span class="s1">before</span><span class="s4">, </span><span class="s1">argument</span><span class="s4">, </span><span class="s1">after</span>
+            <span class="s4">),</span>
+        <span class="s4">)</span>
+    <span class="s0"># intern the role map</span>
+    <span class="s3">for </span><span class="s1">role</span><span class="s4">, </span><span class="s1">method_name </span><span class="s3">in </span><span class="s1">roles</span><span class="s4">.</span><span class="s1">items</span><span class="s4">():</span>
+        <span class="s1">setattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s5">&quot;_sa_%s&quot; </span><span class="s4">% </span><span class="s1">role</span><span class="s4">, </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s1">method_name</span><span class="s4">))</span>
+
+    <span class="s1">cls</span><span class="s4">.</span><span class="s1">_sa_adapter </span><span class="s4">= </span><span class="s3">None</span>
+
+    <span class="s3">if not </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">, </span><span class="s5">&quot;_sa_converter&quot;</span><span class="s4">):</span>
+        <span class="s1">cls</span><span class="s4">.</span><span class="s1">_sa_converter </span><span class="s4">= </span><span class="s3">None</span>
+    <span class="s1">cls</span><span class="s4">.</span><span class="s1">_sa_instrumented </span><span class="s4">= </span><span class="s1">id</span><span class="s4">(</span><span class="s1">cls</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_instrument_membership_mutator</span><span class="s4">(</span><span class="s1">method</span><span class="s4">, </span><span class="s1">before</span><span class="s4">, </span><span class="s1">argument</span><span class="s4">, </span><span class="s1">after</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Route method args and/or return value through the collection 
+    adapter.&quot;&quot;&quot;</span>
+    <span class="s0"># This isn't smart enough to handle @adds(1) for 'def fn(self, (a, b))'</span>
+    <span class="s3">if </span><span class="s1">before</span><span class="s4">:</span>
+        <span class="s1">fn_args </span><span class="s4">= </span><span class="s1">list</span><span class="s4">(</span>
+            <span class="s1">util</span><span class="s4">.</span><span class="s1">flatten_iterator</span><span class="s4">(</span><span class="s1">inspect_getfullargspec</span><span class="s4">(</span><span class="s1">method</span><span class="s4">)[</span><span class="s6">0</span><span class="s4">])</span>
+        <span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">argument</span><span class="s4">, </span><span class="s1">int</span><span class="s4">):</span>
+            <span class="s1">pos_arg </span><span class="s4">= </span><span class="s1">argument</span>
+            <span class="s1">named_arg </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">fn_args</span><span class="s4">) &gt; </span><span class="s1">argument </span><span class="s3">and </span><span class="s1">fn_args</span><span class="s4">[</span><span class="s1">argument</span><span class="s4">] </span><span class="s3">or None</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">argument </span><span class="s3">in </span><span class="s1">fn_args</span><span class="s4">:</span>
+                <span class="s1">pos_arg </span><span class="s4">= </span><span class="s1">fn_args</span><span class="s4">.</span><span class="s1">index</span><span class="s4">(</span><span class="s1">argument</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">pos_arg </span><span class="s4">= </span><span class="s3">None</span>
+            <span class="s1">named_arg </span><span class="s4">= </span><span class="s1">argument</span>
+        <span class="s3">del </span><span class="s1">fn_args</span>
+
+    <span class="s3">def </span><span class="s1">wrapper</span><span class="s4">(*</span><span class="s1">args</span><span class="s4">, **</span><span class="s1">kw</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">before</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">pos_arg </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">named_arg </span><span class="s3">not in </span><span class="s1">kw</span><span class="s4">:</span>
+                    <span class="s3">raise </span><span class="s1">sa_exc</span><span class="s4">.</span><span class="s1">ArgumentError</span><span class="s4">(</span>
+                        <span class="s5">&quot;Missing argument %s&quot; </span><span class="s4">% </span><span class="s1">argument</span>
+                    <span class="s4">)</span>
+                <span class="s1">value </span><span class="s4">= </span><span class="s1">kw</span><span class="s4">[</span><span class="s1">named_arg</span><span class="s4">]</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">args</span><span class="s4">) &gt; </span><span class="s1">pos_arg</span><span class="s4">:</span>
+                    <span class="s1">value </span><span class="s4">= </span><span class="s1">args</span><span class="s4">[</span><span class="s1">pos_arg</span><span class="s4">]</span>
+                <span class="s3">elif </span><span class="s1">named_arg </span><span class="s3">in </span><span class="s1">kw</span><span class="s4">:</span>
+                    <span class="s1">value </span><span class="s4">= </span><span class="s1">kw</span><span class="s4">[</span><span class="s1">named_arg</span><span class="s4">]</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s3">raise </span><span class="s1">sa_exc</span><span class="s4">.</span><span class="s1">ArgumentError</span><span class="s4">(</span>
+                        <span class="s5">&quot;Missing argument %s&quot; </span><span class="s4">% </span><span class="s1">argument</span>
+                    <span class="s4">)</span>
+
+        <span class="s1">initiator </span><span class="s4">= </span><span class="s1">kw</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">(</span><span class="s5">&quot;_sa_initiator&quot;</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">initiator </span><span class="s3">is False</span><span class="s4">:</span>
+            <span class="s1">executor </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">executor </span><span class="s4">= </span><span class="s1">args</span><span class="s4">[</span><span class="s6">0</span><span class="s4">].</span><span class="s1">_sa_adapter</span>
+
+        <span class="s3">if </span><span class="s1">before </span><span class="s3">and </span><span class="s1">executor</span><span class="s4">:</span>
+            <span class="s1">getattr</span><span class="s4">(</span><span class="s1">executor</span><span class="s4">, </span><span class="s1">before</span><span class="s4">)(</span><span class="s1">value</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">)</span>
+
+        <span class="s3">if not </span><span class="s1">after </span><span class="s3">or not </span><span class="s1">executor</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">method</span><span class="s4">(*</span><span class="s1">args</span><span class="s4">, **</span><span class="s1">kw</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">res </span><span class="s4">= </span><span class="s1">method</span><span class="s4">(*</span><span class="s1">args</span><span class="s4">, **</span><span class="s1">kw</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">res </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s1">getattr</span><span class="s4">(</span><span class="s1">executor</span><span class="s4">, </span><span class="s1">after</span><span class="s4">)(</span><span class="s1">res</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">res</span>
+
+    <span class="s1">wrapper</span><span class="s4">.</span><span class="s1">_sa_instrumented </span><span class="s4">= </span><span class="s3">True  </span><span class="s0"># type: ignore[attr-defined]</span>
+    <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">method</span><span class="s4">, </span><span class="s5">&quot;_sa_instrument_role&quot;</span><span class="s4">):</span>
+        <span class="s1">wrapper</span><span class="s4">.</span><span class="s1">_sa_instrument_role </span><span class="s4">= </span><span class="s1">method</span><span class="s4">.</span><span class="s1">_sa_instrument_role  </span><span class="s0"># type: ignore[attr-defined]  # noqa: E501</span>
+    <span class="s1">wrapper</span><span class="s4">.</span><span class="s1">__name__ </span><span class="s4">= </span><span class="s1">method</span><span class="s4">.</span><span class="s1">__name__</span>
+    <span class="s1">wrapper</span><span class="s4">.</span><span class="s1">__doc__ </span><span class="s4">= </span><span class="s1">method</span><span class="s4">.</span><span class="s1">__doc__</span>
+    <span class="s3">return </span><span class="s1">wrapper</span>
+
+
+<span class="s3">def </span><span class="s1">__set_wo_mutation</span><span class="s4">(</span><span class="s1">collection</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Run set wo mutation events. 
+ 
+    The collection is not mutated. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">_sa_initiator </span><span class="s3">is not False</span><span class="s4">:</span>
+        <span class="s1">executor </span><span class="s4">= </span><span class="s1">collection</span><span class="s4">.</span><span class="s1">_sa_adapter</span>
+        <span class="s3">if </span><span class="s1">executor</span><span class="s4">:</span>
+            <span class="s1">executor</span><span class="s4">.</span><span class="s1">fire_append_wo_mutation_event</span><span class="s4">(</span>
+                <span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">key</span><span class="s4">=</span><span class="s3">None</span>
+            <span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">__set</span><span class="s4">(</span><span class="s1">collection</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Run set events. 
+ 
+    This event always occurs before the collection is actually mutated. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">if </span><span class="s1">_sa_initiator </span><span class="s3">is not False</span><span class="s4">:</span>
+        <span class="s1">executor </span><span class="s4">= </span><span class="s1">collection</span><span class="s4">.</span><span class="s1">_sa_adapter</span>
+        <span class="s3">if </span><span class="s1">executor</span><span class="s4">:</span>
+            <span class="s1">item </span><span class="s4">= </span><span class="s1">executor</span><span class="s4">.</span><span class="s1">fire_append_event</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">key</span><span class="s4">=</span><span class="s1">key</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">item</span>
+
+
+<span class="s3">def </span><span class="s1">__del</span><span class="s4">(</span><span class="s1">collection</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">key</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Run del events. 
+ 
+    This event occurs before the collection is actually mutated, *except* 
+    in the case of a pop operation, in which case it occurs afterwards. 
+    For pop operations, the __before_pop hook is called before the 
+    operation occurs. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">_sa_initiator </span><span class="s3">is not False</span><span class="s4">:</span>
+        <span class="s1">executor </span><span class="s4">= </span><span class="s1">collection</span><span class="s4">.</span><span class="s1">_sa_adapter</span>
+        <span class="s3">if </span><span class="s1">executor</span><span class="s4">:</span>
+            <span class="s1">executor</span><span class="s4">.</span><span class="s1">fire_remove_event</span><span class="s4">(</span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">key</span><span class="s4">=</span><span class="s1">key</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">__before_pop</span><span class="s4">(</span><span class="s1">collection</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;An event which occurs on a before a pop() operation occurs.&quot;&quot;&quot;</span>
+    <span class="s1">executor </span><span class="s4">= </span><span class="s1">collection</span><span class="s4">.</span><span class="s1">_sa_adapter</span>
+    <span class="s3">if </span><span class="s1">executor</span><span class="s4">:</span>
+        <span class="s1">executor</span><span class="s4">.</span><span class="s1">fire_pre_remove_event</span><span class="s4">(</span><span class="s1">_sa_initiator</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_list_decorators</span><span class="s4">() </span><span class="s1">-&gt; Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">Callable</span><span class="s4">[[</span><span class="s1">_FN</span><span class="s4">], </span><span class="s1">_FN</span><span class="s4">]]:</span>
+    <span class="s2">&quot;&quot;&quot;Tailored instrumentation wrappers for any list-like class.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">_tidy</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrumented </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">__doc__ </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">list</span><span class="s4">, </span><span class="s1">fn</span><span class="s4">.</span><span class="s1">__name__</span><span class="s4">).</span><span class="s1">__doc__</span>
+
+    <span class="s3">def </span><span class="s1">append</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">append</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+            <span class="s1">item </span><span class="s4">= </span><span class="s1">__set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">NO_KEY</span><span class="s4">)</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">append</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">append</span>
+
+    <span class="s3">def </span><span class="s1">remove</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">remove</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+            <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">NO_KEY</span><span class="s4">)</span>
+            <span class="s0"># testlib.pragma exempt:__eq__</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">remove</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">remove</span>
+
+    <span class="s3">def </span><span class="s1">insert</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">insert</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">__set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">insert</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">insert</span>
+
+    <span class="s3">def </span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+            <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">index</span><span class="s4">, </span><span class="s1">slice</span><span class="s4">):</span>
+                <span class="s1">existing </span><span class="s4">= </span><span class="s1">self</span><span class="s4">[</span><span class="s1">index</span><span class="s4">]</span>
+                <span class="s3">if </span><span class="s1">existing </span><span class="s3">is not None</span><span class="s4">:</span>
+                    <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">existing</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+                <span class="s1">value </span><span class="s4">= </span><span class="s1">__set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+                <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s0"># slice assignment requires __delitem__, insert, __len__</span>
+                <span class="s1">step </span><span class="s4">= </span><span class="s1">index</span><span class="s4">.</span><span class="s1">step </span><span class="s3">or </span><span class="s6">1</span>
+                <span class="s1">start </span><span class="s4">= </span><span class="s1">index</span><span class="s4">.</span><span class="s1">start </span><span class="s3">or </span><span class="s6">0</span>
+                <span class="s3">if </span><span class="s1">start </span><span class="s4">&lt; </span><span class="s6">0</span><span class="s4">:</span>
+                    <span class="s1">start </span><span class="s4">+= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+                <span class="s3">if </span><span class="s1">index</span><span class="s4">.</span><span class="s1">stop </span><span class="s3">is not None</span><span class="s4">:</span>
+                    <span class="s1">stop </span><span class="s4">= </span><span class="s1">index</span><span class="s4">.</span><span class="s1">stop</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">stop </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+                <span class="s3">if </span><span class="s1">stop </span><span class="s4">&lt; </span><span class="s6">0</span><span class="s4">:</span>
+                    <span class="s1">stop </span><span class="s4">+= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+
+                <span class="s3">if </span><span class="s1">step </span><span class="s4">== </span><span class="s6">1</span><span class="s4">:</span>
+                    <span class="s3">if </span><span class="s1">value </span><span class="s3">is </span><span class="s1">self</span><span class="s4">:</span>
+                        <span class="s3">return</span>
+                    <span class="s3">for </span><span class="s1">i </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">start</span><span class="s4">, </span><span class="s1">stop</span><span class="s4">, </span><span class="s1">step</span><span class="s4">):</span>
+                        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) &gt; </span><span class="s1">start</span><span class="s4">:</span>
+                            <span class="s3">del </span><span class="s1">self</span><span class="s4">[</span><span class="s1">start</span><span class="s4">]</span>
+
+                    <span class="s3">for </span><span class="s1">i</span><span class="s4">, </span><span class="s1">item </span><span class="s3">in </span><span class="s1">enumerate</span><span class="s4">(</span><span class="s1">value</span><span class="s4">):</span>
+                        <span class="s1">self</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s1">i </span><span class="s4">+ </span><span class="s1">start</span><span class="s4">, </span><span class="s1">item</span><span class="s4">)</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">rng </span><span class="s4">= </span><span class="s1">list</span><span class="s4">(</span><span class="s1">range</span><span class="s4">(</span><span class="s1">start</span><span class="s4">, </span><span class="s1">stop</span><span class="s4">, </span><span class="s1">step</span><span class="s4">))</span>
+                    <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">value</span><span class="s4">) != </span><span class="s1">len</span><span class="s4">(</span><span class="s1">rng</span><span class="s4">):</span>
+                        <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span>
+                            <span class="s5">&quot;attempt to assign sequence of size %s to &quot;</span>
+                            <span class="s5">&quot;extended slice of size %s&quot;</span>
+                            <span class="s4">% (</span><span class="s1">len</span><span class="s4">(</span><span class="s1">value</span><span class="s4">), </span><span class="s1">len</span><span class="s4">(</span><span class="s1">rng</span><span class="s4">))</span>
+                        <span class="s4">)</span>
+                    <span class="s3">for </span><span class="s1">i</span><span class="s4">, </span><span class="s1">item </span><span class="s3">in </span><span class="s1">zip</span><span class="s4">(</span><span class="s1">rng</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+                        <span class="s1">self</span><span class="s4">.</span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">i</span><span class="s4">, </span><span class="s1">item</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">__setitem__</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">__setitem__</span>
+
+    <span class="s3">def </span><span class="s1">__delitem__</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">__delitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">):</span>
+            <span class="s3">if not </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">index</span><span class="s4">, </span><span class="s1">slice</span><span class="s4">):</span>
+                <span class="s1">item </span><span class="s4">= </span><span class="s1">self</span><span class="s4">[</span><span class="s1">index</span><span class="s4">]</span>
+                <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+                <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s0"># slice deletion requires __getslice__ and a slice-groking</span>
+                <span class="s0"># __getitem__ for stepped deletion</span>
+                <span class="s0"># note: not breaking this into atomic dels</span>
+                <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">self</span><span class="s4">[</span><span class="s1">index</span><span class="s4">]:</span>
+                    <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+                <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">__delitem__</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">__delitem__</span>
+
+    <span class="s3">def </span><span class="s1">extend</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">extend</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">iterable</span><span class="s4">):</span>
+            <span class="s3">for </span><span class="s1">value </span><span class="s3">in </span><span class="s1">list</span><span class="s4">(</span><span class="s1">iterable</span><span class="s4">):</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">extend</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">extend</span>
+
+    <span class="s3">def </span><span class="s1">__iadd__</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">__iadd__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">iterable</span><span class="s4">):</span>
+            <span class="s0"># list.__iadd__ takes any iterable and seems to let TypeError</span>
+            <span class="s0"># raise as-is instead of returning NotImplemented</span>
+            <span class="s3">for </span><span class="s1">value </span><span class="s3">in </span><span class="s1">list</span><span class="s4">(</span><span class="s1">iterable</span><span class="s4">):</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">self</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">__iadd__</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">__iadd__</span>
+
+    <span class="s3">def </span><span class="s1">pop</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">pop</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">=-</span><span class="s6">1</span><span class="s4">):</span>
+            <span class="s1">__before_pop</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s1">item </span><span class="s4">= </span><span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+            <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">item</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">pop</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">pop</span>
+
+    <span class="s3">def </span><span class="s1">clear</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">clear</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">=-</span><span class="s6">1</span><span class="s4">):</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">index</span><span class="s4">)</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">clear</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">clear</span>
+
+    <span class="s0"># __imul__ : not wrapping this.  all members of the collection are already</span>
+    <span class="s0"># present, so no need to fire appends... wrapping it with an explicit</span>
+    <span class="s0"># decorator is still possible, so events on *= can be had if they're</span>
+    <span class="s0"># desired.  hard to imagine a use case for __imul__, though.</span>
+
+    <span class="s1">l </span><span class="s4">= </span><span class="s1">locals</span><span class="s4">().</span><span class="s1">copy</span><span class="s4">()</span>
+    <span class="s1">l</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">(</span><span class="s5">&quot;_tidy&quot;</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">l</span>
+
+
+<span class="s3">def </span><span class="s1">_dict_decorators</span><span class="s4">() </span><span class="s1">-&gt; Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">Callable</span><span class="s4">[[</span><span class="s1">_FN</span><span class="s4">], </span><span class="s1">_FN</span><span class="s4">]]:</span>
+    <span class="s2">&quot;&quot;&quot;Tailored instrumentation wrappers for any dict-like mapping class.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">_tidy</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrumented </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">__doc__ </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">dict</span><span class="s4">, </span><span class="s1">fn</span><span class="s4">.</span><span class="s1">__name__</span><span class="s4">).</span><span class="s1">__doc__</span>
+
+    <span class="s3">def </span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">key </span><span class="s3">in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">], </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">__set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">__setitem__</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">__setitem__</span>
+
+    <span class="s3">def </span><span class="s1">__delitem__</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">__delitem__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">key </span><span class="s3">in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">], </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">__delitem__</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">__delitem__</span>
+
+    <span class="s3">def </span><span class="s1">clear</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">clear</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+            <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">], </span><span class="s3">None</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">clear</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">clear</span>
+
+    <span class="s3">def </span><span class="s1">pop</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">pop</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">default</span><span class="s4">=</span><span class="s1">NO_ARG</span><span class="s4">):</span>
+            <span class="s1">__before_pop</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s1">_to_del </span><span class="s4">= </span><span class="s1">key </span><span class="s3">in </span><span class="s1">self</span>
+            <span class="s3">if </span><span class="s1">default </span><span class="s3">is </span><span class="s1">NO_ARG</span><span class="s4">:</span>
+                <span class="s1">item </span><span class="s4">= </span><span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">item </span><span class="s4">= </span><span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">default</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">_to_del</span><span class="s4">:</span>
+                <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">key</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">item</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">pop</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">pop</span>
+
+    <span class="s3">def </span><span class="s1">popitem</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">popitem</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+            <span class="s1">__before_pop</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s1">item </span><span class="s4">= </span><span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">[</span><span class="s6">1</span><span class="s4">], </span><span class="s3">None</span><span class="s4">, </span><span class="s6">1</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">item</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">popitem</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">popitem</span>
+
+    <span class="s3">def </span><span class="s1">setdefault</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">setdefault</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">default</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">__setitem__</span><span class="s4">(</span><span class="s1">key</span><span class="s4">, </span><span class="s1">default</span><span class="s4">)</span>
+                <span class="s3">return </span><span class="s1">default</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">value </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">__getitem__</span><span class="s4">(</span><span class="s1">key</span><span class="s4">)</span>
+                <span class="s3">if </span><span class="s1">value </span><span class="s3">is </span><span class="s1">default</span><span class="s4">:</span>
+                    <span class="s1">__set_wo_mutation</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+
+                <span class="s3">return </span><span class="s1">value</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">setdefault</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">setdefault</span>
+
+    <span class="s3">def </span><span class="s1">update</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">update</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">__other</span><span class="s4">=</span><span class="s1">NO_ARG</span><span class="s4">, **</span><span class="s1">kw</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">__other </span><span class="s3">is not </span><span class="s1">NO_ARG</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">__other</span><span class="s4">, </span><span class="s5">&quot;keys&quot;</span><span class="s4">):</span>
+                    <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">list</span><span class="s4">(</span><span class="s1">__other</span><span class="s4">):</span>
+                        <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">self </span><span class="s3">or </span><span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] </span><span class="s3">is not </span><span class="s1">__other</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]:</span>
+                            <span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">__other</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]</span>
+                        <span class="s3">else</span><span class="s4">:</span>
+                            <span class="s1">__set_wo_mutation</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">__other</span><span class="s4">[</span><span class="s1">key</span><span class="s4">], </span><span class="s3">None</span><span class="s4">)</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s3">for </span><span class="s1">key</span><span class="s4">, </span><span class="s1">value </span><span class="s3">in </span><span class="s1">__other</span><span class="s4">:</span>
+                        <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">self </span><span class="s3">or </span><span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] </span><span class="s3">is not </span><span class="s1">value</span><span class="s4">:</span>
+                            <span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">value</span>
+                        <span class="s3">else</span><span class="s4">:</span>
+                            <span class="s1">__set_wo_mutation</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s3">None</span><span class="s4">)</span>
+            <span class="s3">for </span><span class="s1">key </span><span class="s3">in </span><span class="s1">kw</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">key </span><span class="s3">not in </span><span class="s1">self </span><span class="s3">or </span><span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] </span><span class="s3">is not </span><span class="s1">kw</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]:</span>
+                    <span class="s1">self</span><span class="s4">[</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">kw</span><span class="s4">[</span><span class="s1">key</span><span class="s4">]</span>
+                <span class="s3">else</span><span class="s4">:</span>
+                    <span class="s1">__set_wo_mutation</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">kw</span><span class="s4">[</span><span class="s1">key</span><span class="s4">], </span><span class="s3">None</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">update</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">update</span>
+
+    <span class="s1">l </span><span class="s4">= </span><span class="s1">locals</span><span class="s4">().</span><span class="s1">copy</span><span class="s4">()</span>
+    <span class="s1">l</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">(</span><span class="s5">&quot;_tidy&quot;</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">l</span>
+
+
+<span class="s1">_set_binop_bases </span><span class="s4">= (</span><span class="s1">set</span><span class="s4">, </span><span class="s1">frozenset</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_set_binops_check_strict</span><span class="s4">(</span><span class="s1">self</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; bool</span><span class="s4">:</span>
+    <span class="s2">&quot;&quot;&quot;Allow only set, frozenset and self.__class__-derived 
+    objects in binops.&quot;&quot;&quot;</span>
+    <span class="s3">return </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">_set_binop_bases </span><span class="s4">+ (</span><span class="s1">self</span><span class="s4">.</span><span class="s1">__class__</span><span class="s4">,))</span>
+
+
+<span class="s3">def </span><span class="s1">_set_binops_check_loose</span><span class="s4">(</span><span class="s1">self</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">, </span><span class="s1">obj</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; bool</span><span class="s4">:</span>
+    <span class="s2">&quot;&quot;&quot;Allow anything set-like to participate in set binops.&quot;&quot;&quot;</span>
+    <span class="s3">return </span><span class="s4">(</span>
+        <span class="s1">isinstance</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">, </span><span class="s1">_set_binop_bases </span><span class="s4">+ (</span><span class="s1">self</span><span class="s4">.</span><span class="s1">__class__</span><span class="s4">,))</span>
+        <span class="s3">or </span><span class="s1">util</span><span class="s4">.</span><span class="s1">duck_type_collection</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">) == </span><span class="s1">set</span>
+    <span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">_set_decorators</span><span class="s4">() </span><span class="s1">-&gt; Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">Callable</span><span class="s4">[[</span><span class="s1">_FN</span><span class="s4">], </span><span class="s1">_FN</span><span class="s4">]]:</span>
+    <span class="s2">&quot;&quot;&quot;Tailored instrumentation wrappers for any set-like class.&quot;&quot;&quot;</span>
+
+    <span class="s3">def </span><span class="s1">_tidy</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">_sa_instrumented </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s1">fn</span><span class="s4">.</span><span class="s1">__doc__ </span><span class="s4">= </span><span class="s1">getattr</span><span class="s4">(</span><span class="s1">set</span><span class="s4">, </span><span class="s1">fn</span><span class="s4">.</span><span class="s1">__name__</span><span class="s4">).</span><span class="s1">__doc__</span>
+
+    <span class="s3">def </span><span class="s1">add</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">add</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+            <span class="s3">if </span><span class="s1">value </span><span class="s3">not in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">value </span><span class="s4">= </span><span class="s1">__set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">NO_KEY</span><span class="s4">)</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">__set_wo_mutation</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">)</span>
+            <span class="s0"># testlib.pragma exempt:__hash__</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">add</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">add</span>
+
+    <span class="s3">def </span><span class="s1">discard</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">discard</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+            <span class="s0"># testlib.pragma exempt:__hash__</span>
+            <span class="s3">if </span><span class="s1">value </span><span class="s3">in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">NO_KEY</span><span class="s4">)</span>
+                <span class="s0"># testlib.pragma exempt:__hash__</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">discard</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">discard</span>
+
+    <span class="s3">def </span><span class="s1">remove</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">remove</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">=</span><span class="s3">None</span><span class="s4">):</span>
+            <span class="s0"># testlib.pragma exempt:__hash__</span>
+            <span class="s3">if </span><span class="s1">value </span><span class="s3">in </span><span class="s1">self</span><span class="s4">:</span>
+                <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">_sa_initiator</span><span class="s4">, </span><span class="s1">NO_KEY</span><span class="s4">)</span>
+            <span class="s0"># testlib.pragma exempt:__hash__</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">remove</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">remove</span>
+
+    <span class="s3">def </span><span class="s1">pop</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">pop</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+            <span class="s1">__before_pop</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s1">item </span><span class="s4">= </span><span class="s1">fn</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s0"># for set in particular, we have no way to access the item</span>
+            <span class="s0"># that will be popped before pop is called.</span>
+            <span class="s1">__del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">NO_KEY</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">item</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">pop</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">pop</span>
+
+    <span class="s3">def </span><span class="s1">clear</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">clear</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">list</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">clear</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">clear</span>
+
+    <span class="s3">def </span><span class="s1">update</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">update</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">value</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">update</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">update</span>
+
+    <span class="s3">def </span><span class="s1">__ior__</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">__ior__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+            <span class="s3">if not </span><span class="s1">_set_binops_check_strict</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+                <span class="s3">return </span><span class="s1">NotImplemented</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">value</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">self</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">__ior__</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">__ior__</span>
+
+    <span class="s3">def </span><span class="s1">difference_update</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">difference_update</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">value</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">discard</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">difference_update</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">difference_update</span>
+
+    <span class="s3">def </span><span class="s1">__isub__</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">__isub__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+            <span class="s3">if not </span><span class="s1">_set_binops_check_strict</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">):</span>
+                <span class="s3">return </span><span class="s1">NotImplemented</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">value</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">discard</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">self</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">__isub__</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">__isub__</span>
+
+    <span class="s3">def </span><span class="s1">intersection_update</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">intersection_update</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+            <span class="s1">want</span><span class="s4">, </span><span class="s1">have </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">intersection</span><span class="s4">(</span><span class="s1">other</span><span class="s4">), </span><span class="s1">set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s1">remove</span><span class="s4">, </span><span class="s1">add </span><span class="s4">= </span><span class="s1">have </span><span class="s4">- </span><span class="s1">want</span><span class="s4">, </span><span class="s1">want </span><span class="s4">- </span><span class="s1">have</span>
+
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">remove</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">add</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">intersection_update</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">intersection_update</span>
+
+    <span class="s3">def </span><span class="s1">__iand__</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">__iand__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+            <span class="s3">if not </span><span class="s1">_set_binops_check_strict</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+                <span class="s3">return </span><span class="s1">NotImplemented</span>
+            <span class="s1">want</span><span class="s4">, </span><span class="s1">have </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">intersection</span><span class="s4">(</span><span class="s1">other</span><span class="s4">), </span><span class="s1">set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s1">remove</span><span class="s4">, </span><span class="s1">add </span><span class="s4">= </span><span class="s1">have </span><span class="s4">- </span><span class="s1">want</span><span class="s4">, </span><span class="s1">want </span><span class="s4">- </span><span class="s1">have</span>
+
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">remove</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">add</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">self</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">__iand__</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">__iand__</span>
+
+    <span class="s3">def </span><span class="s1">symmetric_difference_update</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">symmetric_difference_update</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+            <span class="s1">want</span><span class="s4">, </span><span class="s1">have </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">symmetric_difference</span><span class="s4">(</span><span class="s1">other</span><span class="s4">), </span><span class="s1">set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s1">remove</span><span class="s4">, </span><span class="s1">add </span><span class="s4">= </span><span class="s1">have </span><span class="s4">- </span><span class="s1">want</span><span class="s4">, </span><span class="s1">want </span><span class="s4">- </span><span class="s1">have</span>
+
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">remove</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">add</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">symmetric_difference_update</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">symmetric_difference_update</span>
+
+    <span class="s3">def </span><span class="s1">__ixor__</span><span class="s4">(</span><span class="s1">fn</span><span class="s4">):</span>
+        <span class="s3">def </span><span class="s1">__ixor__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+            <span class="s3">if not </span><span class="s1">_set_binops_check_strict</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">other</span><span class="s4">):</span>
+                <span class="s3">return </span><span class="s1">NotImplemented</span>
+            <span class="s1">want</span><span class="s4">, </span><span class="s1">have </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">symmetric_difference</span><span class="s4">(</span><span class="s1">other</span><span class="s4">), </span><span class="s1">set</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+            <span class="s1">remove</span><span class="s4">, </span><span class="s1">add </span><span class="s4">= </span><span class="s1">have </span><span class="s4">- </span><span class="s1">want</span><span class="s4">, </span><span class="s1">want </span><span class="s4">- </span><span class="s1">have</span>
+
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">remove</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+            <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">add</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">self</span>
+
+        <span class="s1">_tidy</span><span class="s4">(</span><span class="s1">__ixor__</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">__ixor__</span>
+
+    <span class="s1">l </span><span class="s4">= </span><span class="s1">locals</span><span class="s4">().</span><span class="s1">copy</span><span class="s4">()</span>
+    <span class="s1">l</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">(</span><span class="s5">&quot;_tidy&quot;</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">l</span>
+
+
+<span class="s3">class </span><span class="s1">InstrumentedList</span><span class="s4">(</span><span class="s1">List</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]):</span>
+    <span class="s2">&quot;&quot;&quot;An instrumented version of the built-in list.&quot;&quot;&quot;</span>
+
+
+<span class="s3">class </span><span class="s1">InstrumentedSet</span><span class="s4">(</span><span class="s1">Set</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]):</span>
+    <span class="s2">&quot;&quot;&quot;An instrumented version of the built-in set.&quot;&quot;&quot;</span>
+
+
+<span class="s3">class </span><span class="s1">InstrumentedDict</span><span class="s4">(</span><span class="s1">Dict</span><span class="s4">[</span><span class="s1">_KT</span><span class="s4">, </span><span class="s1">_VT</span><span class="s4">]):</span>
+    <span class="s2">&quot;&quot;&quot;An instrumented version of the built-in dict.&quot;&quot;&quot;</span>
+
+
+<span class="s1">__canned_instrumentation</span><span class="s4">: </span><span class="s1">util</span><span class="s4">.</span><span class="s1">immutabledict</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">, </span><span class="s1">_CollectionFactoryType</span><span class="s4">] = (</span>
+    <span class="s1">util</span><span class="s4">.</span><span class="s1">immutabledict</span><span class="s4">(</span>
+        <span class="s4">{</span>
+            <span class="s1">list</span><span class="s4">: </span><span class="s1">InstrumentedList</span><span class="s4">,</span>
+            <span class="s1">set</span><span class="s4">: </span><span class="s1">InstrumentedSet</span><span class="s4">,</span>
+            <span class="s1">dict</span><span class="s4">: </span><span class="s1">InstrumentedDict</span><span class="s4">,</span>
+        <span class="s4">}</span>
+    <span class="s4">)</span>
+<span class="s4">)</span>
+
+<span class="s1">__interfaces</span><span class="s4">: </span><span class="s1">util</span><span class="s4">.</span><span class="s1">immutabledict</span><span class="s4">[</span>
+    <span class="s1">Any</span><span class="s4">,</span>
+    <span class="s1">Tuple</span><span class="s4">[</span>
+        <span class="s1">Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">str</span><span class="s4">],</span>
+        <span class="s1">Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">Callable</span><span class="s4">[..., </span><span class="s1">Any</span><span class="s4">]],</span>
+    <span class="s4">],</span>
+<span class="s4">] = </span><span class="s1">util</span><span class="s4">.</span><span class="s1">immutabledict</span><span class="s4">(</span>
+    <span class="s4">{</span>
+        <span class="s1">list</span><span class="s4">: (</span>
+            <span class="s4">{</span>
+                <span class="s5">&quot;appender&quot;</span><span class="s4">: </span><span class="s5">&quot;append&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;remover&quot;</span><span class="s4">: </span><span class="s5">&quot;remove&quot;</span><span class="s4">,</span>
+                <span class="s5">&quot;iterator&quot;</span><span class="s4">: </span><span class="s5">&quot;__iter__&quot;</span><span class="s4">,</span>
+            <span class="s4">},</span>
+            <span class="s1">_list_decorators</span><span class="s4">(),</span>
+        <span class="s4">),</span>
+        <span class="s1">set</span><span class="s4">: (</span>
+            <span class="s4">{</span><span class="s5">&quot;appender&quot;</span><span class="s4">: </span><span class="s5">&quot;add&quot;</span><span class="s4">, </span><span class="s5">&quot;remover&quot;</span><span class="s4">: </span><span class="s5">&quot;remove&quot;</span><span class="s4">, </span><span class="s5">&quot;iterator&quot;</span><span class="s4">: </span><span class="s5">&quot;__iter__&quot;</span><span class="s4">},</span>
+            <span class="s1">_set_decorators</span><span class="s4">(),</span>
+        <span class="s4">),</span>
+        <span class="s0"># decorators are required for dicts and object collections.</span>
+        <span class="s1">dict</span><span class="s4">: ({</span><span class="s5">&quot;iterator&quot;</span><span class="s4">: </span><span class="s5">&quot;values&quot;</span><span class="s4">}, </span><span class="s1">_dict_decorators</span><span class="s4">()),</span>
+    <span class="s4">}</span>
+<span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">__go</span><span class="s4">(</span><span class="s1">lcls</span><span class="s4">):</span>
+    <span class="s3">global </span><span class="s1">keyfunc_mapping</span><span class="s4">, </span><span class="s1">mapped_collection</span>
+    <span class="s3">global </span><span class="s1">column_keyed_dict</span><span class="s4">, </span><span class="s1">column_mapped_collection</span>
+    <span class="s3">global </span><span class="s1">MappedCollection</span><span class="s4">, </span><span class="s1">KeyFuncDict</span>
+    <span class="s3">global </span><span class="s1">attribute_keyed_dict</span><span class="s4">, </span><span class="s1">attribute_mapped_collection</span>
+
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">keyfunc_mapping</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">column_keyed_dict</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">attribute_keyed_dict</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">KeyFuncDict</span>
+
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">mapped_collection</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">column_mapped_collection</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">attribute_mapped_collection</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapped_collection </span><span class="s3">import </span><span class="s1">MappedCollection</span>
+
+    <span class="s0"># ensure instrumentation is associated with</span>
+    <span class="s0"># these built-in classes; if a user-defined class</span>
+    <span class="s0"># subclasses these and uses @internally_instrumented,</span>
+    <span class="s0"># the superclass is otherwise not instrumented.</span>
+    <span class="s0"># see [ticket:2406].</span>
+    <span class="s1">_instrument_class</span><span class="s4">(</span><span class="s1">InstrumentedList</span><span class="s4">)</span>
+    <span class="s1">_instrument_class</span><span class="s4">(</span><span class="s1">InstrumentedSet</span><span class="s4">)</span>
+    <span class="s1">_instrument_class</span><span class="s4">(</span><span class="s1">KeyFuncDict</span><span class="s4">)</span>
+
+
+<span class="s1">__go</span><span class="s4">(</span><span class="s1">locals</span><span class="s4">())</span>
+</pre>
+</body>
+</html>

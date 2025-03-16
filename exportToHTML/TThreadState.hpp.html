@@ -1,0 +1,520 @@
+<html>
+<head>
+<title>TThreadState.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #6aab73;}
+.s3 { color: #c77dbb;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TThreadState.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_THREAD_STATE_HPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_THREAD_STATE_HPP</span>
+
+<span class="s0">#include </span><span class="s1">&lt;ctime&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;stdexcept&gt;</span>
+
+<span class="s0">#include </span><span class="s2">&quot;greenlet_internal.hpp&quot;</span>
+<span class="s0">#include </span><span class="s2">&quot;greenlet_refs.hpp&quot;</span>
+<span class="s0">#include </span><span class="s2">&quot;greenlet_thread_support.hpp&quot;</span>
+
+<span class="s3">using </span><span class="s1">greenlet::refs::BorrowedObject;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::BorrowedGreenlet;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::BorrowedMainGreenlet;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::OwnedMainGreenlet;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::OwnedObject;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::OwnedGreenlet;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::OwnedList;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::PyErrFetchParam;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::PyArgParseParam;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::ImmortalString;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::CreatedModule;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::PyErrPieces;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::NewReference;</span>
+
+<span class="s3">namespace </span><span class="s1">greenlet {</span>
+<span class="s4">/** 
+ * Thread-local state of greenlets. 
+ * 
+ * Each native thread will get exactly one of these objects, 
+ * automatically accessed through the best available thread-local 
+ * mechanism the compiler supports (``thread_local`` for C++11 
+ * compilers or ``__thread``/``declspec(thread)`` for older GCC/clang 
+ * or MSVC, respectively.) 
+ * 
+ * Previously, we kept thread-local state mostly in a bunch of 
+ * ``static volatile`` variables in the main greenlet file.. This had 
+ * the problem of requiring extra checks, loops, and great care 
+ * accessing these variables if we potentially invoked any Python code 
+ * that could release the GIL, because the state could change out from 
+ * under us. Making the variables thread-local solves this problem. 
+ * 
+ * When we detected that a greenlet API accessing the current greenlet 
+ * was invoked from a different thread than the greenlet belonged to, 
+ * we stored a reference to the greenlet in the Python thread 
+ * dictionary for the thread the greenlet belonged to. This could lead 
+ * to memory leaks if the thread then exited (because of a reference 
+ * cycle, as greenlets referred to the thread dictionary, and deleting 
+ * non-current greenlets leaked their frame plus perhaps arguments on 
+ * the C stack). If a thread exited while still having running 
+ * greenlet objects (perhaps that had just switched back to the main 
+ * greenlet), and did not invoke one of the greenlet APIs *in that 
+ * thread, immediately before it exited, without some other thread 
+ * then being invoked*, such a leak was guaranteed. 
+ * 
+ * This can be partly solved by using compiler thread-local variables 
+ * instead of the Python thread dictionary, thus avoiding a cycle. 
+ * 
+ * To fully solve this problem, we need a reliable way to know that a 
+ * thread is done and we should clean up the main greenlet. On POSIX, 
+ * we can use the destructor function of ``pthread_key_create``, but 
+ * there's nothing similar on Windows; a C++11 thread local object 
+ * reliably invokes its destructor when the thread it belongs to exits 
+ * (non-C++11 compilers offer ``__thread`` or ``declspec(thread)`` to 
+ * create thread-local variables, but they can't hold C++ objects that 
+ * invoke destructors; the C++11 version is the most portable solution 
+ * I found). When the thread exits, we can drop references and 
+ * otherwise manipulate greenlets and frames that we know can no 
+ * longer be switched to. For compilers that don't support C++11 
+ * thread locals, we have a solution that uses the python thread 
+ * dictionary, though it may not collect everything as promptly as 
+ * other compilers do, if some other library is using the thread 
+ * dictionary and has a cycle or extra reference. 
+ * 
+ * There are two small wrinkles. The first is that when the thread 
+ * exits, it is too late to actually invoke Python APIs: the Python 
+ * thread state is gone, and the GIL is released. To solve *this* 
+ * problem, our destructor uses ``Py_AddPendingCall`` to transfer the 
+ * destruction work to the main thread. (This is not an issue for the 
+ * dictionary solution.) 
+ * 
+ * The second is that once the thread exits, the thread local object 
+ * is invalid and we can't even access a pointer to it, so we can't 
+ * pass it to ``Py_AddPendingCall``. This is handled by actually using 
+ * a second object that's thread local (ThreadStateCreator) and having 
+ * it dynamically allocate this object so it can live until the 
+ * pending call runs. 
+ */</span>
+
+
+
+<span class="s3">class </span><span class="s1">ThreadState {</span>
+<span class="s3">private</span><span class="s1">:</span>
+    <span class="s4">// As of commit 08ad1dd7012b101db953f492e0021fb08634afad</span>
+    <span class="s4">// this class needed 56 bytes in o Py_DEBUG build</span>
+    <span class="s4">// on 64-bit macOS 11.</span>
+    <span class="s4">// Adding the vector takes us up to 80 bytes ()</span>
+
+    <span class="s4">/* Strong reference to the main greenlet */</span>
+    <span class="s1">OwnedMainGreenlet main_greenlet;</span>
+
+    <span class="s4">/* Strong reference to the current greenlet. */</span>
+    <span class="s1">OwnedGreenlet current_greenlet;</span>
+
+    <span class="s4">/* Strong reference to the trace function, if any. */</span>
+    <span class="s1">OwnedObject tracefunc;</span>
+
+    <span class="s0">typedef </span><span class="s1">std::vector&lt;PyGreenlet*, PythonAllocator&lt;PyGreenlet*&gt; &gt; deleteme_t;</span>
+    <span class="s4">/* A vector of raw PyGreenlet pointers representing things that need 
+       deleted when this thread is running. The vector owns the 
+       references, but you need to manually INCREF/DECREF as you use 
+       them. We don't use a vector&lt;refs::OwnedGreenlet&gt; because we 
+       make copy of this vector, and that would become O(n) as all the 
+       refcounts are incremented in the copy. 
+    */</span>
+    <span class="s1">deleteme_t deleteme;</span>
+
+<span class="s0">#ifdef </span><span class="s1">GREENLET_NEEDS_EXCEPTION_STATE_SAVED</span>
+    <span class="s0">void</span><span class="s1">* exception_state;</span>
+<span class="s0">#endif</span>
+
+    <span class="s0">static </span><span class="s1">std::clock_t _clocks_used_doing_gc;</span>
+    <span class="s0">static </span><span class="s1">ImmortalString get_referrers_name;</span>
+    <span class="s0">static </span><span class="s1">PythonAllocator&lt;ThreadState&gt; allocator;</span>
+
+    <span class="s1">G_NO_COPIES_OF_CLS(ThreadState);</span>
+
+
+    <span class="s4">// Allocates a main greenlet for the thread state. If this fails,</span>
+    <span class="s4">// exits the process. Called only during constructing a ThreadState.</span>
+    <span class="s1">MainGreenlet* alloc_main()</span>
+    <span class="s1">{</span>
+        <span class="s1">PyGreenlet* gmain;</span>
+
+        <span class="s4">/* create the main greenlet for this thread */</span>
+        <span class="s1">gmain = </span><span class="s3">reinterpret_cast</span><span class="s1">&lt;PyGreenlet*&gt;(PyType_GenericAlloc(&amp;PyGreenlet_Type, </span><span class="s5">0</span><span class="s1">));</span>
+        <span class="s0">if </span><span class="s1">(gmain == NULL) {</span>
+            <span class="s3">throw </span><span class="s1">PyFatalError(</span><span class="s2">&quot;alloc_main failed to alloc&quot;</span><span class="s1">); </span><span class="s4">//exits the process</span>
+        <span class="s1">}</span>
+
+        <span class="s1">MainGreenlet* </span><span class="s0">const </span><span class="s1">main = </span><span class="s3">new </span><span class="s1">MainGreenlet(gmain, </span><span class="s3">this</span><span class="s1">);</span>
+
+        <span class="s1">assert(Py_REFCNT(gmain) == </span><span class="s5">1</span><span class="s1">);</span>
+        <span class="s1">assert(gmain</span><span class="s6">-&gt;</span><span class="s1">pimpl == main);</span>
+        <span class="s0">return </span><span class="s1">main;</span>
+    <span class="s1">}</span>
+
+
+<span class="s3">public</span><span class="s1">:</span>
+    <span class="s0">static void</span><span class="s1">* </span><span class="s3">operator new</span><span class="s1">(size_t UNUSED(count))</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s1">ThreadState::allocator.allocate(</span><span class="s5">1</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s0">static void </span><span class="s3">operator </span><span class="s0">delete</span><span class="s1">(</span><span class="s0">void</span><span class="s1">* ptr)</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s1">ThreadState::allocator.deallocate(</span><span class="s3">static_cast</span><span class="s1">&lt;ThreadState*&gt;(ptr),</span>
+                                                 <span class="s5">1</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s0">static void </span><span class="s1">init()</span>
+    <span class="s1">{</span>
+        <span class="s1">ThreadState::get_referrers_name = </span><span class="s2">&quot;get_referrers&quot;</span><span class="s1">;</span>
+        <span class="s1">ThreadState::_clocks_used_doing_gc = </span><span class="s5">0</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">ThreadState()</span>
+    <span class="s1">{</span>
+
+<span class="s0">#ifdef </span><span class="s1">GREENLET_NEEDS_EXCEPTION_STATE_SAVED</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">exception_state = slp_get_exception_state();</span>
+<span class="s0">#endif</span>
+
+        <span class="s4">// XXX: Potentially dangerous, exposing a not fully</span>
+        <span class="s4">// constructed object.</span>
+        <span class="s1">MainGreenlet* </span><span class="s0">const </span><span class="s1">main = </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">alloc_main();</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet = OwnedMainGreenlet::consuming(</span>
+            <span class="s1">main</span><span class="s6">-&gt;</span><span class="s1">self()</span>
+        <span class="s1">);</span>
+        <span class="s1">assert(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet);</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet = main</span><span class="s6">-&gt;</span><span class="s1">self();</span>
+        <span class="s4">// The main greenlet starts with 1 refs: The returned one. We</span>
+        <span class="s4">// then copied it to the current greenlet.</span>
+        <span class="s1">assert(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet.REFCNT() == </span><span class="s5">2</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s3">inline </span><span class="s0">void </span><span class="s1">restore_exception_state()</span>
+    <span class="s1">{</span>
+<span class="s0">#ifdef </span><span class="s1">GREENLET_NEEDS_EXCEPTION_STATE_SAVED</span>
+        <span class="s4">// It's probably important this be inlined and only call C</span>
+        <span class="s4">// functions to avoid adding an SEH frame.</span>
+        <span class="s1">slp_set_exception_state(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">exception_state);</span>
+<span class="s0">#endif</span>
+    <span class="s1">}</span>
+
+    <span class="s3">inline </span><span class="s0">bool </span><span class="s1">has_main_greenlet() </span><span class="s0">const </span><span class="s1">noexcept</span>
+    <span class="s1">{</span>
+        <span class="s0">return bool</span><span class="s1">(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet);</span>
+    <span class="s1">}</span>
+
+    <span class="s4">// Called from the ThreadStateCreator when we're in non-standard</span>
+    <span class="s4">// threading mode. In that case, there is an object in the Python</span>
+    <span class="s4">// thread state dictionary that points to us. The main greenlet</span>
+    <span class="s4">// also traverses into us, in which case it's crucial not to</span>
+    <span class="s4">// traverse back into the main greenlet.</span>
+    <span class="s0">int </span><span class="s1">tp_traverse(visitproc visit, </span><span class="s0">void</span><span class="s1">* arg, </span><span class="s0">bool </span><span class="s1">traverse_main=</span><span class="s3">true</span><span class="s1">)</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(traverse_main) {</span>
+            <span class="s1">Py_VISIT(main_greenlet.borrow_o());</span>
+        <span class="s1">}</span>
+        <span class="s0">if </span><span class="s1">(traverse_main || current_greenlet != main_greenlet) {</span>
+            <span class="s1">Py_VISIT(current_greenlet.borrow_o());</span>
+        <span class="s1">}</span>
+        <span class="s1">Py_VISIT(tracefunc.borrow());</span>
+        <span class="s0">return </span><span class="s5">0</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s3">inline </span><span class="s1">BorrowedMainGreenlet borrow_main_greenlet() </span><span class="s0">const </span><span class="s1">noexcept</span>
+    <span class="s1">{</span>
+        <span class="s1">assert(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet);</span>
+        <span class="s1">assert(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet.REFCNT() &gt;= </span><span class="s5">2</span><span class="s1">);</span>
+        <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet;</span>
+    <span class="s1">};</span>
+
+    <span class="s3">inline </span><span class="s1">OwnedMainGreenlet get_main_greenlet() </span><span class="s0">const </span><span class="s1">noexcept</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet;</span>
+    <span class="s1">}</span>
+
+    <span class="s4">/** 
+     * In addition to returning a new reference to the currunt 
+     * greenlet, this performs any maintenance needed. 
+     */</span>
+    <span class="s3">inline </span><span class="s1">OwnedGreenlet get_current()</span>
+    <span class="s1">{</span>
+        <span class="s4">/* green_dealloc() cannot delete greenlets from other threads, so 
+           it stores them in the thread dict; delete them now. */</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">clear_deleteme_list();</span>
+        <span class="s4">//assert(this-&gt;current_greenlet-&gt;main_greenlet == this-&gt;main_greenlet);</span>
+        <span class="s4">//assert(this-&gt;main_greenlet-&gt;main_greenlet == this-&gt;main_greenlet);</span>
+        <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet;</span>
+    <span class="s1">}</span>
+
+    <span class="s4">/** 
+     * As for non-const get_current(); 
+     */</span>
+    <span class="s3">inline </span><span class="s1">BorrowedGreenlet borrow_current()</span>
+    <span class="s1">{</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">clear_deleteme_list();</span>
+        <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet;</span>
+    <span class="s1">}</span>
+
+    <span class="s4">/** 
+     * Does no maintenance. 
+     */</span>
+    <span class="s3">inline </span><span class="s1">OwnedGreenlet get_current() </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s3">typename </span><span class="s1">T, refs::TypeChecker TC&gt;</span>
+    <span class="s3">inline </span><span class="s0">bool </span><span class="s1">is_current(</span><span class="s0">const </span><span class="s1">refs::PyObjectPointer&lt;T, TC&gt;&amp; obj) </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet.borrow_o() == obj.borrow_o();</span>
+    <span class="s1">}</span>
+
+    <span class="s3">inline </span><span class="s0">void </span><span class="s1">set_current(</span><span class="s0">const </span><span class="s1">OwnedGreenlet&amp; target)</span>
+    <span class="s1">{</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet = target;</span>
+    <span class="s1">}</span>
+
+<span class="s3">private</span><span class="s1">:</span>
+    <span class="s4">/** 
+     * Deref and remove the greenlets from the deleteme list. Must be 
+     * holding the GIL. 
+     * 
+     * If *murder* is true, then we must be called from a different 
+     * thread than the one that these greenlets were running in. 
+     * In that case, if the greenlet was actually running, we destroy 
+     * the frame reference and otherwise make it appear dead before 
+     * proceeding; otherwise, we would try (and fail) to raise an 
+     * exception in it and wind up right back in this list. 
+     */</span>
+    <span class="s3">inline </span><span class="s0">void </span><span class="s1">clear_deleteme_list(</span><span class="s0">const bool </span><span class="s1">murder=</span><span class="s0">false</span><span class="s1">)</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(!</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">deleteme.empty()) {</span>
+            <span class="s4">// It's possible we could add items to this list while</span>
+            <span class="s4">// running Python code if there's a thread switch, so we</span>
+            <span class="s4">// need to defensively copy it before that can happen.</span>
+            <span class="s1">deleteme_t copy = </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">deleteme;</span>
+            <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">deleteme.clear(); </span><span class="s4">// in case things come back on the list</span>
+            <span class="s0">for</span><span class="s1">(deleteme_t::iterator it = copy.begin(), end = copy.end();</span>
+                <span class="s1">it != end;</span>
+                <span class="s1">++it ) {</span>
+                <span class="s1">PyGreenlet* to_del = *it;</span>
+                <span class="s0">if </span><span class="s1">(murder) {</span>
+                    <span class="s4">// Force each greenlet to appear dead; we can't raise an</span>
+                    <span class="s4">// exception into it anymore anyway.</span>
+                    <span class="s1">to_del</span><span class="s6">-&gt;</span><span class="s1">pimpl</span><span class="s6">-&gt;</span><span class="s1">murder_in_place();</span>
+                <span class="s1">}</span>
+
+                <span class="s4">// The only reference to these greenlets should be in</span>
+                <span class="s4">// this list, decreffing them should let them be</span>
+                <span class="s4">// deleted again, triggering calls to green_dealloc()</span>
+                <span class="s4">// in the correct thread (if we're not murdering).</span>
+                <span class="s4">// This may run arbitrary Python code and switch</span>
+                <span class="s4">// threads or greenlets!</span>
+                <span class="s1">Py_DECREF(to_del);</span>
+                <span class="s0">if </span><span class="s1">(PyErr_Occurred()) {</span>
+                    <span class="s1">PyErr_WriteUnraisable(nullptr);</span>
+                    <span class="s1">PyErr_Clear();</span>
+                <span class="s1">}</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+<span class="s3">public</span><span class="s1">:</span>
+
+    <span class="s4">/** 
+     * Returns a new reference, or a false object. 
+     */</span>
+    <span class="s3">inline </span><span class="s1">OwnedObject get_tracefunc() </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s1">tracefunc;</span>
+    <span class="s1">};</span>
+
+
+    <span class="s3">inline </span><span class="s0">void </span><span class="s1">set_tracefunc(BorrowedObject tracefunc)</span>
+    <span class="s1">{</span>
+        <span class="s1">assert(tracefunc);</span>
+        <span class="s0">if </span><span class="s1">(tracefunc == BorrowedObject(Py_None)) {</span>
+            <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">tracefunc.CLEAR();</span>
+        <span class="s1">}</span>
+        <span class="s0">else </span><span class="s1">{</span>
+            <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">tracefunc = tracefunc;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s4">/** 
+     * Given a reference to a greenlet that some other thread 
+     * attempted to delete (has a refcount of 0) store it for later 
+     * deletion when the thread this state belongs to is current. 
+     */</span>
+    <span class="s3">inline </span><span class="s0">void </span><span class="s1">delete_when_thread_running(PyGreenlet* to_del)</span>
+    <span class="s1">{</span>
+        <span class="s1">Py_INCREF(to_del);</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">deleteme.push_back(to_del);</span>
+    <span class="s1">}</span>
+
+    <span class="s4">/** 
+     * Set to std::clock_t(-1) to disable. 
+     */</span>
+    <span class="s3">inline </span><span class="s0">static </span><span class="s1">std::clock_t&amp; clocks_used_doing_gc()</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s1">ThreadState::_clocks_used_doing_gc;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">~ThreadState()</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(!PyInterpreterState_Head()) {</span>
+            <span class="s4">// We shouldn't get here (our callers protect us)</span>
+            <span class="s4">// but if we do, all we can do is bail early.</span>
+            <span class="s0">return</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">// We should not have an &quot;origin&quot; greenlet; that only exists</span>
+        <span class="s4">// for the temporary time during a switch, which should not</span>
+        <span class="s4">// be in progress as the thread dies.</span>
+        <span class="s4">//assert(!this-&gt;switching_state.origin);</span>
+
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">tracefunc.CLEAR();</span>
+
+        <span class="s4">// Forcibly GC as much as we can.</span>
+        <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">clear_deleteme_list(</span><span class="s3">true</span><span class="s1">);</span>
+
+        <span class="s4">// The pending call did this.</span>
+        <span class="s1">assert(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet</span><span class="s6">-&gt;</span><span class="s1">thread_state() == nullptr);</span>
+
+        <span class="s4">// If the main greenlet is the current greenlet,</span>
+        <span class="s4">// then we &quot;fell off the end&quot; and the thread died.</span>
+        <span class="s4">// It's possible that there is some other greenlet that</span>
+        <span class="s4">// switched to us, leaving a reference to the main greenlet</span>
+        <span class="s4">// on the stack, somewhere uncollectible. Try to detect that.</span>
+        <span class="s0">if </span><span class="s1">(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet == </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet &amp;&amp; </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet) {</span>
+            <span class="s1">assert(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet</span><span class="s6">-&gt;</span><span class="s1">is_currently_running_in_some_thread());</span>
+            <span class="s4">// Drop one reference we hold.</span>
+            <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet.CLEAR();</span>
+            <span class="s1">assert(!</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet);</span>
+            <span class="s4">// Only our reference to the main greenlet should be left,</span>
+            <span class="s4">// But hold onto the pointer in case we need to do extra cleanup.</span>
+            <span class="s1">PyGreenlet* old_main_greenlet = </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet.borrow();</span>
+            <span class="s1">Py_ssize_t cnt = </span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet.REFCNT();</span>
+            <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet.CLEAR();</span>
+            <span class="s0">if </span><span class="s1">(ThreadState::_clocks_used_doing_gc != std::clock_t(-</span><span class="s5">1</span><span class="s1">)</span>
+                <span class="s1">&amp;&amp; cnt == </span><span class="s5">2 </span><span class="s1">&amp;&amp; Py_REFCNT(old_main_greenlet) == </span><span class="s5">1</span><span class="s1">) {</span>
+                <span class="s4">// Highly likely that the reference is somewhere on</span>
+                <span class="s4">// the stack, not reachable by GC. Verify.</span>
+                <span class="s4">// XXX: This is O(n) in the total number of objects.</span>
+                <span class="s4">// TODO: Add a way to disable this at runtime, and</span>
+                <span class="s4">// another way to report on it.</span>
+                <span class="s1">std::clock_t begin = std::clock();</span>
+                <span class="s1">NewReference gc(PyImport_ImportModule(</span><span class="s2">&quot;gc&quot;</span><span class="s1">));</span>
+                <span class="s0">if </span><span class="s1">(gc) {</span>
+                    <span class="s1">OwnedObject get_referrers = gc.PyRequireAttr(ThreadState::get_referrers_name);</span>
+                    <span class="s1">OwnedList refs(get_referrers.PyCall(old_main_greenlet));</span>
+                    <span class="s0">if </span><span class="s1">(refs &amp;&amp; refs.empty()) {</span>
+                        <span class="s1">assert(refs.REFCNT() == </span><span class="s5">1</span><span class="s1">);</span>
+                        <span class="s4">// We found nothing! So we left a dangling</span>
+                        <span class="s4">// reference: Probably the last thing some</span>
+                        <span class="s4">// other greenlet did was call</span>
+                        <span class="s4">// 'getcurrent().parent.switch()' to switch</span>
+                        <span class="s4">// back to us. Clean it up. This will be the</span>
+                        <span class="s4">// case on CPython 3.7 and newer, as they use</span>
+                        <span class="s4">// an internal calling conversion that avoids</span>
+                        <span class="s4">// creating method objects and storing them on</span>
+                        <span class="s4">// the stack.</span>
+                        <span class="s1">Py_DECREF(old_main_greenlet);</span>
+                    <span class="s1">}</span>
+                    <span class="s0">else if </span><span class="s1">(refs</span>
+                             <span class="s1">&amp;&amp; refs.size() == </span><span class="s5">1</span>
+                             <span class="s1">&amp;&amp; PyCFunction_Check(refs.at(</span><span class="s5">0</span><span class="s1">))</span>
+                             <span class="s1">&amp;&amp; Py_REFCNT(refs.at(</span><span class="s5">0</span><span class="s1">)) == </span><span class="s5">2</span><span class="s1">) {</span>
+                        <span class="s1">assert(refs.REFCNT() == </span><span class="s5">1</span><span class="s1">);</span>
+                        <span class="s4">// Ok, we found a C method that refers to the</span>
+                        <span class="s4">// main greenlet, and its only referenced</span>
+                        <span class="s4">// twice, once in the list we just created,</span>
+                        <span class="s4">// once from...somewhere else. If we can't</span>
+                        <span class="s4">// find where else, then this is a leak.</span>
+                        <span class="s4">// This happens in older versions of CPython</span>
+                        <span class="s4">// that create a bound method object somewhere</span>
+                        <span class="s4">// on the stack that we'll never get back to.</span>
+                        <span class="s0">if </span><span class="s1">(PyCFunction_GetFunction(refs.at(</span><span class="s5">0</span><span class="s1">).borrow()) == (PyCFunction)green_switch) {</span>
+                            <span class="s1">BorrowedObject function_w = refs.at(</span><span class="s5">0</span><span class="s1">);</span>
+                            <span class="s1">refs.clear(); </span><span class="s4">// destroy the reference</span>
+                                          <span class="s4">// from the list.</span>
+                            <span class="s4">// back to one reference. Can *it* be</span>
+                            <span class="s4">// found?</span>
+                            <span class="s1">assert(function_w.REFCNT() == </span><span class="s5">1</span><span class="s1">);</span>
+                            <span class="s1">refs = get_referrers.PyCall(function_w);</span>
+                            <span class="s0">if </span><span class="s1">(refs &amp;&amp; refs.empty()) {</span>
+                                <span class="s4">// Nope, it can't be found so it won't</span>
+                                <span class="s4">// ever be GC'd. Drop it.</span>
+                                <span class="s1">Py_CLEAR(function_w);</span>
+                            <span class="s1">}</span>
+                        <span class="s1">}</span>
+                    <span class="s1">}</span>
+                    <span class="s1">std::clock_t end = std::clock();</span>
+                    <span class="s1">ThreadState::_clocks_used_doing_gc += (end - begin);</span>
+                <span class="s1">}</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+
+        <span class="s4">// We need to make sure this greenlet appears to be dead,</span>
+        <span class="s4">// because otherwise deallocing it would fail to raise an</span>
+        <span class="s4">// exception in it (the thread is dead) and put it back in our</span>
+        <span class="s4">// deleteme list.</span>
+        <span class="s0">if </span><span class="s1">(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet) {</span>
+            <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet</span><span class="s6">-&gt;</span><span class="s1">murder_in_place();</span>
+            <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">current_greenlet.CLEAR();</span>
+        <span class="s1">}</span>
+
+        <span class="s0">if </span><span class="s1">(</span><span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet) {</span>
+            <span class="s4">// Couldn't have been the main greenlet that was running</span>
+            <span class="s4">// when the thread exited (because we already cleared this</span>
+            <span class="s4">// pointer if it was). This shouldn't be possible?</span>
+
+            <span class="s4">// If the main greenlet was current when the thread died (it</span>
+            <span class="s4">// should be, right?) then we cleared its self pointer above</span>
+            <span class="s4">// when we cleared the current greenlet's main greenlet pointer.</span>
+            <span class="s4">// assert(this-&gt;main_greenlet-&gt;main_greenlet == this-&gt;main_greenlet</span>
+            <span class="s4">//        || !this-&gt;main_greenlet-&gt;main_greenlet);</span>
+            <span class="s4">// // self reference, probably gone</span>
+            <span class="s4">// this-&gt;main_greenlet-&gt;main_greenlet.CLEAR();</span>
+
+            <span class="s4">// This will actually go away when the ivar is destructed.</span>
+            <span class="s3">this</span><span class="s6">-&gt;</span><span class="s1">main_greenlet.CLEAR();</span>
+        <span class="s1">}</span>
+
+        <span class="s0">if </span><span class="s1">(PyErr_Occurred()) {</span>
+            <span class="s1">PyErr_WriteUnraisable(NULL);</span>
+            <span class="s1">PyErr_Clear();</span>
+        <span class="s1">}</span>
+
+    <span class="s1">}</span>
+
+<span class="s1">};</span>
+
+<span class="s1">ImmortalString ThreadState::get_referrers_name(nullptr);</span>
+<span class="s1">PythonAllocator&lt;ThreadState&gt; ThreadState::allocator;</span>
+<span class="s1">std::clock_t ThreadState::_clocks_used_doing_gc(</span><span class="s5">0</span><span class="s1">);</span>
+
+
+
+
+
+<span class="s1">}; </span><span class="s4">// namespace greenlet</span>
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

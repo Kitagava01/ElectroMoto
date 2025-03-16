@@ -1,0 +1,136 @@
+<html>
+<head>
+<title>cache_control.pyi</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cache_control.pyi</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s1">Callable</span>
+<span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s1">Iterable</span>
+<span class="s0">from </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">import </span><span class="s1">Mapping</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">TypeVar</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">mixins </span><span class="s0">import </span><span class="s1">ImmutableDictMixin</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">mixins </span><span class="s0">import </span><span class="s1">UpdateDictMixin</span>
+
+<span class="s1">T </span><span class="s2">= </span><span class="s1">TypeVar</span><span class="s2">(</span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+<span class="s1">_CPT </span><span class="s2">= </span><span class="s1">TypeVar</span><span class="s2">(</span><span class="s3">&quot;_CPT&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">bool</span><span class="s2">)</span>
+
+<span class="s0">def </span><span class="s1">cache_control_property</span><span class="s2">(</span>
+    <span class="s1">key</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">empty</span><span class="s2">: </span><span class="s1">_CPT </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">type</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">_CPT</span><span class="s2">]</span>
+<span class="s2">) </span><span class="s1">-&gt; property</span><span class="s2">: ...</span>
+
+<span class="s0">class </span><span class="s1">_CacheControl</span><span class="s2">(</span>
+    <span class="s1">UpdateDictMixin</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s1">int </span><span class="s2">| </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">], </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s1">int </span><span class="s2">| </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">]</span>
+<span class="s2">):</span>
+    <span class="s1">provided</span><span class="s2">: </span><span class="s1">bool</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">values</span><span class="s2">: </span><span class="s1">Mapping</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s1">int </span><span class="s2">| </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">]</span>
+        <span class="s2">| </span><span class="s1">Iterable</span><span class="s2">[</span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s1">int </span><span class="s2">| </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">]] = (),</span>
+        <span class="s1">on_update</span><span class="s2">: </span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">_CacheControl</span><span class="s2">], </span><span class="s0">None</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">no_cache</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">no_cache</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">no_cache</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">no_cache</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">no_cache</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">no_store</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">no_store</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">no_store</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">no_store</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">no_store</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">max_age</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">max_age</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">max_age</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">max_age</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">max_age</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">no_transform</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">no_transform</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">no_transform</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">no_transform</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">no_transform</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s0">def </span><span class="s1">_get_cache_value</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">empty</span><span class="s2">: </span><span class="s1">T </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">type</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">T</span><span class="s2">]) </span><span class="s1">-&gt; T</span><span class="s2">: ...</span>
+    <span class="s0">def </span><span class="s1">_set_cache_value</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">T </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">type</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">T</span><span class="s2">]) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s0">def </span><span class="s1">_del_cache_value</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s0">def </span><span class="s1">to_header</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">staticmethod</span>
+    <span class="s0">def </span><span class="s1">cache_property</span><span class="s2">(</span><span class="s1">key</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">empty</span><span class="s2">: </span><span class="s1">_CPT </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">type</span><span class="s2">: </span><span class="s1">type</span><span class="s2">[</span><span class="s1">_CPT</span><span class="s2">]) </span><span class="s1">-&gt; property</span><span class="s2">: ...</span>
+
+<span class="s0">class </span><span class="s1">RequestCacheControl</span><span class="s2">(  </span><span class="s4"># type: ignore[misc]</span>
+    <span class="s1">ImmutableDictMixin</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s1">int </span><span class="s2">| </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">], </span><span class="s1">_CacheControl</span>
+<span class="s2">):</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">max_stale</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">max_stale</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">max_stale</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">max_stale</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">max_stale</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">min_fresh</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">min_fresh</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">min_fresh</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">min_fresh</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">min_fresh</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">only_if_cached</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">only_if_cached</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">only_if_cached</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">only_if_cached</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">only_if_cached</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+
+<span class="s0">class </span><span class="s1">ResponseCacheControl</span><span class="s2">(</span><span class="s1">_CacheControl</span><span class="s2">):</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">public</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">public</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">public</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">public</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">public</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">private</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">private</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">private</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">private</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">private</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">must_revalidate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">must_revalidate</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">must_revalidate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">must_revalidate</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">must_revalidate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">proxy_revalidate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">proxy_revalidate</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">proxy_revalidate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">proxy_revalidate</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">proxy_revalidate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">s_maxage</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">s_maxage</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">s_maxage</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">s_maxage</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">s_maxage</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">immutable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">immutable</span><span class="s2">.</span><span class="s1">setter</span>
+    <span class="s0">def </span><span class="s1">immutable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+    <span class="s2">@</span><span class="s1">immutable</span><span class="s2">.</span><span class="s1">deleter</span>
+    <span class="s0">def </span><span class="s1">immutable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">: ...</span>
+</pre>
+</body>
+</html>

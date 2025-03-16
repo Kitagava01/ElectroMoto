@@ -1,0 +1,685 @@
+<html>
+<head>
+<title>TUserGreenlet.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #2aacb8;}
+.s6 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TUserGreenlet.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">/* -*- indent-tabs-mode: nil; tab-width: 4; -*- */</span>
+<span class="s0">/** 
+ * Implementation of greenlet::UserGreenlet. 
+ * 
+ * Format with: 
+ *  clang-format -i --style=file src/greenlet/greenlet.c 
+ * 
+ * 
+ * Fix missing braces with: 
+ *   clang-tidy src/greenlet/greenlet.c -fix -checks=&quot;readability-braces-around-statements&quot; 
+*/</span>
+<span class="s2">#ifndef </span><span class="s1">T_USER_GREENLET_CPP</span>
+<span class="s2">#define </span><span class="s1">T_USER_GREENLET_CPP</span>
+
+<span class="s2">#include </span><span class="s3">&quot;greenlet_internal.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TGreenlet.hpp&quot;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;TThreadStateDestroy.cpp&quot;</span>
+
+
+<span class="s4">namespace </span><span class="s1">greenlet {</span>
+<span class="s4">using </span><span class="s1">greenlet::refs::BorrowedMainGreenlet;</span>
+<span class="s1">greenlet::PythonAllocator&lt;UserGreenlet&gt; UserGreenlet::allocator;</span>
+
+<span class="s2">void</span><span class="s1">* UserGreenlet::</span><span class="s4">operator new</span><span class="s1">(size_t UNUSED(count))</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">allocator.allocate(</span><span class="s5">1</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+
+<span class="s2">void </span><span class="s1">UserGreenlet::</span><span class="s4">operator </span><span class="s2">delete</span><span class="s1">(</span><span class="s2">void</span><span class="s1">* ptr)</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">allocator.deallocate(</span><span class="s4">static_cast</span><span class="s1">&lt;UserGreenlet*&gt;(ptr),</span>
+                                <span class="s5">1</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+
+<span class="s1">UserGreenlet::UserGreenlet(PyGreenlet* p, BorrowedGreenlet the_parent)</span>
+    <span class="s1">: Greenlet(p), _parent(the_parent)</span>
+<span class="s1">{</span>
+<span class="s1">}</span>
+
+<span class="s1">UserGreenlet::~UserGreenlet()</span>
+<span class="s1">{</span>
+    <span class="s0">// Python 3.11: If we don't clear out the raw frame datastack</span>
+    <span class="s0">// when deleting an unfinished greenlet,</span>
+    <span class="s0">// TestLeaks.test_untracked_memory_doesnt_increase_unfinished_thread_dealloc_in_main fails.</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">python_state.did_finish(nullptr);</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">tp_clear();</span>
+<span class="s1">}</span>
+
+
+<span class="s2">const </span><span class="s1">BorrowedMainGreenlet</span>
+<span class="s1">UserGreenlet::main_greenlet() </span><span class="s2">const</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet;</span>
+<span class="s1">}</span>
+
+
+<span class="s1">BorrowedMainGreenlet</span>
+<span class="s1">UserGreenlet::find_main_greenlet_in_lineage() </span><span class="s2">const</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">started()) {</span>
+        <span class="s1">assert(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet);</span>
+        <span class="s2">return </span><span class="s1">BorrowedMainGreenlet(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet);</span>
+    <span class="s1">}</span>
+
+    <span class="s2">if </span><span class="s1">(!</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_parent) {</span>
+        <span class="s0">/* garbage collected greenlet in chain */</span>
+        <span class="s0">// XXX: WHAT?</span>
+        <span class="s2">return </span><span class="s1">BorrowedMainGreenlet(nullptr);</span>
+    <span class="s1">}</span>
+
+    <span class="s2">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_parent</span><span class="s6">-&gt;</span><span class="s1">find_main_greenlet_in_lineage();</span>
+<span class="s1">}</span>
+
+
+<span class="s0">/** 
+ * CAUTION: This will allocate memory and may trigger garbage 
+ * collection and arbitrary Python code. 
+ */</span>
+<span class="s1">OwnedObject</span>
+<span class="s1">UserGreenlet::throw_GreenletExit_during_dealloc(</span><span class="s2">const </span><span class="s1">ThreadState&amp; current_thread_state)</span>
+<span class="s1">{</span>
+    <span class="s0">/* The dying greenlet cannot be a parent of ts_current 
+       because the 'parent' field chain would hold a 
+       reference */</span>
+    <span class="s1">UserGreenlet::ParentIsCurrentGuard with_current_parent(</span><span class="s4">this</span><span class="s1">, current_thread_state);</span>
+
+    <span class="s0">// We don't care about the return value, only whether an</span>
+    <span class="s0">// exception happened. Whether or not an exception happens,</span>
+    <span class="s0">// we need to restore the parent in case the greenlet gets</span>
+    <span class="s0">// resurrected.</span>
+    <span class="s2">return </span><span class="s1">Greenlet::throw_GreenletExit_during_dealloc(current_thread_state);</span>
+<span class="s1">}</span>
+
+<span class="s1">ThreadState*</span>
+<span class="s1">UserGreenlet::thread_state() </span><span class="s2">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s0">// TODO: maybe make this throw, if the thread state isn't there?</span>
+    <span class="s0">// if (!this-&gt;main_greenlet) {</span>
+    <span class="s0">//     throw std::runtime_error(&quot;No thread state&quot;); // TODO: Better exception</span>
+    <span class="s0">// }</span>
+    <span class="s2">if </span><span class="s1">(!</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet) {</span>
+        <span class="s2">return </span><span class="s1">nullptr;</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet</span><span class="s6">-&gt;</span><span class="s1">thread_state();</span>
+<span class="s1">}</span>
+
+
+<span class="s2">bool</span>
+<span class="s1">UserGreenlet::was_running_in_dead_thread() </span><span class="s2">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet &amp;&amp; !</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">thread_state();</span>
+<span class="s1">}</span>
+
+<span class="s1">OwnedObject</span>
+<span class="s1">UserGreenlet::g_switch()</span>
+<span class="s1">{</span>
+    <span class="s1">assert(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args() || PyErr_Occurred());</span>
+
+    <span class="s4">try </span><span class="s1">{</span>
+        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">check_switch_allowed();</span>
+    <span class="s1">}</span>
+    <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">PyErrOccurred&amp;) {</span>
+        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">release_args();</span>
+        <span class="s4">throw</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">// Switching greenlets used to attempt to clean out ones that need</span>
+    <span class="s0">// deleted *if* we detected a thread switch. Should it still do</span>
+    <span class="s0">// that?</span>
+    <span class="s0">// An issue is that if we delete a greenlet from another thread,</span>
+    <span class="s0">// it gets queued to this thread, and ``kill_greenlet()`` switches</span>
+    <span class="s0">// back into the greenlet</span>
+
+    <span class="s0">/* find the real target by ignoring dead greenlets, 
+       and if necessary starting a greenlet. */</span>
+    <span class="s1">switchstack_result_t err;</span>
+    <span class="s1">Greenlet* target = </span><span class="s4">this</span><span class="s1">;</span>
+    <span class="s0">// TODO: probably cleaner to handle the case where we do</span>
+    <span class="s0">// switch to ourself separately from the other cases.</span>
+    <span class="s0">// This can probably even further be simplified if we keep</span>
+    <span class="s0">// track of the switching_state we're going for and just call</span>
+    <span class="s0">// into g_switch() if it's not ourself. The main problem with that</span>
+    <span class="s0">// is that we would be using more stack space.</span>
+    <span class="s2">bool </span><span class="s1">target_was_me = </span><span class="s4">true</span><span class="s1">;</span>
+    <span class="s2">bool </span><span class="s1">was_initial_stub = </span><span class="s2">false</span><span class="s1">;</span>
+    <span class="s2">while </span><span class="s1">(target) {</span>
+        <span class="s2">if </span><span class="s1">(target</span><span class="s6">-&gt;</span><span class="s1">active()) {</span>
+            <span class="s2">if </span><span class="s1">(!target_was_me) {</span>
+                <span class="s1">target</span><span class="s6">-&gt;</span><span class="s1">args() &lt;&lt;= </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args();</span>
+                <span class="s1">assert(!</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args());</span>
+            <span class="s1">}</span>
+            <span class="s1">err = target</span><span class="s6">-&gt;</span><span class="s1">g_switchstack();</span>
+            <span class="s2">break</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s2">if </span><span class="s1">(!target</span><span class="s6">-&gt;</span><span class="s1">started()) {</span>
+            <span class="s0">// We never encounter a main greenlet that's not started.</span>
+            <span class="s1">assert(!target</span><span class="s6">-&gt;</span><span class="s1">main());</span>
+            <span class="s1">UserGreenlet* real_target = </span><span class="s4">static_cast</span><span class="s1">&lt;UserGreenlet*&gt;(target);</span>
+            <span class="s1">assert(real_target);</span>
+            <span class="s2">void</span><span class="s1">* dummymarker;</span>
+            <span class="s1">was_initial_stub = </span><span class="s4">true</span><span class="s1">;</span>
+            <span class="s2">if </span><span class="s1">(!target_was_me) {</span>
+                <span class="s1">target</span><span class="s6">-&gt;</span><span class="s1">args() &lt;&lt;= </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args();</span>
+                <span class="s1">assert(!</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args());</span>
+            <span class="s1">}</span>
+            <span class="s4">try </span><span class="s1">{</span>
+                <span class="s0">// This can only throw back to us while we're</span>
+                <span class="s0">// still in this greenlet. Once the new greenlet</span>
+                <span class="s0">// is bootstrapped, it has its own exception state.</span>
+                <span class="s1">err = real_target</span><span class="s6">-&gt;</span><span class="s1">g_initialstub(&amp;dummymarker);</span>
+            <span class="s1">}</span>
+            <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">PyErrOccurred&amp;) {</span>
+                <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">release_args();</span>
+                <span class="s4">throw</span><span class="s1">;</span>
+            <span class="s1">}</span>
+            <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">GreenletStartedWhileInPython&amp;) {</span>
+                <span class="s0">// The greenlet was started sometime before this</span>
+                <span class="s0">// greenlet actually switched to it, i.e.,</span>
+                <span class="s0">// &quot;concurrent&quot; calls to switch() or throw().</span>
+                <span class="s0">// We need to retry the switch.</span>
+                <span class="s0">// Note that the current greenlet has been reset</span>
+                <span class="s0">// to this one (or we wouldn't be running!)</span>
+                <span class="s2">continue</span><span class="s1">;</span>
+            <span class="s1">}</span>
+            <span class="s2">break</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">target = target</span><span class="s6">-&gt;</span><span class="s1">parent();</span>
+        <span class="s1">target_was_me = </span><span class="s2">false</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s0">// The ``this`` pointer and all other stack or register based</span>
+    <span class="s0">// variables are invalid now, at least where things succeed</span>
+    <span class="s0">// above.</span>
+    <span class="s0">// But this one, probably not so much? It's not clear if it's</span>
+    <span class="s0">// safe to throw an exception at this point.</span>
+
+    <span class="s2">if </span><span class="s1">(err.status &lt; </span><span class="s5">0</span><span class="s1">) {</span>
+        <span class="s0">// If we get here, either g_initialstub()</span>
+        <span class="s0">// failed, or g_switchstack() failed. Either one of those</span>
+        <span class="s0">// cases SHOULD leave us in the original greenlet with a valid</span>
+        <span class="s0">// stack.</span>
+        <span class="s2">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">on_switchstack_or_initialstub_failure(target, err, target_was_me, was_initial_stub);</span>
+    <span class="s1">}</span>
+
+    <span class="s0">// err.the_new_current_greenlet would be the same as ``target``,</span>
+    <span class="s0">// if target wasn't probably corrupt.</span>
+    <span class="s2">return </span><span class="s1">err.the_new_current_greenlet</span><span class="s6">-&gt;</span><span class="s1">g_switch_finish(err);</span>
+<span class="s1">}</span>
+
+
+
+<span class="s1">Greenlet::switchstack_result_t</span>
+<span class="s1">UserGreenlet::g_initialstub(</span><span class="s2">void</span><span class="s1">* mark)</span>
+<span class="s1">{</span>
+    <span class="s1">OwnedObject run;</span>
+
+    <span class="s0">// We need to grab a reference to the current switch arguments</span>
+    <span class="s0">// in case we're entered concurrently during the call to</span>
+    <span class="s0">// GetAttr() and have to try again.</span>
+    <span class="s0">// We'll restore them when we return in that case.</span>
+    <span class="s0">// Scope them tightly to avoid ref leaks.</span>
+    <span class="s1">{</span>
+        <span class="s1">SwitchingArgs args(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args());</span>
+
+        <span class="s0">/* save exception in case getattr clears it */</span>
+        <span class="s1">PyErrPieces saved;</span>
+
+        <span class="s0">/* 
+          self.run is the object to call in the new greenlet. 
+          This could run arbitrary python code and switch greenlets! 
+        */</span>
+        <span class="s1">run = </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">self().PyRequireAttr(mod_globs</span><span class="s6">-&gt;</span><span class="s1">str_run);</span>
+        <span class="s0">/* restore saved exception */</span>
+        <span class="s1">saved.PyErrRestore();</span>
+
+
+        <span class="s0">/* recheck that it's safe to switch in case greenlet reparented anywhere above */</span>
+        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">check_switch_allowed();</span>
+
+        <span class="s0">/* by the time we got here another start could happen elsewhere, 
+         * that means it should now be a regular switch. 
+         * This can happen if the Python code is a subclass that implements 
+         * __getattribute__ or __getattr__, or makes ``run`` a descriptor; 
+         * all of those can run arbitrary code that switches back into 
+         * this greenlet. 
+         */</span>
+        <span class="s2">if </span><span class="s1">(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state.started()) {</span>
+            <span class="s0">// the successful switch cleared these out, we need to</span>
+            <span class="s0">// restore our version. They will be copied on up to the</span>
+            <span class="s0">// next target.</span>
+            <span class="s1">assert(!</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args());</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args() &lt;&lt;= args;</span>
+            <span class="s4">throw </span><span class="s1">GreenletStartedWhileInPython();</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">// Sweet, if we got here, we have the go-ahead and will switch</span>
+    <span class="s0">// greenlets.</span>
+    <span class="s0">// Nothing we do from here on out should allow for a thread or</span>
+    <span class="s0">// greenlet switch: No arbitrary calls to Python, including</span>
+    <span class="s0">// decref'ing</span>
+
+<span class="s2">#if </span><span class="s1">GREENLET_USE_CFRAME</span>
+    <span class="s0">/* OK, we need it, we're about to switch greenlets, save the state. */</span>
+    <span class="s0">/* 
+      See green_new(). This is a stack-allocated variable used 
+      while *self* is in PyObject_Call(). 
+      We want to defer copying the state info until we're sure 
+      we need it and are in a stable place to do so. 
+    */</span>
+    <span class="s1">_PyCFrame trace_info;</span>
+
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">python_state.set_new_cframe(trace_info);</span>
+<span class="s2">#endif</span>
+    <span class="s0">/* start the greenlet */</span>
+    <span class="s1">ThreadState&amp; thread_state = GET_THREAD_STATE().state();</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state = StackState(mark,</span>
+                                   <span class="s1">thread_state.borrow_current()</span><span class="s6">-&gt;</span><span class="s1">stack_state);</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">python_state.set_initial_state(PyThreadState_GET());</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">exception_state.clear();</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet = thread_state.get_main_greenlet();</span>
+
+    <span class="s0">/* perform the initial switch */</span>
+    <span class="s1">switchstack_result_t err = </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">g_switchstack();</span>
+    <span class="s0">/* returns twice! 
+       The 1st time with ``err == 1``: we are in the new greenlet. 
+       This one owns a greenlet that used to be current. 
+       The 2nd time with ``err &lt;= 0``: back in the caller's 
+       greenlet; this happens if the child finishes or switches 
+       explicitly to us. Either way, the ``err`` variable is 
+       created twice at the same memory location, but possibly 
+       having different ``origin`` values. Note that it's not 
+       constructed for the second time until the switch actually happens. 
+    */</span>
+    <span class="s2">if </span><span class="s1">(err.status == </span><span class="s5">1</span><span class="s1">) {</span>
+        <span class="s0">// In the new greenlet.</span>
+
+        <span class="s0">// This never returns! Calling inner_bootstrap steals</span>
+        <span class="s0">// the contents of our run object within this stack frame, so</span>
+        <span class="s0">// it is not valid to do anything with it.</span>
+        <span class="s4">try </span><span class="s1">{</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">inner_bootstrap(err.origin_greenlet.relinquish_ownership(),</span>
+                                  <span class="s1">run.relinquish_ownership());</span>
+        <span class="s1">}</span>
+        <span class="s0">// Getting a C++ exception here isn't good. It's probably a</span>
+        <span class="s0">// bug in the underlying greenlet, meaning it's probably a</span>
+        <span class="s0">// C++ extension. We're going to abort anyway, but try to</span>
+        <span class="s0">// display some nice information *if* possible. Some obscure</span>
+        <span class="s0">// platforms don't properly support this (old 32-bit Arm, see see</span>
+        <span class="s0">// https://github.com/python-greenlet/greenlet/issues/385); that's not</span>
+        <span class="s0">// great, but should usually be OK because, as mentioned above, we're</span>
+        <span class="s0">// terminating anyway.</span>
+        <span class="s0">//</span>
+        <span class="s0">// The catching is tested by</span>
+        <span class="s0">// ``test_cpp.CPPTests.test_unhandled_exception_in_greenlet_aborts``.</span>
+        <span class="s0">//</span>
+        <span class="s0">// PyErrOccurred can theoretically be thrown by</span>
+        <span class="s0">// inner_bootstrap() -&gt; g_switch_finish(), but that should</span>
+        <span class="s0">// never make it back to here. It is a std::exception and</span>
+        <span class="s0">// would be caught if it is.</span>
+        <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">std::exception&amp; e) {</span>
+            <span class="s1">std::string base = </span><span class="s3">&quot;greenlet: Unhandled C++ exception: &quot;</span><span class="s1">;</span>
+            <span class="s1">base += e.what();</span>
+            <span class="s1">Py_FatalError(base.c_str());</span>
+        <span class="s1">}</span>
+        <span class="s4">catch </span><span class="s1">(...) {</span>
+            <span class="s0">// Some compilers/runtimes use exceptions internally.</span>
+            <span class="s0">// It appears that GCC on Linux with libstdc++ throws an</span>
+            <span class="s0">// exception internally at process shutdown time to unwind</span>
+            <span class="s0">// stacks and clean up resources. Depending on exactly</span>
+            <span class="s0">// where we are when the process exits, that could result</span>
+            <span class="s0">// in an unknown exception getting here. If we</span>
+            <span class="s0">// Py_FatalError() or abort() here, we interfere with</span>
+            <span class="s0">// orderly process shutdown. Throwing the exception on up</span>
+            <span class="s0">// is the right thing to do.</span>
+            <span class="s0">//</span>
+            <span class="s0">// gevent's ``examples/dns_mass_resolve.py`` demonstrates this.</span>
+<span class="s2">#ifndef </span><span class="s1">NDEBUG</span>
+            <span class="s1">fprintf(stderr,</span>
+                    <span class="s3">&quot;greenlet: inner_bootstrap threw unknown exception; &quot;</span>
+                    <span class="s3">&quot;is the process terminating?</span><span class="s2">\n</span><span class="s3">&quot;</span><span class="s1">);</span>
+<span class="s2">#endif</span>
+            <span class="s4">throw</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s1">Py_FatalError(</span><span class="s3">&quot;greenlet: inner_bootstrap returned with no exception.</span><span class="s2">\n</span><span class="s3">&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+
+    <span class="s0">// In contrast, notice that we're keeping the origin greenlet</span>
+    <span class="s0">// around as an owned reference; we need it to call the trace</span>
+    <span class="s0">// function for the switch back into the parent. It was only</span>
+    <span class="s0">// captured at the time the switch actually happened, though,</span>
+    <span class="s0">// so we haven't been keeping an extra reference around this</span>
+    <span class="s0">// whole time.</span>
+
+    <span class="s0">/* back in the parent */</span>
+    <span class="s2">if </span><span class="s1">(err.status &lt; </span><span class="s5">0</span><span class="s1">) {</span>
+        <span class="s0">/* start failed badly, restore greenlet state */</span>
+        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state = StackState();</span>
+        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet.CLEAR();</span>
+        <span class="s0">// CAUTION: This may run arbitrary Python code.</span>
+        <span class="s1">run.CLEAR(); </span><span class="s0">// inner_bootstrap didn't run, we own the reference.</span>
+    <span class="s1">}</span>
+
+    <span class="s0">// In the success case, the spawned code (inner_bootstrap) will</span>
+    <span class="s0">// take care of decrefing this, so we relinquish ownership so as</span>
+    <span class="s0">// to not double-decref.</span>
+
+    <span class="s1">run.relinquish_ownership();</span>
+
+    <span class="s2">return </span><span class="s1">err;</span>
+<span class="s1">}</span>
+
+
+<span class="s2">void</span>
+<span class="s1">UserGreenlet::inner_bootstrap(PyGreenlet* origin_greenlet, PyObject* run)</span>
+<span class="s1">{</span>
+    <span class="s0">// The arguments here would be another great place for move.</span>
+    <span class="s0">// As it is, we take them as a reference so that when we clear</span>
+    <span class="s0">// them we clear what's on the stack above us. Do that NOW, and</span>
+    <span class="s0">// without using a C++ RAII object,</span>
+    <span class="s0">// so there's no way that exiting the parent frame can clear it,</span>
+    <span class="s0">// or we clear it unexpectedly. This arises in the context of the</span>
+    <span class="s0">// interpreter shutting down. See https://github.com/python-greenlet/greenlet/issues/325</span>
+    <span class="s0">//PyObject* run = _run.relinquish_ownership();</span>
+
+    <span class="s0">/* in the new greenlet */</span>
+    <span class="s1">assert(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">thread_state()</span><span class="s6">-&gt;</span><span class="s1">borrow_current() == BorrowedGreenlet(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_self));</span>
+    <span class="s0">// C++ exceptions cannot propagate to the parent greenlet from</span>
+    <span class="s0">// here. (TODO: Do we need a catch(...) clause, perhaps on the</span>
+    <span class="s0">// function itself? ALl we could do is terminate the program.)</span>
+    <span class="s0">// NOTE: On 32-bit Windows, the call chain is extremely</span>
+    <span class="s0">// important here in ways that are subtle, having to do with</span>
+    <span class="s0">// the depth of the SEH list. The call to restore it MUST NOT</span>
+    <span class="s0">// add a new SEH handler to the list, or we'll restore it to</span>
+    <span class="s0">// the wrong thing.</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">thread_state()</span><span class="s6">-&gt;</span><span class="s1">restore_exception_state();</span>
+    <span class="s0">/* stack variables from above are no good and also will not unwind! */</span>
+    <span class="s0">// EXCEPT: That can't be true, we access run, among others, here.</span>
+
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state.set_active(); </span><span class="s0">/* running */</span>
+
+    <span class="s0">// We're about to possibly run Python code again, which</span>
+    <span class="s0">// could switch back/away to/from us, so we need to grab the</span>
+    <span class="s0">// arguments locally.</span>
+    <span class="s1">SwitchingArgs args;</span>
+    <span class="s1">args &lt;&lt;= </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args();</span>
+    <span class="s1">assert(!</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args());</span>
+
+    <span class="s0">// XXX: We could clear this much earlier, right?</span>
+    <span class="s0">// Or would that introduce the possibility of running Python</span>
+    <span class="s0">// code when we don't want to?</span>
+    <span class="s0">// CAUTION: This may run arbitrary Python code.</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_run_callable.CLEAR();</span>
+
+
+    <span class="s0">// The first switch we need to manually call the trace</span>
+    <span class="s0">// function here instead of in g_switch_finish, because we</span>
+    <span class="s0">// never return there.</span>
+    <span class="s2">if </span><span class="s1">(OwnedObject tracefunc = </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">thread_state()</span><span class="s6">-&gt;</span><span class="s1">get_tracefunc()) {</span>
+        <span class="s1">OwnedGreenlet trace_origin;</span>
+        <span class="s1">trace_origin = origin_greenlet;</span>
+        <span class="s4">try </span><span class="s1">{</span>
+            <span class="s1">g_calltrace(tracefunc,</span>
+                        <span class="s1">args ? mod_globs</span><span class="s6">-&gt;</span><span class="s1">event_switch : mod_globs</span><span class="s6">-&gt;</span><span class="s1">event_throw,</span>
+                        <span class="s1">trace_origin,</span>
+                        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_self);</span>
+        <span class="s1">}</span>
+        <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">PyErrOccurred&amp;) {</span>
+            <span class="s0">/* Turn trace errors into switch throws */</span>
+            <span class="s1">args.CLEAR();</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">// We no longer need the origin, it was only here for</span>
+    <span class="s0">// tracing.</span>
+    <span class="s0">// We may never actually exit this stack frame so we need</span>
+    <span class="s0">// to explicitly clear it.</span>
+    <span class="s0">// This could run Python code and switch.</span>
+    <span class="s1">Py_CLEAR(origin_greenlet);</span>
+
+    <span class="s1">OwnedObject result;</span>
+    <span class="s2">if </span><span class="s1">(!args) {</span>
+        <span class="s0">/* pending exception */</span>
+        <span class="s1">result = NULL;</span>
+    <span class="s1">}</span>
+    <span class="s2">else </span><span class="s1">{</span>
+        <span class="s0">/* call g.run(*args, **kwargs) */</span>
+        <span class="s0">// This could result in further switches</span>
+        <span class="s4">try </span><span class="s1">{</span>
+            <span class="s0">//result = run.PyCall(args.args(), args.kwargs());</span>
+            <span class="s0">// CAUTION: Just invoking this, before the function even</span>
+            <span class="s0">// runs, may cause memory allocations, which may trigger</span>
+            <span class="s0">// GC, which may run arbitrary Python code.</span>
+            <span class="s1">result = OwnedObject::consuming(PyObject_Call(run, args.args().borrow(), args.kwargs().borrow()));</span>
+        <span class="s1">}</span>
+        <span class="s4">catch </span><span class="s1">(...) {</span>
+            <span class="s0">// Unhandled C++ exception!</span>
+
+            <span class="s0">// If we declare ourselves as noexcept, if we don't catch</span>
+            <span class="s0">// this here, most platforms will just abort() the</span>
+            <span class="s0">// process. But on 64-bit Windows with older versions of</span>
+            <span class="s0">// the C runtime, this can actually corrupt memory and</span>
+            <span class="s0">// just return. We see this when compiling with the</span>
+            <span class="s0">// Windows 7.0 SDK targeting Windows Server 2008, but not</span>
+            <span class="s0">// when using the Appveyor Visual Studio 2019 image. So</span>
+            <span class="s0">// this currently only affects Python 2.7 on Windows 64.</span>
+            <span class="s0">// That is, the tests pass and the runtime aborts</span>
+            <span class="s0">// everywhere else.</span>
+            <span class="s0">//</span>
+            <span class="s0">// However, if we catch it and try to continue with a</span>
+            <span class="s0">// Python error, then all Windows 64 bit platforms corrupt</span>
+            <span class="s0">// memory. So all we can do is manually abort, hopefully</span>
+            <span class="s0">// with a good error message. (Note that the above was</span>
+            <span class="s0">// tested WITHOUT the `/EHr` switch being used at compile</span>
+            <span class="s0">// time, so MSVC may have &quot;optimized&quot; out important</span>
+            <span class="s0">// checking. Using that switch, we may be in a better</span>
+            <span class="s0">// place in terms of memory corruption.) But sometimes it</span>
+            <span class="s0">// can't be caught here at all, which is confusing but not</span>
+            <span class="s0">// terribly surprising; so again, the G_NOEXCEPT_WIN32</span>
+            <span class="s0">// plus &quot;/EHr&quot;.</span>
+            <span class="s0">//</span>
+            <span class="s0">// Hopefully the basic C stdlib is still functional enough</span>
+            <span class="s0">// for us to at least print an error.</span>
+            <span class="s0">//</span>
+            <span class="s0">// It gets more complicated than that, though, on some</span>
+            <span class="s0">// platforms, specifically at least Linux/gcc/libstdc++. They use</span>
+            <span class="s0">// an exception to unwind the stack when a background</span>
+            <span class="s0">// thread exits. (See comments about noexcept.) So this</span>
+            <span class="s0">// may not actually represent anything untoward. On those</span>
+            <span class="s0">// platforms we allow throws of this to propagate, or</span>
+            <span class="s0">// attempt to anyway.</span>
+<span class="s1"># </span><span class="s2">if </span><span class="s1">defined(WIN32) || defined(_WIN32)</span>
+            <span class="s1">Py_FatalError(</span>
+                <span class="s3">&quot;greenlet: Unhandled C++ exception from a greenlet run function. &quot;</span>
+                <span class="s3">&quot;Because memory is likely corrupted, terminating process.&quot;</span><span class="s1">);</span>
+            <span class="s1">std::abort();</span>
+<span class="s2">#else</span>
+            <span class="s4">throw</span><span class="s1">;</span>
+<span class="s2">#endif</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+    <span class="s0">// These lines may run arbitrary code</span>
+    <span class="s1">args.CLEAR();</span>
+    <span class="s1">Py_CLEAR(run);</span>
+
+    <span class="s2">if </span><span class="s1">(!result</span>
+        <span class="s1">&amp;&amp; mod_globs</span><span class="s6">-&gt;</span><span class="s1">PyExc_GreenletExit.PyExceptionMatches()</span>
+        <span class="s1">&amp;&amp; (</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args())) {</span>
+        <span class="s0">// This can happen, for example, if our only reference</span>
+        <span class="s0">// goes away after we switch back to the parent.</span>
+        <span class="s0">// See test_dealloc_switch_args_not_lost</span>
+        <span class="s1">PyErrPieces clear_error;</span>
+        <span class="s1">result &lt;&lt;= </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">args();</span>
+        <span class="s1">result = single_result(result);</span>
+    <span class="s1">}</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">release_args();</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">python_state.did_finish(PyThreadState_GET());</span>
+
+    <span class="s1">result = g_handle_exit(result);</span>
+    <span class="s1">assert(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">thread_state()</span><span class="s6">-&gt;</span><span class="s1">borrow_current() == </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_self);</span>
+
+    <span class="s0">/* jump back to parent */</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state.set_inactive(); </span><span class="s0">/* dead */</span>
+
+
+    <span class="s0">// TODO: Can we decref some things here? Release our main greenlet</span>
+    <span class="s0">// and maybe parent?</span>
+    <span class="s2">for </span><span class="s1">(Greenlet* parent = </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_parent;</span>
+         <span class="s1">parent;</span>
+         <span class="s1">parent = parent</span><span class="s6">-&gt;</span><span class="s1">parent()) {</span>
+        <span class="s0">// We need to somewhere consume a reference to</span>
+        <span class="s0">// the result; in most cases we'll never have control</span>
+        <span class="s0">// back in this stack frame again. Calling</span>
+        <span class="s0">// green_switch actually adds another reference!</span>
+        <span class="s0">// This would probably be clearer with a specific API</span>
+        <span class="s0">// to hand results to the parent.</span>
+        <span class="s1">parent</span><span class="s6">-&gt;</span><span class="s1">args() &lt;&lt;= result;</span>
+        <span class="s1">assert(!result);</span>
+        <span class="s0">// The parent greenlet now owns the result; in the</span>
+        <span class="s0">// typical case we'll never get back here to assign to</span>
+        <span class="s0">// result and thus release the reference.</span>
+        <span class="s4">try </span><span class="s1">{</span>
+            <span class="s1">result = parent</span><span class="s6">-&gt;</span><span class="s1">g_switch();</span>
+        <span class="s1">}</span>
+        <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">PyErrOccurred&amp;) {</span>
+            <span class="s0">// Ignore, keep passing the error on up.</span>
+        <span class="s1">}</span>
+
+        <span class="s0">/* Return here means switch to parent failed, 
+         * in which case we throw *current* exception 
+         * to the next parent in chain. 
+         */</span>
+        <span class="s1">assert(!result);</span>
+    <span class="s1">}</span>
+    <span class="s0">/* We ran out of parents, cannot continue */</span>
+    <span class="s1">PyErr_WriteUnraisable(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">self().borrow_o());</span>
+    <span class="s1">Py_FatalError(</span><span class="s3">&quot;greenlet: ran out of parent greenlets while propagating exception; &quot;</span>
+                  <span class="s3">&quot;cannot continue&quot;</span><span class="s1">);</span>
+    <span class="s1">std::abort();</span>
+<span class="s1">}</span>
+
+<span class="s2">void</span>
+<span class="s1">UserGreenlet::run(</span><span class="s2">const </span><span class="s1">BorrowedObject nrun)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">started()) {</span>
+        <span class="s4">throw </span><span class="s1">AttributeError(</span>
+                        <span class="s3">&quot;run cannot be set &quot;</span>
+                        <span class="s3">&quot;after the start of the greenlet&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_run_callable = nrun;</span>
+<span class="s1">}</span>
+
+<span class="s2">const </span><span class="s1">OwnedGreenlet</span>
+<span class="s1">UserGreenlet::parent() </span><span class="s2">const</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_parent;</span>
+<span class="s1">}</span>
+
+<span class="s2">void</span>
+<span class="s1">UserGreenlet::parent(</span><span class="s2">const </span><span class="s1">BorrowedObject raw_new_parent)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(!raw_new_parent) {</span>
+        <span class="s4">throw </span><span class="s1">AttributeError(</span><span class="s3">&quot;can't delete attribute&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s1">BorrowedMainGreenlet main_greenlet_of_new_parent;</span>
+    <span class="s1">BorrowedGreenlet new_parent(raw_new_parent.borrow()); </span><span class="s0">// could</span>
+                                                          <span class="s0">// throw</span>
+                                                          <span class="s0">// TypeError!</span>
+    <span class="s2">for </span><span class="s1">(BorrowedGreenlet p = new_parent; p; p = p</span><span class="s6">-&gt;</span><span class="s1">parent()) {</span>
+        <span class="s2">if </span><span class="s1">(p == </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">self()) {</span>
+            <span class="s4">throw </span><span class="s1">ValueError(</span><span class="s3">&quot;cyclic parent chain&quot;</span><span class="s1">);</span>
+        <span class="s1">}</span>
+        <span class="s1">main_greenlet_of_new_parent = p</span><span class="s6">-&gt;</span><span class="s1">main_greenlet();</span>
+    <span class="s1">}</span>
+
+    <span class="s2">if </span><span class="s1">(!main_greenlet_of_new_parent) {</span>
+        <span class="s4">throw </span><span class="s1">ValueError(</span><span class="s3">&quot;parent must not be garbage collected&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s2">if </span><span class="s1">(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">started()</span>
+        <span class="s1">&amp;&amp; </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet != main_greenlet_of_new_parent) {</span>
+        <span class="s4">throw </span><span class="s1">ValueError(</span><span class="s3">&quot;parent cannot be on a different thread&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_parent = new_parent;</span>
+<span class="s1">}</span>
+
+<span class="s2">void</span>
+<span class="s1">UserGreenlet::murder_in_place()</span>
+<span class="s1">{</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet.CLEAR();</span>
+    <span class="s1">Greenlet::murder_in_place();</span>
+<span class="s1">}</span>
+
+<span class="s2">bool</span>
+<span class="s1">UserGreenlet::belongs_to_thread(</span><span class="s2">const </span><span class="s1">ThreadState* thread_state) </span><span class="s2">const</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">Greenlet::belongs_to_thread(thread_state) &amp;&amp; </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet == thread_state</span><span class="s6">-&gt;</span><span class="s1">borrow_main_greenlet();</span>
+<span class="s1">}</span>
+
+
+<span class="s2">int</span>
+<span class="s1">UserGreenlet::tp_traverse(visitproc visit, </span><span class="s2">void</span><span class="s1">* arg)</span>
+<span class="s1">{</span>
+    <span class="s1">Py_VISIT(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_parent.borrow_o());</span>
+    <span class="s1">Py_VISIT(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet.borrow_o());</span>
+    <span class="s1">Py_VISIT(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_run_callable.borrow_o());</span>
+
+    <span class="s2">return </span><span class="s1">Greenlet::tp_traverse(visit, arg);</span>
+<span class="s1">}</span>
+
+<span class="s2">int</span>
+<span class="s1">UserGreenlet::tp_clear()</span>
+<span class="s1">{</span>
+    <span class="s1">Greenlet::tp_clear();</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_parent.CLEAR();</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_main_greenlet.CLEAR();</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_run_callable.CLEAR();</span>
+    <span class="s2">return </span><span class="s5">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s1">UserGreenlet::ParentIsCurrentGuard::ParentIsCurrentGuard(UserGreenlet* p,</span>
+                                                     <span class="s2">const </span><span class="s1">ThreadState&amp; thread_state)</span>
+    <span class="s1">: oldparent(p</span><span class="s6">-&gt;</span><span class="s1">_parent),</span>
+      <span class="s1">greenlet(p)</span>
+<span class="s1">{</span>
+    <span class="s1">p</span><span class="s6">-&gt;</span><span class="s1">_parent = thread_state.get_current();</span>
+<span class="s1">}</span>
+
+<span class="s1">UserGreenlet::ParentIsCurrentGuard::~ParentIsCurrentGuard()</span>
+<span class="s1">{</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">greenlet</span><span class="s6">-&gt;</span><span class="s1">_parent = oldparent;</span>
+    <span class="s1">oldparent.CLEAR();</span>
+<span class="s1">}</span>
+
+<span class="s1">}; </span><span class="s0">//namespace greenlet</span>
+<span class="s2">#endif</span>
+</pre>
+</body>
+</html>

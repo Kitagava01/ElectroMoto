@@ -1,0 +1,367 @@
+<html>
+<head>
+<title>debugger.js</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #bcbec4;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+debugger.js</font>
+</center></td></tr></table>
+<pre><span class="s0">docReady</span><span class="s1">(() =&gt; {</span>
+  <span class="s2">if </span><span class="s1">(!</span><span class="s0">EVALEX_TRUSTED</span><span class="s1">) {</span>
+    <span class="s0">initPinBox</span><span class="s1">();</span>
+  <span class="s1">}</span>
+  <span class="s3">// if we are in console mode, show the console.</span>
+  <span class="s2">if </span><span class="s1">(</span><span class="s0">CONSOLE_MODE </span><span class="s1">&amp;&amp; </span><span class="s0">EVALEX</span><span class="s1">) {</span>
+    <span class="s0">createInteractiveConsole</span><span class="s1">();</span>
+  <span class="s1">}</span>
+
+  <span class="s2">const </span><span class="s0">frames </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">querySelectorAll</span><span class="s1">(</span><span class="s4">&quot;div.traceback div.frame&quot;</span><span class="s1">);</span>
+  <span class="s2">if </span><span class="s1">(</span><span class="s0">EVALEX</span><span class="s1">) {</span>
+    <span class="s0">addConsoleIconToFrames</span><span class="s1">(</span><span class="s0">frames</span><span class="s1">);</span>
+  <span class="s1">}</span>
+  <span class="s0">addEventListenersToElements</span><span class="s1">(</span><span class="s0">document</span><span class="s1">.</span><span class="s0">querySelectorAll</span><span class="s1">(</span><span class="s4">&quot;div.detail&quot;</span><span class="s1">), </span><span class="s4">&quot;click&quot;</span><span class="s1">, () =&gt;</span>
+    <span class="s0">document</span><span class="s1">.</span><span class="s0">querySelector</span><span class="s1">(</span><span class="s4">&quot;div.traceback&quot;</span><span class="s1">).</span><span class="s0">scrollIntoView</span><span class="s1">(</span><span class="s2">false</span><span class="s1">)</span>
+  <span class="s1">);</span>
+  <span class="s0">addToggleFrameTraceback</span><span class="s1">(</span><span class="s0">frames</span><span class="s1">);</span>
+  <span class="s0">addToggleTraceTypesOnClick</span><span class="s1">(</span><span class="s0">document</span><span class="s1">.</span><span class="s0">querySelectorAll</span><span class="s1">(</span><span class="s4">&quot;h2.traceback&quot;</span><span class="s1">));</span>
+  <span class="s0">addInfoPrompt</span><span class="s1">(</span><span class="s0">document</span><span class="s1">.</span><span class="s0">querySelectorAll</span><span class="s1">(</span><span class="s4">&quot;span.nojavascript&quot;</span><span class="s1">));</span>
+  <span class="s0">wrapPlainTraceback</span><span class="s1">();</span>
+<span class="s1">});</span>
+
+<span class="s2">function </span><span class="s0">addToggleFrameTraceback</span><span class="s1">(</span><span class="s0">frames</span><span class="s1">) {</span>
+  <span class="s0">frames</span><span class="s1">.</span><span class="s0">forEach</span><span class="s1">((</span><span class="s0">frame</span><span class="s1">) =&gt; {</span>
+    <span class="s0">frame</span><span class="s1">.</span><span class="s0">addEventListener</span><span class="s1">(</span><span class="s4">&quot;click&quot;</span><span class="s1">, () =&gt; {</span>
+      <span class="s0">frame</span><span class="s1">.</span><span class="s0">getElementsByTagName</span><span class="s1">(</span><span class="s4">&quot;pre&quot;</span><span class="s1">)[</span><span class="s5">0</span><span class="s1">].</span><span class="s0">parentElement</span><span class="s1">.</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">toggle</span><span class="s1">(</span><span class="s4">&quot;expanded&quot;</span><span class="s1">);</span>
+    <span class="s1">});</span>
+  <span class="s1">})</span>
+<span class="s1">}</span>
+
+
+<span class="s2">function </span><span class="s0">wrapPlainTraceback</span><span class="s1">() {</span>
+  <span class="s2">const </span><span class="s0">plainTraceback </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">querySelector</span><span class="s1">(</span><span class="s4">&quot;div.plain textarea&quot;</span><span class="s1">);</span>
+  <span class="s2">const </span><span class="s0">wrapper </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createElement</span><span class="s1">(</span><span class="s4">&quot;pre&quot;</span><span class="s1">);</span>
+  <span class="s2">const </span><span class="s0">textNode </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createTextNode</span><span class="s1">(</span><span class="s0">plainTraceback</span><span class="s1">.</span><span class="s0">textContent</span><span class="s1">);</span>
+  <span class="s0">wrapper</span><span class="s1">.</span><span class="s0">appendChild</span><span class="s1">(</span><span class="s0">textNode</span><span class="s1">);</span>
+  <span class="s0">plainTraceback</span><span class="s1">.</span><span class="s0">replaceWith</span><span class="s1">(</span><span class="s0">wrapper</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">makeDebugURL</span><span class="s1">(</span><span class="s0">args</span><span class="s1">) {</span>
+  <span class="s2">const </span><span class="s0">params </span><span class="s1">= </span><span class="s2">new </span><span class="s0">URLSearchParams</span><span class="s1">(</span><span class="s0">args</span><span class="s1">)</span>
+  <span class="s0">params</span><span class="s1">.</span><span class="s0">set</span><span class="s1">(</span><span class="s4">&quot;s&quot;</span><span class="s1">, </span><span class="s0">SECRET</span><span class="s1">)</span>
+  <span class="s2">return </span><span class="s4">`?__debugger__=yes&amp;</span><span class="s0">$</span><span class="s1">{</span><span class="s0">params</span><span class="s1">}</span><span class="s4">`</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">initPinBox</span><span class="s1">() {</span>
+  <span class="s0">document</span><span class="s1">.</span><span class="s0">querySelector</span><span class="s1">(</span><span class="s4">&quot;.pin-prompt form&quot;</span><span class="s1">).</span><span class="s0">addEventListener</span><span class="s1">(</span>
+    <span class="s4">&quot;submit&quot;</span><span class="s1">,</span>
+    <span class="s2">function </span><span class="s1">(</span><span class="s0">event</span><span class="s1">) {</span>
+      <span class="s0">event</span><span class="s1">.</span><span class="s0">preventDefault</span><span class="s1">();</span>
+      <span class="s2">const </span><span class="s0">btn </span><span class="s1">= </span><span class="s2">this</span><span class="s1">.</span><span class="s0">btn</span><span class="s1">;</span>
+      <span class="s0">btn</span><span class="s1">.</span><span class="s0">disabled </span><span class="s1">= </span><span class="s2">true</span><span class="s1">;</span>
+
+      <span class="s0">fetch</span><span class="s1">(</span>
+        <span class="s0">makeDebugURL</span><span class="s1">({</span><span class="s0">cmd</span><span class="s1">: </span><span class="s4">&quot;pinauth&quot;</span><span class="s1">, </span><span class="s0">pin</span><span class="s1">: </span><span class="s2">this</span><span class="s1">.</span><span class="s0">pin</span><span class="s1">.</span><span class="s0">value</span><span class="s1">})</span>
+      <span class="s1">)</span>
+        <span class="s1">.</span><span class="s0">then</span><span class="s1">((</span><span class="s0">res</span><span class="s1">) =&gt; </span><span class="s0">res</span><span class="s1">.</span><span class="s0">json</span><span class="s1">())</span>
+        <span class="s1">.</span><span class="s0">then</span><span class="s1">(({</span><span class="s0">auth</span><span class="s1">, </span><span class="s0">exhausted</span><span class="s1">}) =&gt; {</span>
+          <span class="s2">if </span><span class="s1">(</span><span class="s0">auth</span><span class="s1">) {</span>
+            <span class="s0">EVALEX_TRUSTED </span><span class="s1">= </span><span class="s2">true</span><span class="s1">;</span>
+            <span class="s0">fadeOut</span><span class="s1">(</span><span class="s0">document</span><span class="s1">.</span><span class="s0">getElementsByClassName</span><span class="s1">(</span><span class="s4">&quot;pin-prompt&quot;</span><span class="s1">)[</span><span class="s5">0</span><span class="s1">]);</span>
+          <span class="s1">} </span><span class="s2">else </span><span class="s1">{</span>
+            <span class="s0">alert</span><span class="s1">(</span>
+              <span class="s4">`Error: </span><span class="s0">$</span><span class="s1">{</span>
+                <span class="s0">exhausted</span>
+                  <span class="s1">? </span><span class="s4">&quot;too many attempts.  Restart server to retry.&quot;</span>
+                  <span class="s1">: </span><span class="s4">&quot;incorrect pin&quot;</span>
+              <span class="s1">}</span><span class="s4">`</span>
+            <span class="s1">);</span>
+          <span class="s1">}</span>
+        <span class="s1">})</span>
+        <span class="s1">.</span><span class="s0">catch</span><span class="s1">((</span><span class="s0">err</span><span class="s1">) =&gt; {</span>
+          <span class="s0">alert</span><span class="s1">(</span><span class="s4">&quot;Error: Could not verify PIN.  Network error?&quot;</span><span class="s1">);</span>
+          <span class="s0">console</span><span class="s1">.</span><span class="s0">error</span><span class="s1">(</span><span class="s0">err</span><span class="s1">);</span>
+        <span class="s1">})</span>
+        <span class="s1">.</span><span class="s0">finally</span><span class="s1">(() =&gt; (</span><span class="s0">btn</span><span class="s1">.</span><span class="s0">disabled </span><span class="s1">= </span><span class="s2">false</span><span class="s1">));</span>
+    <span class="s1">},</span>
+    <span class="s2">false</span>
+  <span class="s1">);</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">promptForPin</span><span class="s1">() {</span>
+  <span class="s2">if </span><span class="s1">(!</span><span class="s0">EVALEX_TRUSTED</span><span class="s1">) {</span>
+    <span class="s0">fetch</span><span class="s1">(</span><span class="s0">makeDebugURL</span><span class="s1">({</span><span class="s0">cmd</span><span class="s1">: </span><span class="s4">&quot;printpin&quot;</span><span class="s1">}));</span>
+    <span class="s2">const </span><span class="s0">pinPrompt </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">getElementsByClassName</span><span class="s1">(</span><span class="s4">&quot;pin-prompt&quot;</span><span class="s1">)[</span><span class="s5">0</span><span class="s1">];</span>
+    <span class="s0">fadeIn</span><span class="s1">(</span><span class="s0">pinPrompt</span><span class="s1">);</span>
+    <span class="s0">document</span><span class="s1">.</span><span class="s0">querySelector</span><span class="s1">(</span><span class="s4">'.pin-prompt input[name=&quot;pin&quot;]'</span><span class="s1">).</span><span class="s0">focus</span><span class="s1">();</span>
+  <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s6">/**</span>
+ <span class="s6">* Helper function for shell initialization</span>
+ <span class="s6">*/</span>
+<span class="s2">function </span><span class="s0">openShell</span><span class="s1">(</span><span class="s0">consoleNode</span><span class="s1">, </span><span class="s0">target</span><span class="s1">, </span><span class="s0">frameID</span><span class="s1">) {</span>
+  <span class="s0">promptForPin</span><span class="s1">();</span>
+  <span class="s2">if </span><span class="s1">(</span><span class="s0">consoleNode</span><span class="s1">) {</span>
+    <span class="s0">slideToggle</span><span class="s1">(</span><span class="s0">consoleNode</span><span class="s1">);</span>
+    <span class="s2">return </span><span class="s0">consoleNode</span><span class="s1">;</span>
+  <span class="s1">}</span>
+  <span class="s2">let </span><span class="s0">historyPos </span><span class="s1">= </span><span class="s5">0</span><span class="s1">;</span>
+  <span class="s2">const </span><span class="s0">history </span><span class="s1">= [</span><span class="s4">&quot;&quot;</span><span class="s1">];</span>
+  <span class="s2">const </span><span class="s0">consoleElement </span><span class="s1">= </span><span class="s0">createConsole</span><span class="s1">();</span>
+  <span class="s2">const </span><span class="s0">output </span><span class="s1">= </span><span class="s0">createConsoleOutput</span><span class="s1">();</span>
+  <span class="s2">const </span><span class="s0">form </span><span class="s1">= </span><span class="s0">createConsoleInputForm</span><span class="s1">();</span>
+  <span class="s2">const </span><span class="s0">command </span><span class="s1">= </span><span class="s0">createConsoleInput</span><span class="s1">();</span>
+
+  <span class="s0">target</span><span class="s1">.</span><span class="s0">parentNode</span><span class="s1">.</span><span class="s0">appendChild</span><span class="s1">(</span><span class="s0">consoleElement</span><span class="s1">);</span>
+  <span class="s0">consoleElement</span><span class="s1">.</span><span class="s0">append</span><span class="s1">(</span><span class="s0">output</span><span class="s1">);</span>
+  <span class="s0">consoleElement</span><span class="s1">.</span><span class="s0">append</span><span class="s1">(</span><span class="s0">form</span><span class="s1">);</span>
+  <span class="s0">form</span><span class="s1">.</span><span class="s0">append</span><span class="s1">(</span><span class="s0">command</span><span class="s1">);</span>
+  <span class="s0">command</span><span class="s1">.</span><span class="s0">focus</span><span class="s1">();</span>
+  <span class="s0">slideToggle</span><span class="s1">(</span><span class="s0">consoleElement</span><span class="s1">);</span>
+
+  <span class="s0">form</span><span class="s1">.</span><span class="s0">addEventListener</span><span class="s1">(</span><span class="s4">&quot;submit&quot;</span><span class="s1">, (</span><span class="s0">e</span><span class="s1">) =&gt; {</span>
+    <span class="s0">handleConsoleSubmit</span><span class="s1">(</span><span class="s0">e</span><span class="s1">, </span><span class="s0">command</span><span class="s1">, </span><span class="s0">frameID</span><span class="s1">).</span><span class="s0">then</span><span class="s1">((</span><span class="s0">consoleOutput</span><span class="s1">) =&gt; {</span>
+      <span class="s0">output</span><span class="s1">.</span><span class="s0">append</span><span class="s1">(</span><span class="s0">consoleOutput</span><span class="s1">);</span>
+      <span class="s0">command</span><span class="s1">.</span><span class="s0">focus</span><span class="s1">();</span>
+      <span class="s0">consoleElement</span><span class="s1">.</span><span class="s0">scrollTo</span><span class="s1">(</span><span class="s5">0</span><span class="s1">, </span><span class="s0">consoleElement</span><span class="s1">.</span><span class="s0">scrollHeight</span><span class="s1">);</span>
+      <span class="s2">const </span><span class="s0">old </span><span class="s1">= </span><span class="s0">history</span><span class="s1">.</span><span class="s0">pop</span><span class="s1">();</span>
+      <span class="s0">history</span><span class="s1">.</span><span class="s0">push</span><span class="s1">(</span><span class="s0">command</span><span class="s1">.</span><span class="s0">value</span><span class="s1">);</span>
+      <span class="s2">if </span><span class="s1">(</span><span class="s2">typeof </span><span class="s0">old </span><span class="s1">!== </span><span class="s4">&quot;undefined&quot;</span><span class="s1">) {</span>
+        <span class="s0">history</span><span class="s1">.</span><span class="s0">push</span><span class="s1">(</span><span class="s0">old</span><span class="s1">);</span>
+      <span class="s1">}</span>
+      <span class="s0">historyPos </span><span class="s1">= </span><span class="s0">history</span><span class="s1">.</span><span class="s0">length </span><span class="s1">- </span><span class="s5">1</span><span class="s1">;</span>
+      <span class="s0">command</span><span class="s1">.</span><span class="s0">value </span><span class="s1">= </span><span class="s4">&quot;&quot;</span><span class="s1">;</span>
+    <span class="s1">});</span>
+  <span class="s1">});</span>
+
+  <span class="s0">command</span><span class="s1">.</span><span class="s0">addEventListener</span><span class="s1">(</span><span class="s4">&quot;keydown&quot;</span><span class="s1">, (</span><span class="s0">e</span><span class="s1">) =&gt; {</span>
+    <span class="s2">if </span><span class="s1">(</span><span class="s0">e</span><span class="s1">.</span><span class="s0">key </span><span class="s1">=== </span><span class="s4">&quot;l&quot; </span><span class="s1">&amp;&amp; </span><span class="s0">e</span><span class="s1">.</span><span class="s0">ctrlKey</span><span class="s1">) {</span>
+      <span class="s0">output</span><span class="s1">.</span><span class="s0">innerText </span><span class="s1">= </span><span class="s4">&quot;--- screen cleared ---&quot;</span><span class="s1">;</span>
+    <span class="s1">} </span><span class="s2">else if </span><span class="s1">(</span><span class="s0">e</span><span class="s1">.</span><span class="s0">key </span><span class="s1">=== </span><span class="s4">&quot;ArrowUp&quot; </span><span class="s1">|| </span><span class="s0">e</span><span class="s1">.</span><span class="s0">key </span><span class="s1">=== </span><span class="s4">&quot;ArrowDown&quot;</span><span class="s1">) {</span>
+      <span class="s3">// Handle up arrow and down arrow.</span>
+      <span class="s2">if </span><span class="s1">(</span><span class="s0">e</span><span class="s1">.</span><span class="s0">key </span><span class="s1">=== </span><span class="s4">&quot;ArrowUp&quot; </span><span class="s1">&amp;&amp; </span><span class="s0">historyPos </span><span class="s1">&gt; </span><span class="s5">0</span><span class="s1">) {</span>
+        <span class="s0">e</span><span class="s1">.</span><span class="s0">preventDefault</span><span class="s1">();</span>
+        <span class="s0">historyPos</span><span class="s1">--;</span>
+      <span class="s1">} </span><span class="s2">else if </span><span class="s1">(</span><span class="s0">e</span><span class="s1">.</span><span class="s0">key </span><span class="s1">=== </span><span class="s4">&quot;ArrowDown&quot; </span><span class="s1">&amp;&amp; </span><span class="s0">historyPos </span><span class="s1">&lt; </span><span class="s0">history</span><span class="s1">.</span><span class="s0">length </span><span class="s1">- </span><span class="s5">1</span><span class="s1">) {</span>
+        <span class="s0">historyPos</span><span class="s1">++;</span>
+      <span class="s1">}</span>
+      <span class="s0">command</span><span class="s1">.</span><span class="s0">value </span><span class="s1">= </span><span class="s0">history</span><span class="s1">[</span><span class="s0">historyPos</span><span class="s1">];</span>
+    <span class="s1">}</span>
+    <span class="s2">return false</span><span class="s1">;</span>
+  <span class="s1">});</span>
+
+  <span class="s2">return </span><span class="s0">consoleElement</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">addEventListenersToElements</span><span class="s1">(</span><span class="s0">elements</span><span class="s1">, </span><span class="s0">event</span><span class="s1">, </span><span class="s0">listener</span><span class="s1">) {</span>
+  <span class="s0">elements</span><span class="s1">.</span><span class="s0">forEach</span><span class="s1">((</span><span class="s0">el</span><span class="s1">) =&gt; </span><span class="s0">el</span><span class="s1">.</span><span class="s0">addEventListener</span><span class="s1">(</span><span class="s0">event</span><span class="s1">, </span><span class="s0">listener</span><span class="s1">));</span>
+<span class="s1">}</span>
+
+<span class="s6">/**</span>
+ <span class="s6">* Add extra info</span>
+ <span class="s6">*/</span>
+<span class="s2">function </span><span class="s0">addInfoPrompt</span><span class="s1">(</span><span class="s0">elements</span><span class="s1">) {</span>
+  <span class="s2">for </span><span class="s1">(</span><span class="s2">let </span><span class="s0">i </span><span class="s1">= </span><span class="s5">0</span><span class="s1">; </span><span class="s0">i </span><span class="s1">&lt; </span><span class="s0">elements</span><span class="s1">.</span><span class="s0">length</span><span class="s1">; </span><span class="s0">i</span><span class="s1">++) {</span>
+    <span class="s0">elements</span><span class="s1">[</span><span class="s0">i</span><span class="s1">].</span><span class="s0">innerHTML </span><span class="s1">=</span>
+      <span class="s4">&quot;&lt;p&gt;To switch between the interactive traceback and the plaintext &quot; </span><span class="s1">+</span>
+      <span class="s4">'one, you can click on the &quot;Traceback&quot; headline. From the text ' </span><span class="s1">+</span>
+      <span class="s4">&quot;traceback you can also create a paste of it. &quot; </span><span class="s1">+</span>
+      <span class="s1">(!</span><span class="s0">EVALEX</span>
+        <span class="s1">? </span><span class="s4">&quot;&quot;</span>
+        <span class="s1">: </span><span class="s4">&quot;For code execution mouse-over the frame you want to debug and &quot; </span><span class="s1">+</span>
+          <span class="s4">&quot;click on the console icon on the right side.&quot; </span><span class="s1">+</span>
+          <span class="s4">&quot;&lt;p&gt;You can execute arbitrary Python code in the stack frames and &quot; </span><span class="s1">+</span>
+          <span class="s4">&quot;there are some extra helpers available for introspection:&quot; </span><span class="s1">+</span>
+          <span class="s4">&quot;&lt;ul&gt;&lt;li&gt;&lt;code&gt;dump()&lt;/code&gt; shows all variables in the frame&quot; </span><span class="s1">+</span>
+          <span class="s4">&quot;&lt;li&gt;&lt;code&gt;dump(obj)&lt;/code&gt; dumps all that's known about the object&lt;/ul&gt;&quot;</span><span class="s1">);</span>
+    <span class="s0">elements</span><span class="s1">[</span><span class="s0">i</span><span class="s1">].</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">remove</span><span class="s1">(</span><span class="s4">&quot;nojavascript&quot;</span><span class="s1">);</span>
+  <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">addConsoleIconToFrames</span><span class="s1">(</span><span class="s0">frames</span><span class="s1">) {</span>
+  <span class="s2">for </span><span class="s1">(</span><span class="s2">let </span><span class="s0">i </span><span class="s1">= </span><span class="s5">0</span><span class="s1">; </span><span class="s0">i </span><span class="s1">&lt; </span><span class="s0">frames</span><span class="s1">.</span><span class="s0">length</span><span class="s1">; </span><span class="s0">i</span><span class="s1">++) {</span>
+    <span class="s2">let </span><span class="s0">consoleNode </span><span class="s1">= </span><span class="s2">null</span><span class="s1">;</span>
+    <span class="s2">const </span><span class="s0">target </span><span class="s1">= </span><span class="s0">frames</span><span class="s1">[</span><span class="s0">i</span><span class="s1">];</span>
+    <span class="s2">const </span><span class="s0">frameID </span><span class="s1">= </span><span class="s0">frames</span><span class="s1">[</span><span class="s0">i</span><span class="s1">].</span><span class="s0">id</span><span class="s1">.</span><span class="s0">substring</span><span class="s1">(</span><span class="s5">6</span><span class="s1">);</span>
+
+    <span class="s2">for </span><span class="s1">(</span><span class="s2">let </span><span class="s0">j </span><span class="s1">= </span><span class="s5">0</span><span class="s1">; </span><span class="s0">j </span><span class="s1">&lt; </span><span class="s0">target</span><span class="s1">.</span><span class="s0">getElementsByTagName</span><span class="s1">(</span><span class="s4">&quot;pre&quot;</span><span class="s1">).</span><span class="s0">length</span><span class="s1">; </span><span class="s0">j</span><span class="s1">++) {</span>
+      <span class="s2">const </span><span class="s0">img </span><span class="s1">= </span><span class="s0">createIconForConsole</span><span class="s1">();</span>
+      <span class="s0">img</span><span class="s1">.</span><span class="s0">addEventListener</span><span class="s1">(</span><span class="s4">&quot;click&quot;</span><span class="s1">, (</span><span class="s0">e</span><span class="s1">) =&gt; {</span>
+        <span class="s0">e</span><span class="s1">.</span><span class="s0">stopPropagation</span><span class="s1">();</span>
+        <span class="s0">consoleNode </span><span class="s1">= </span><span class="s0">openShell</span><span class="s1">(</span><span class="s0">consoleNode</span><span class="s1">, </span><span class="s0">target</span><span class="s1">, </span><span class="s0">frameID</span><span class="s1">);</span>
+        <span class="s2">return false</span><span class="s1">;</span>
+      <span class="s1">});</span>
+      <span class="s0">target</span><span class="s1">.</span><span class="s0">getElementsByTagName</span><span class="s1">(</span><span class="s4">&quot;pre&quot;</span><span class="s1">)[</span><span class="s0">j</span><span class="s1">].</span><span class="s0">append</span><span class="s1">(</span><span class="s0">img</span><span class="s1">);</span>
+    <span class="s1">}</span>
+  <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">slideToggle</span><span class="s1">(</span><span class="s0">target</span><span class="s1">) {</span>
+  <span class="s0">target</span><span class="s1">.</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">toggle</span><span class="s1">(</span><span class="s4">&quot;active&quot;</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+<span class="s6">/**</span>
+ <span class="s6">* toggle traceback types on click.</span>
+ <span class="s6">*/</span>
+<span class="s2">function </span><span class="s0">addToggleTraceTypesOnClick</span><span class="s1">(</span><span class="s0">elements</span><span class="s1">) {</span>
+  <span class="s2">for </span><span class="s1">(</span><span class="s2">let </span><span class="s0">i </span><span class="s1">= </span><span class="s5">0</span><span class="s1">; </span><span class="s0">i </span><span class="s1">&lt; </span><span class="s0">elements</span><span class="s1">.</span><span class="s0">length</span><span class="s1">; </span><span class="s0">i</span><span class="s1">++) {</span>
+    <span class="s0">elements</span><span class="s1">[</span><span class="s0">i</span><span class="s1">].</span><span class="s0">addEventListener</span><span class="s1">(</span><span class="s4">&quot;click&quot;</span><span class="s1">, () =&gt; {</span>
+      <span class="s0">document</span><span class="s1">.</span><span class="s0">querySelector</span><span class="s1">(</span><span class="s4">&quot;div.traceback&quot;</span><span class="s1">).</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">toggle</span><span class="s1">(</span><span class="s4">&quot;hidden&quot;</span><span class="s1">);</span>
+      <span class="s0">document</span><span class="s1">.</span><span class="s0">querySelector</span><span class="s1">(</span><span class="s4">&quot;div.plain&quot;</span><span class="s1">).</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">toggle</span><span class="s1">(</span><span class="s4">&quot;hidden&quot;</span><span class="s1">);</span>
+    <span class="s1">});</span>
+    <span class="s0">elements</span><span class="s1">[</span><span class="s0">i</span><span class="s1">].</span><span class="s0">style</span><span class="s1">.</span><span class="s0">cursor </span><span class="s1">= </span><span class="s4">&quot;pointer&quot;</span><span class="s1">;</span>
+    <span class="s0">document</span><span class="s1">.</span><span class="s0">querySelector</span><span class="s1">(</span><span class="s4">&quot;div.plain&quot;</span><span class="s1">).</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">toggle</span><span class="s1">(</span><span class="s4">&quot;hidden&quot;</span><span class="s1">);</span>
+  <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">createConsole</span><span class="s1">() {</span>
+  <span class="s2">const </span><span class="s0">consoleNode </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createElement</span><span class="s1">(</span><span class="s4">&quot;pre&quot;</span><span class="s1">);</span>
+  <span class="s0">consoleNode</span><span class="s1">.</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">add</span><span class="s1">(</span><span class="s4">&quot;console&quot;</span><span class="s1">);</span>
+  <span class="s0">consoleNode</span><span class="s1">.</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">add</span><span class="s1">(</span><span class="s4">&quot;active&quot;</span><span class="s1">);</span>
+  <span class="s2">return </span><span class="s0">consoleNode</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">createConsoleOutput</span><span class="s1">() {</span>
+  <span class="s2">const </span><span class="s0">output </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createElement</span><span class="s1">(</span><span class="s4">&quot;div&quot;</span><span class="s1">);</span>
+  <span class="s0">output</span><span class="s1">.</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">add</span><span class="s1">(</span><span class="s4">&quot;output&quot;</span><span class="s1">);</span>
+  <span class="s0">output</span><span class="s1">.</span><span class="s0">innerHTML </span><span class="s1">= </span><span class="s4">&quot;[console ready]&quot;</span><span class="s1">;</span>
+  <span class="s2">return </span><span class="s0">output</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">createConsoleInputForm</span><span class="s1">() {</span>
+  <span class="s2">const </span><span class="s0">form </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createElement</span><span class="s1">(</span><span class="s4">&quot;form&quot;</span><span class="s1">);</span>
+  <span class="s0">form</span><span class="s1">.</span><span class="s0">innerHTML </span><span class="s1">= </span><span class="s4">&quot;&amp;gt;&amp;gt;&amp;gt; &quot;</span><span class="s1">;</span>
+  <span class="s2">return </span><span class="s0">form</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">createConsoleInput</span><span class="s1">() {</span>
+  <span class="s2">const </span><span class="s0">command </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createElement</span><span class="s1">(</span><span class="s4">&quot;input&quot;</span><span class="s1">);</span>
+  <span class="s0">command</span><span class="s1">.</span><span class="s0">type </span><span class="s1">= </span><span class="s4">&quot;text&quot;</span><span class="s1">;</span>
+  <span class="s0">command</span><span class="s1">.</span><span class="s0">setAttribute</span><span class="s1">(</span><span class="s4">&quot;autocomplete&quot;</span><span class="s1">, </span><span class="s4">&quot;off&quot;</span><span class="s1">);</span>
+  <span class="s0">command</span><span class="s1">.</span><span class="s0">setAttribute</span><span class="s1">(</span><span class="s4">&quot;spellcheck&quot;</span><span class="s1">, </span><span class="s2">false</span><span class="s1">);</span>
+  <span class="s0">command</span><span class="s1">.</span><span class="s0">setAttribute</span><span class="s1">(</span><span class="s4">&quot;autocapitalize&quot;</span><span class="s1">, </span><span class="s4">&quot;off&quot;</span><span class="s1">);</span>
+  <span class="s0">command</span><span class="s1">.</span><span class="s0">setAttribute</span><span class="s1">(</span><span class="s4">&quot;autocorrect&quot;</span><span class="s1">, </span><span class="s4">&quot;off&quot;</span><span class="s1">);</span>
+  <span class="s2">return </span><span class="s0">command</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">createIconForConsole</span><span class="s1">() {</span>
+  <span class="s2">const </span><span class="s0">img </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createElement</span><span class="s1">(</span><span class="s4">&quot;img&quot;</span><span class="s1">);</span>
+  <span class="s0">img</span><span class="s1">.</span><span class="s0">setAttribute</span><span class="s1">(</span><span class="s4">&quot;src&quot;</span><span class="s1">, </span><span class="s0">makeDebugURL</span><span class="s1">({</span><span class="s0">cmd</span><span class="s1">: </span><span class="s4">&quot;resource&quot;</span><span class="s1">, </span><span class="s0">f</span><span class="s1">: </span><span class="s4">&quot;console.png&quot;</span><span class="s1">}));</span>
+  <span class="s0">img</span><span class="s1">.</span><span class="s0">setAttribute</span><span class="s1">(</span><span class="s4">&quot;title&quot;</span><span class="s1">, </span><span class="s4">&quot;Open an interactive python shell in this frame&quot;</span><span class="s1">);</span>
+  <span class="s2">return </span><span class="s0">img</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">createExpansionButtonForConsole</span><span class="s1">() {</span>
+  <span class="s2">const </span><span class="s0">expansionButton </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createElement</span><span class="s1">(</span><span class="s4">&quot;a&quot;</span><span class="s1">);</span>
+  <span class="s0">expansionButton</span><span class="s1">.</span><span class="s0">setAttribute</span><span class="s1">(</span><span class="s4">&quot;href&quot;</span><span class="s1">, </span><span class="s4">&quot;#&quot;</span><span class="s1">);</span>
+  <span class="s0">expansionButton</span><span class="s1">.</span><span class="s0">setAttribute</span><span class="s1">(</span><span class="s4">&quot;class&quot;</span><span class="s1">, </span><span class="s4">&quot;toggle&quot;</span><span class="s1">);</span>
+  <span class="s0">expansionButton</span><span class="s1">.</span><span class="s0">innerHTML </span><span class="s1">= </span><span class="s4">&quot;&amp;nbsp;&amp;nbsp;&quot;</span><span class="s1">;</span>
+  <span class="s2">return </span><span class="s0">expansionButton</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">createInteractiveConsole</span><span class="s1">() {</span>
+  <span class="s2">const </span><span class="s0">target </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">querySelector</span><span class="s1">(</span><span class="s4">&quot;div.console div.inner&quot;</span><span class="s1">);</span>
+  <span class="s2">while </span><span class="s1">(</span><span class="s0">target</span><span class="s1">.</span><span class="s0">firstChild</span><span class="s1">) {</span>
+    <span class="s0">target</span><span class="s1">.</span><span class="s0">removeChild</span><span class="s1">(</span><span class="s0">target</span><span class="s1">.</span><span class="s0">firstChild</span><span class="s1">);</span>
+  <span class="s1">}</span>
+  <span class="s0">openShell</span><span class="s1">(</span><span class="s2">null</span><span class="s1">, </span><span class="s0">target</span><span class="s1">, </span><span class="s5">0</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">handleConsoleSubmit</span><span class="s1">(</span><span class="s0">e</span><span class="s1">, </span><span class="s0">command</span><span class="s1">, </span><span class="s0">frameID</span><span class="s1">) {</span>
+  <span class="s3">// Prevent page from refreshing.</span>
+  <span class="s0">e</span><span class="s1">.</span><span class="s0">preventDefault</span><span class="s1">();</span>
+
+  <span class="s2">return new </span><span class="s0">Promise</span><span class="s1">((</span><span class="s0">resolve</span><span class="s1">) =&gt; {</span>
+    <span class="s0">fetch</span><span class="s1">(</span><span class="s0">makeDebugURL</span><span class="s1">({</span><span class="s0">cmd</span><span class="s1">: </span><span class="s0">command</span><span class="s1">.</span><span class="s0">value</span><span class="s1">, </span><span class="s0">frm</span><span class="s1">: </span><span class="s0">frameID</span><span class="s1">}))</span>
+      <span class="s1">.</span><span class="s0">then</span><span class="s1">((</span><span class="s0">res</span><span class="s1">) =&gt; {</span>
+        <span class="s2">return </span><span class="s0">res</span><span class="s1">.</span><span class="s0">text</span><span class="s1">();</span>
+      <span class="s1">})</span>
+      <span class="s1">.</span><span class="s0">then</span><span class="s1">((</span><span class="s0">data</span><span class="s1">) =&gt; {</span>
+        <span class="s2">const </span><span class="s0">tmp </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createElement</span><span class="s1">(</span><span class="s4">&quot;div&quot;</span><span class="s1">);</span>
+        <span class="s0">tmp</span><span class="s1">.</span><span class="s0">innerHTML </span><span class="s1">= </span><span class="s0">data</span><span class="s1">;</span>
+        <span class="s0">resolve</span><span class="s1">(</span><span class="s0">tmp</span><span class="s1">);</span>
+
+        <span class="s3">// Handle expandable span for long list outputs.</span>
+        <span class="s3">// Example to test: list(range(13))</span>
+        <span class="s2">let </span><span class="s0">wrapperAdded </span><span class="s1">= </span><span class="s2">false</span><span class="s1">;</span>
+        <span class="s2">const </span><span class="s0">wrapperSpan </span><span class="s1">= </span><span class="s0">document</span><span class="s1">.</span><span class="s0">createElement</span><span class="s1">(</span><span class="s4">&quot;span&quot;</span><span class="s1">);</span>
+        <span class="s2">const </span><span class="s0">expansionButton </span><span class="s1">= </span><span class="s0">createExpansionButtonForConsole</span><span class="s1">();</span>
+
+        <span class="s0">tmp</span><span class="s1">.</span><span class="s0">querySelectorAll</span><span class="s1">(</span><span class="s4">&quot;span.extended&quot;</span><span class="s1">).</span><span class="s0">forEach</span><span class="s1">((</span><span class="s0">spanToWrap</span><span class="s1">) =&gt; {</span>
+          <span class="s2">const </span><span class="s0">parentDiv </span><span class="s1">= </span><span class="s0">spanToWrap</span><span class="s1">.</span><span class="s0">parentNode</span><span class="s1">;</span>
+          <span class="s2">if </span><span class="s1">(!</span><span class="s0">wrapperAdded</span><span class="s1">) {</span>
+            <span class="s0">parentDiv</span><span class="s1">.</span><span class="s0">insertBefore</span><span class="s1">(</span><span class="s0">wrapperSpan</span><span class="s1">, </span><span class="s0">spanToWrap</span><span class="s1">);</span>
+            <span class="s0">wrapperAdded </span><span class="s1">= </span><span class="s2">true</span><span class="s1">;</span>
+          <span class="s1">}</span>
+          <span class="s0">parentDiv</span><span class="s1">.</span><span class="s0">removeChild</span><span class="s1">(</span><span class="s0">spanToWrap</span><span class="s1">);</span>
+          <span class="s0">wrapperSpan</span><span class="s1">.</span><span class="s0">append</span><span class="s1">(</span><span class="s0">spanToWrap</span><span class="s1">);</span>
+          <span class="s0">spanToWrap</span><span class="s1">.</span><span class="s0">hidden </span><span class="s1">= </span><span class="s2">true</span><span class="s1">;</span>
+
+          <span class="s0">expansionButton</span><span class="s1">.</span><span class="s0">addEventListener</span><span class="s1">(</span><span class="s4">&quot;click&quot;</span><span class="s1">, (</span><span class="s0">event</span><span class="s1">) =&gt; {</span>
+            <span class="s0">event</span><span class="s1">.</span><span class="s0">preventDefault</span><span class="s1">();</span>
+            <span class="s0">spanToWrap</span><span class="s1">.</span><span class="s0">hidden </span><span class="s1">= !</span><span class="s0">spanToWrap</span><span class="s1">.</span><span class="s0">hidden</span><span class="s1">;</span>
+            <span class="s0">expansionButton</span><span class="s1">.</span><span class="s0">classList</span><span class="s1">.</span><span class="s0">toggle</span><span class="s1">(</span><span class="s4">&quot;open&quot;</span><span class="s1">);</span>
+            <span class="s2">return false</span><span class="s1">;</span>
+          <span class="s1">});</span>
+        <span class="s1">});</span>
+
+        <span class="s3">// Add expansion button at end of wrapper.</span>
+        <span class="s2">if </span><span class="s1">(</span><span class="s0">wrapperAdded</span><span class="s1">) {</span>
+          <span class="s0">wrapperSpan</span><span class="s1">.</span><span class="s0">append</span><span class="s1">(</span><span class="s0">expansionButton</span><span class="s1">);</span>
+        <span class="s1">}</span>
+      <span class="s1">})</span>
+      <span class="s1">.</span><span class="s0">catch</span><span class="s1">((</span><span class="s0">err</span><span class="s1">) =&gt; {</span>
+        <span class="s0">console</span><span class="s1">.</span><span class="s0">error</span><span class="s1">(</span><span class="s0">err</span><span class="s1">);</span>
+      <span class="s1">});</span>
+    <span class="s2">return false</span><span class="s1">;</span>
+  <span class="s1">});</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">fadeOut</span><span class="s1">(</span><span class="s0">element</span><span class="s1">) {</span>
+  <span class="s0">element</span><span class="s1">.</span><span class="s0">style</span><span class="s1">.</span><span class="s0">opacity </span><span class="s1">= </span><span class="s5">1</span><span class="s1">;</span>
+
+  <span class="s1">(</span><span class="s2">function </span><span class="s0">fade</span><span class="s1">() {</span>
+    <span class="s0">element</span><span class="s1">.</span><span class="s0">style</span><span class="s1">.</span><span class="s0">opacity </span><span class="s1">-= </span><span class="s5">0.1</span><span class="s1">;</span>
+    <span class="s2">if </span><span class="s1">(</span><span class="s0">element</span><span class="s1">.</span><span class="s0">style</span><span class="s1">.</span><span class="s0">opacity </span><span class="s1">&lt; </span><span class="s5">0</span><span class="s1">) {</span>
+      <span class="s0">element</span><span class="s1">.</span><span class="s0">style</span><span class="s1">.</span><span class="s0">display </span><span class="s1">= </span><span class="s4">&quot;none&quot;</span><span class="s1">;</span>
+    <span class="s1">} </span><span class="s2">else </span><span class="s1">{</span>
+      <span class="s0">requestAnimationFrame</span><span class="s1">(</span><span class="s0">fade</span><span class="s1">);</span>
+    <span class="s1">}</span>
+  <span class="s1">})();</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">fadeIn</span><span class="s1">(</span><span class="s0">element</span><span class="s1">, </span><span class="s0">display</span><span class="s1">) {</span>
+  <span class="s0">element</span><span class="s1">.</span><span class="s0">style</span><span class="s1">.</span><span class="s0">opacity </span><span class="s1">= </span><span class="s5">0</span><span class="s1">;</span>
+  <span class="s0">element</span><span class="s1">.</span><span class="s0">style</span><span class="s1">.</span><span class="s0">display </span><span class="s1">= </span><span class="s0">display </span><span class="s1">|| </span><span class="s4">&quot;block&quot;</span><span class="s1">;</span>
+
+  <span class="s1">(</span><span class="s2">function </span><span class="s0">fade</span><span class="s1">() {</span>
+    <span class="s2">let </span><span class="s0">val </span><span class="s1">= </span><span class="s0">parseFloat</span><span class="s1">(</span><span class="s0">element</span><span class="s1">.</span><span class="s0">style</span><span class="s1">.</span><span class="s0">opacity</span><span class="s1">) + </span><span class="s5">0.1</span><span class="s1">;</span>
+    <span class="s2">if </span><span class="s1">(</span><span class="s0">val </span><span class="s1">&lt;= </span><span class="s5">1</span><span class="s1">) {</span>
+      <span class="s0">element</span><span class="s1">.</span><span class="s0">style</span><span class="s1">.</span><span class="s0">opacity </span><span class="s1">= </span><span class="s0">val</span><span class="s1">;</span>
+      <span class="s0">requestAnimationFrame</span><span class="s1">(</span><span class="s0">fade</span><span class="s1">);</span>
+    <span class="s1">}</span>
+  <span class="s1">})();</span>
+<span class="s1">}</span>
+
+<span class="s2">function </span><span class="s0">docReady</span><span class="s1">(</span><span class="s0">fn</span><span class="s1">) {</span>
+  <span class="s2">if </span><span class="s1">(</span><span class="s0">document</span><span class="s1">.</span><span class="s0">readyState </span><span class="s1">=== </span><span class="s4">&quot;complete&quot; </span><span class="s1">|| </span><span class="s0">document</span><span class="s1">.</span><span class="s0">readyState </span><span class="s1">=== </span><span class="s4">&quot;interactive&quot;</span><span class="s1">) {</span>
+    <span class="s0">setTimeout</span><span class="s1">(</span><span class="s0">fn</span><span class="s1">, </span><span class="s5">1</span><span class="s1">);</span>
+  <span class="s1">} </span><span class="s2">else </span><span class="s1">{</span>
+    <span class="s0">document</span><span class="s1">.</span><span class="s0">addEventListener</span><span class="s1">(</span><span class="s4">&quot;DOMContentLoaded&quot;</span><span class="s1">, </span><span class="s0">fn</span><span class="s1">);</span>
+  <span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

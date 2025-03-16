@@ -1,0 +1,84 @@
+<html>
+<head>
+<title>switch_x32_unix.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_x32_unix.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * this is the internal transfer function. 
+ * 
+ * HISTORY 
+ * 17-Aug-12  Fantix King &lt;fantix.king@gmail.com&gt; 
+ *      Ported from amd64. 
+ */</span>
+
+<span class="s2">#define </span><span class="s1">STACK_REFPLUS </span><span class="s3">1</span>
+
+<span class="s2">#ifdef </span><span class="s1">SLP_EVAL</span>
+
+<span class="s2">#define </span><span class="s1">STACK_MAGIC </span><span class="s3">0</span>
+
+<span class="s2">#define </span><span class="s1">REGS_TO_SAVE </span><span class="s4">&quot;r12&quot;</span><span class="s1">, </span><span class="s4">&quot;r13&quot;</span><span class="s1">, </span><span class="s4">&quot;r14&quot;</span><span class="s1">, </span><span class="s4">&quot;r15&quot;</span>
+
+
+<span class="s2">static int</span>
+<span class="s1">slp_switch(</span><span class="s2">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s2">void</span><span class="s1">* ebp;</span>
+    <span class="s2">void</span><span class="s1">* ebx;</span>
+    <span class="s2">unsigned int </span><span class="s1">csr;</span>
+    <span class="s2">unsigned short </span><span class="s1">cw;</span>
+    <span class="s2">int </span><span class="s1">err;</span>
+    <span class="s2">int </span><span class="s1">*stackref, stsizediff;</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;fstcw %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=m&quot; </span><span class="s1">(cw));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;stmxcsr %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=m&quot; </span><span class="s1">(csr));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;movl %%ebp, %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=m&quot; </span><span class="s1">(ebp));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;movl %%ebx, %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=m&quot; </span><span class="s1">(ebx));</span>
+    <span class="s1">__asm__ (</span><span class="s4">&quot;movl %%esp, %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=g&quot; </span><span class="s1">(stackref));</span>
+    <span class="s1">{</span>
+        <span class="s1">SLP_SAVE_STATE(stackref, stsizediff);</span>
+        <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span>
+            <span class="s4">&quot;addl %0, %%esp</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;addl %0, %%ebp</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s1">:</span>
+            <span class="s1">: </span><span class="s4">&quot;r&quot; </span><span class="s1">(stsizediff)</span>
+            <span class="s1">);</span>
+        <span class="s1">SLP_RESTORE_STATE();</span>
+    <span class="s1">}</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;movl %0, %%ebx&quot; </span><span class="s1">: : </span><span class="s4">&quot;m&quot; </span><span class="s1">(ebx));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;movl %0, %%ebp&quot; </span><span class="s1">: : </span><span class="s4">&quot;m&quot; </span><span class="s1">(ebp));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;ldmxcsr %0&quot; </span><span class="s1">: : </span><span class="s4">&quot;m&quot; </span><span class="s1">(csr));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;fldcw %0&quot; </span><span class="s1">: : </span><span class="s4">&quot;m&quot; </span><span class="s1">(cw));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;xorl %%eax, %%eax&quot; </span><span class="s1">: </span><span class="s4">&quot;=a&quot; </span><span class="s1">(err));</span>
+    <span class="s2">return </span><span class="s1">err;</span>
+<span class="s1">}</span>
+
+<span class="s2">#endif</span>
+
+<span class="s0">/* 
+ * further self-processing support 
+ */</span>
+
+<span class="s0">/* 
+ * if you want to add self-inspection tools, place them 
+ * here. See the x86_msvc for the necessary defines. 
+ * These features are highly experimental und not 
+ * essential yet. 
+ */</span>
+</pre>
+</body>
+</html>

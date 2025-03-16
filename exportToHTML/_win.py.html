@@ -1,0 +1,46 @@
+<html>
+<head>
+<title>_win.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_win.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+
+<span class="s0">def </span><span class="s1">get_short_path_name</span><span class="s2">(</span><span class="s1">long_name</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Gets the short path name of a given long path - http://stackoverflow.com/a/23598461/200291.&quot;&quot;&quot;</span>
+    <span class="s0">import </span><span class="s1">ctypes  </span><span class="s4"># noqa: PLC0415</span>
+    <span class="s0">from </span><span class="s1">ctypes </span><span class="s0">import </span><span class="s1">wintypes  </span><span class="s4"># noqa: PLC0415</span>
+
+    <span class="s1">_GetShortPathNameW </span><span class="s2">= </span><span class="s1">ctypes</span><span class="s2">.</span><span class="s1">windll</span><span class="s2">.</span><span class="s1">kernel32</span><span class="s2">.</span><span class="s1">GetShortPathNameW  </span><span class="s4"># noqa: N806</span>
+    <span class="s1">_GetShortPathNameW</span><span class="s2">.</span><span class="s1">argtypes </span><span class="s2">= [</span><span class="s1">wintypes</span><span class="s2">.</span><span class="s1">LPCWSTR</span><span class="s2">, </span><span class="s1">wintypes</span><span class="s2">.</span><span class="s1">LPWSTR</span><span class="s2">, </span><span class="s1">wintypes</span><span class="s2">.</span><span class="s1">DWORD</span><span class="s2">]</span>
+    <span class="s1">_GetShortPathNameW</span><span class="s2">.</span><span class="s1">restype </span><span class="s2">= </span><span class="s1">wintypes</span><span class="s2">.</span><span class="s1">DWORD</span>
+    <span class="s1">output_buf_size </span><span class="s2">= </span><span class="s5">0</span>
+    <span class="s0">while True</span><span class="s2">:</span>
+        <span class="s1">output_buf </span><span class="s2">= </span><span class="s1">ctypes</span><span class="s2">.</span><span class="s1">create_unicode_buffer</span><span class="s2">(</span><span class="s1">output_buf_size</span><span class="s2">)</span>
+        <span class="s1">needed </span><span class="s2">= </span><span class="s1">_GetShortPathNameW</span><span class="s2">(</span><span class="s1">long_name</span><span class="s2">, </span><span class="s1">output_buf</span><span class="s2">, </span><span class="s1">output_buf_size</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">output_buf_size </span><span class="s2">&gt;= </span><span class="s1">needed</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">output_buf</span><span class="s2">.</span><span class="s1">value</span>
+        <span class="s1">output_buf_size </span><span class="s2">= </span><span class="s1">needed</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s6">&quot;get_short_path_name&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

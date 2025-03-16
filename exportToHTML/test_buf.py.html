@@ -1,0 +1,148 @@
+<html>
+<head>
+<title>test_buf.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_buf.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s2">.</span><span class="s1">lib </span><span class="s0">import </span><span class="s1">TestBase</span><span class="s2">, </span><span class="s1">FileCreator</span>
+
+<span class="s0">from </span><span class="s1">smmap</span><span class="s2">.</span><span class="s1">mman </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">SlidingWindowMapManager</span><span class="s2">,</span>
+    <span class="s1">StaticWindowMapManager</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">smmap</span><span class="s2">.</span><span class="s1">buf </span><span class="s0">import </span><span class="s1">SlidingWindowMapBuffer</span>
+
+<span class="s0">from </span><span class="s1">random </span><span class="s0">import </span><span class="s1">randint</span>
+<span class="s0">from </span><span class="s1">time </span><span class="s0">import </span><span class="s1">time</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">os</span>
+
+
+<span class="s1">man_optimal </span><span class="s2">= </span><span class="s1">SlidingWindowMapManager</span><span class="s2">()</span>
+<span class="s1">man_worst_case </span><span class="s2">= </span><span class="s1">SlidingWindowMapManager</span><span class="s2">(</span>
+    <span class="s1">window_size</span><span class="s2">=</span><span class="s1">TestBase</span><span class="s2">.</span><span class="s1">k_window_test_size </span><span class="s2">// </span><span class="s3">100</span><span class="s2">,</span>
+    <span class="s1">max_memory_size</span><span class="s2">=</span><span class="s1">TestBase</span><span class="s2">.</span><span class="s1">k_window_test_size </span><span class="s2">// </span><span class="s3">3</span><span class="s2">,</span>
+    <span class="s1">max_open_handles</span><span class="s2">=</span><span class="s3">15</span><span class="s2">)</span>
+<span class="s1">static_man </span><span class="s2">= </span><span class="s1">StaticWindowMapManager</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">TestBuf</span><span class="s2">(</span><span class="s1">TestBase</span><span class="s2">):</span>
+
+    <span class="s0">def </span><span class="s1">test_basics</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">FileCreator</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">k_window_test_size</span><span class="s2">, </span><span class="s4">&quot;buffer_test&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fc</span><span class="s2">:</span>
+
+            <span class="s5"># invalid paths fail upon construction</span>
+            <span class="s1">c </span><span class="s2">= </span><span class="s1">man_optimal</span><span class="s2">.</span><span class="s1">make_cursor</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">SlidingWindowMapBuffer</span><span class="s2">, </span><span class="s1">type</span><span class="s2">(</span><span class="s1">c</span><span class="s2">)())            </span><span class="s5"># invalid cursor</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">SlidingWindowMapBuffer</span><span class="s2">, </span><span class="s1">c</span><span class="s2">, </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span><span class="s2">)       </span><span class="s5"># offset too large</span>
+
+            <span class="s1">buf </span><span class="s2">= </span><span class="s1">SlidingWindowMapBuffer</span><span class="s2">()                                              </span><span class="s5"># can create uninitialized buffers</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">cursor</span><span class="s2">() </span><span class="s0">is None</span>
+
+            <span class="s5"># can call end access any time</span>
+            <span class="s1">buf</span><span class="s2">.</span><span class="s1">end_access</span><span class="s2">()</span>
+            <span class="s1">buf</span><span class="s2">.</span><span class="s1">end_access</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">) == </span><span class="s3">0</span>
+
+            <span class="s5"># begin access can revive it, if the offset is suitable</span>
+            <span class="s1">offset </span><span class="s2">= </span><span class="s3">100</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">begin_access</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span><span class="s2">) == </span><span class="s0">False</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">begin_access</span><span class="s2">(</span><span class="s1">c</span><span class="s2">, </span><span class="s1">offset</span><span class="s2">) == </span><span class="s0">True</span>
+            <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">) == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">- </span><span class="s1">offset</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">cursor</span><span class="s2">().</span><span class="s1">is_valid</span><span class="s2">()</span>
+
+            <span class="s5"># empty begin access keeps it valid on the same path, but alters the offset</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">begin_access</span><span class="s2">() == </span><span class="s0">True</span>
+            <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">) == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">cursor</span><span class="s2">().</span><span class="s1">is_valid</span><span class="s2">()</span>
+
+            <span class="s5"># simple access</span>
+            <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s4">'rb'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fp</span><span class="s2">:</span>
+                <span class="s1">data </span><span class="s2">= </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s1">data</span><span class="s2">[</span><span class="s1">offset</span><span class="s2">] == </span><span class="s1">buf</span><span class="s2">[</span><span class="s3">0</span><span class="s2">]</span>
+            <span class="s0">assert </span><span class="s1">data</span><span class="s2">[</span><span class="s1">offset</span><span class="s2">:</span><span class="s1">offset </span><span class="s2">* </span><span class="s3">2</span><span class="s2">] == </span><span class="s1">buf</span><span class="s2">[</span><span class="s3">0</span><span class="s2">:</span><span class="s1">offset</span><span class="s2">]</span>
+
+            <span class="s5"># negative indices, partial slices</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">[-</span><span class="s3">1</span><span class="s2">] == </span><span class="s1">buf</span><span class="s2">[</span><span class="s1">len</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">) - </span><span class="s3">1</span><span class="s2">]</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">[-</span><span class="s3">10</span><span class="s2">:] == </span><span class="s1">buf</span><span class="s2">[</span><span class="s1">len</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">) - </span><span class="s3">10</span><span class="s2">:</span><span class="s1">len</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">)]</span>
+
+            <span class="s5"># end access makes its cursor invalid</span>
+            <span class="s1">buf</span><span class="s2">.</span><span class="s1">end_access</span><span class="s2">()</span>
+            <span class="s0">assert not </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">cursor</span><span class="s2">().</span><span class="s1">is_valid</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">cursor</span><span class="s2">().</span><span class="s1">is_associated</span><span class="s2">()         </span><span class="s5"># but it remains associated</span>
+
+            <span class="s5"># an empty begin access fixes it up again</span>
+            <span class="s0">assert </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">begin_access</span><span class="s2">() == </span><span class="s0">True and </span><span class="s1">buf</span><span class="s2">.</span><span class="s1">cursor</span><span class="s2">().</span><span class="s1">is_valid</span><span class="s2">()</span>
+            <span class="s0">del</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">)        </span><span class="s5"># ends access automatically</span>
+            <span class="s0">del</span><span class="s2">(</span><span class="s1">c</span><span class="s2">)</span>
+
+            <span class="s0">assert </span><span class="s1">man_optimal</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s3">1</span>
+
+            <span class="s5"># PERFORMANCE</span>
+            <span class="s5"># blast away with random access and a full mapping - we don't want to</span>
+            <span class="s5"># exaggerate the manager's overhead, but measure the buffer overhead</span>
+            <span class="s5"># We do it once with an optimal setting, and with a worse manager which</span>
+            <span class="s5"># will produce small mappings only !</span>
+            <span class="s1">max_num_accesses </span><span class="s2">= </span><span class="s3">100</span>
+            <span class="s1">fd </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_RDONLY</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">fd</span><span class="s2">):</span>
+                <span class="s0">for </span><span class="s1">manager</span><span class="s2">, </span><span class="s1">man_id </span><span class="s0">in </span><span class="s2">((</span><span class="s1">man_optimal</span><span class="s2">, </span><span class="s4">'optimal'</span><span class="s2">),</span>
+                                        <span class="s2">(</span><span class="s1">man_worst_case</span><span class="s2">, </span><span class="s4">'worst case'</span><span class="s2">),</span>
+                                        <span class="s2">(</span><span class="s1">static_man</span><span class="s2">, </span><span class="s4">'static optimal'</span><span class="s2">)):</span>
+                    <span class="s1">buf </span><span class="s2">= </span><span class="s1">SlidingWindowMapBuffer</span><span class="s2">(</span><span class="s1">manager</span><span class="s2">.</span><span class="s1">make_cursor</span><span class="s2">(</span><span class="s1">item</span><span class="s2">))</span>
+                    <span class="s0">assert </span><span class="s1">manager</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s3">1</span>
+                    <span class="s0">for </span><span class="s1">access_mode </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s3">2</span><span class="s2">):    </span><span class="s5"># single, multi</span>
+                        <span class="s1">num_accesses_left </span><span class="s2">= </span><span class="s1">max_num_accesses</span>
+                        <span class="s1">num_bytes </span><span class="s2">= </span><span class="s3">0</span>
+                        <span class="s1">fsize </span><span class="s2">= </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span>
+
+                        <span class="s1">st </span><span class="s2">= </span><span class="s1">time</span><span class="s2">()</span>
+                        <span class="s1">buf</span><span class="s2">.</span><span class="s1">begin_access</span><span class="s2">()</span>
+                        <span class="s0">while </span><span class="s1">num_accesses_left</span><span class="s2">:</span>
+                            <span class="s1">num_accesses_left </span><span class="s2">-= </span><span class="s3">1</span>
+                            <span class="s0">if </span><span class="s1">access_mode</span><span class="s2">:  </span><span class="s5"># multi</span>
+                                <span class="s1">ofs_start </span><span class="s2">= </span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">fsize</span><span class="s2">)</span>
+                                <span class="s1">ofs_end </span><span class="s2">= </span><span class="s1">randint</span><span class="s2">(</span><span class="s1">ofs_start</span><span class="s2">, </span><span class="s1">fsize</span><span class="s2">)</span>
+                                <span class="s1">d </span><span class="s2">= </span><span class="s1">buf</span><span class="s2">[</span><span class="s1">ofs_start</span><span class="s2">:</span><span class="s1">ofs_end</span><span class="s2">]</span>
+                                <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">d</span><span class="s2">) == </span><span class="s1">ofs_end </span><span class="s2">- </span><span class="s1">ofs_start</span>
+                                <span class="s0">assert </span><span class="s1">d </span><span class="s2">== </span><span class="s1">data</span><span class="s2">[</span><span class="s1">ofs_start</span><span class="s2">:</span><span class="s1">ofs_end</span><span class="s2">]</span>
+                                <span class="s1">num_bytes </span><span class="s2">+= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">d</span><span class="s2">)</span>
+                                <span class="s0">del </span><span class="s1">d</span>
+                            <span class="s0">else</span><span class="s2">:</span>
+                                <span class="s1">pos </span><span class="s2">= </span><span class="s1">randint</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s1">fsize</span><span class="s2">)</span>
+                                <span class="s0">assert </span><span class="s1">buf</span><span class="s2">[</span><span class="s1">pos</span><span class="s2">] == </span><span class="s1">data</span><span class="s2">[</span><span class="s1">pos</span><span class="s2">]</span>
+                                <span class="s1">num_bytes </span><span class="s2">+= </span><span class="s3">1</span>
+                            <span class="s5"># END handle mode</span>
+                        <span class="s5"># END handle num accesses</span>
+
+                        <span class="s1">buf</span><span class="s2">.</span><span class="s1">end_access</span><span class="s2">()</span>
+                        <span class="s0">assert </span><span class="s1">manager</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">()</span>
+                        <span class="s0">assert </span><span class="s1">manager</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+                        <span class="s0">assert </span><span class="s1">manager</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s3">0</span>
+                        <span class="s1">elapsed </span><span class="s2">= </span><span class="s1">max</span><span class="s2">(</span><span class="s1">time</span><span class="s2">() - </span><span class="s1">st</span><span class="s2">, </span><span class="s3">0.001</span><span class="s2">)  </span><span class="s5"># prevent zero division errors on windows</span>
+                        <span class="s1">mb </span><span class="s2">= </span><span class="s1">float</span><span class="s2">(</span><span class="s3">1000 </span><span class="s2">* </span><span class="s3">1000</span><span class="s2">)</span>
+                        <span class="s1">mode_str </span><span class="s2">= (</span><span class="s1">access_mode </span><span class="s0">and </span><span class="s4">&quot;slice&quot;</span><span class="s2">) </span><span class="s0">or </span><span class="s4">&quot;single byte&quot;</span>
+                        <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;%s: Made %i random %s accesses to buffer created from %s reading a total of %f mb in %f s (%f mb/s)&quot;</span>
+                              <span class="s2">% (</span><span class="s1">man_id</span><span class="s2">, </span><span class="s1">max_num_accesses</span><span class="s2">, </span><span class="s1">mode_str</span><span class="s2">, </span><span class="s1">type</span><span class="s2">(</span><span class="s1">item</span><span class="s2">), </span><span class="s1">num_bytes </span><span class="s2">/ </span><span class="s1">mb</span><span class="s2">, </span><span class="s1">elapsed</span><span class="s2">, (</span><span class="s1">num_bytes </span><span class="s2">/ </span><span class="s1">mb</span><span class="s2">) / </span><span class="s1">elapsed</span><span class="s2">),</span>
+                              <span class="s1">file</span><span class="s2">=</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">)</span>
+                    <span class="s5"># END handle access mode</span>
+                    <span class="s0">del </span><span class="s1">buf</span>
+                <span class="s5"># END for each manager</span>
+            <span class="s5"># END for each input</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">close</span><span class="s2">(</span><span class="s1">fd</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

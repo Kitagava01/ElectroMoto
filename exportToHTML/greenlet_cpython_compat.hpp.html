@@ -1,0 +1,165 @@
+<html>
+<head>
+<title>greenlet_cpython_compat.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #2aacb8;}
+.s5 { color: #c77dbb;}
+.s6 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+greenlet_cpython_compat.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">/* -*- indent-tabs-mode: nil; tab-width: 4; -*- */</span>
+<span class="s2">#ifndef </span><span class="s1">GREENLET_CPYTHON_COMPAT_H</span>
+<span class="s2">#define </span><span class="s1">GREENLET_CPYTHON_COMPAT_H</span>
+
+<span class="s0">/** 
+ * Helpers for compatibility with multiple versions of CPython. 
+ */</span>
+
+<span class="s2">#define </span><span class="s1">PY_SSIZE_T_CLEAN</span>
+<span class="s2">#include </span><span class="s3">&quot;Python.h&quot;</span>
+
+
+<span class="s2">#if </span><span class="s1">PY_VERSION_HEX &gt;= </span><span class="s4">0x30A00B1</span>
+<span class="s1">#    define GREENLET_PY310 </span><span class="s4">1</span>
+<span class="s2">#else</span>
+<span class="s1">#    define GREENLET_PY310 </span><span class="s4">0</span>
+<span class="s2">#endif</span>
+
+<span class="s0">/* 
+Python 3.10 beta 1 changed tstate-&gt;use_tracing to a nested cframe member. 
+See https://github.com/python/cpython/pull/25276 
+We have to save and restore this as well. 
+ 
+Python 3.13 removed PyThreadState.cframe (GH-108035). 
+*/</span>
+<span class="s2">#if </span><span class="s1">GREENLET_PY310 &amp;&amp; PY_VERSION_HEX &lt; </span><span class="s4">0x30D0000</span>
+<span class="s1">#    define GREENLET_USE_CFRAME </span><span class="s4">1</span>
+<span class="s2">#else</span>
+<span class="s1">#    define GREENLET_USE_CFRAME </span><span class="s4">0</span>
+<span class="s2">#endif</span>
+
+
+<span class="s2">#if </span><span class="s1">PY_VERSION_HEX &gt;= </span><span class="s4">0x30B00A4</span>
+<span class="s0">/* 
+Greenlet won't compile on anything older than Python 3.11 alpha 4 (see 
+https://bugs.python.org/issue46090). Summary of breaking internal changes: 
+- Python 3.11 alpha 1 changed how frame objects are represented internally. 
+  - https://github.com/python/cpython/pull/30122 
+- Python 3.11 alpha 3 changed how recursion limits are stored. 
+  - https://github.com/python/cpython/pull/29524 
+- Python 3.11 alpha 4 changed how exception state is stored. It also includes a 
+  change to help greenlet save and restore the interpreter frame &quot;data stack&quot;. 
+  - https://github.com/python/cpython/pull/30122 
+  - https://github.com/python/cpython/pull/30234 
+*/</span>
+<span class="s1">#    define GREENLET_PY311 </span><span class="s4">1</span>
+<span class="s2">#else</span>
+<span class="s1">#    define GREENLET_PY311 </span><span class="s4">0</span>
+<span class="s2">#endif</span>
+
+
+<span class="s2">#if </span><span class="s1">PY_VERSION_HEX &gt;= </span><span class="s4">0x30C0000</span>
+<span class="s1">#    define GREENLET_PY312 </span><span class="s4">1</span>
+<span class="s2">#else</span>
+<span class="s1">#    define GREENLET_PY312 </span><span class="s4">0</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#if </span><span class="s1">PY_VERSION_HEX &gt;= </span><span class="s4">0x30D0000</span>
+<span class="s1">#    define GREENLET_PY313 </span><span class="s4">1</span>
+<span class="s2">#else</span>
+<span class="s1">#    define GREENLET_PY313 </span><span class="s4">0</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#ifndef </span><span class="s1">Py_SET_REFCNT</span>
+<span class="s0">/* Py_REFCNT and Py_SIZE macros are converted to functions 
+https://bugs.python.org/issue39573 */</span>
+<span class="s1">#    define Py_SET_REFCNT(obj, refcnt) Py_REFCNT(obj) = (refcnt)</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#ifndef </span><span class="s1">_Py_DEC_REFTOTAL</span>
+<span class="s0">/* _Py_DEC_REFTOTAL macro has been removed from Python 3.9 by: 
+  https://github.com/python/cpython/commit/49932fec62c616ec88da52642339d83ae719e924 
+ 
+  The symbol we use to replace it was removed by at least 3.12. 
+*/</span>
+<span class="s1">#    ifdef Py_REF_DEBUG</span>
+<span class="s1">#      </span><span class="s2">if </span><span class="s1">GREENLET_PY312</span>
+<span class="s1">#         define _Py_DEC_REFTOTAL</span>
+<span class="s1">#      </span><span class="s2">else</span>
+<span class="s1">#        define _Py_DEC_REFTOTAL _Py_RefTotal--</span>
+<span class="s1">#      endif</span>
+<span class="s1">#    </span><span class="s2">else</span>
+<span class="s1">#        define _Py_DEC_REFTOTAL</span>
+<span class="s1">#    endif</span>
+<span class="s2">#endif</span>
+<span class="s0">// Define these flags like Cython does if we're on an old version.</span>
+<span class="s2">#ifndef </span><span class="s1">Py_TPFLAGS_CHECKTYPES</span>
+  <span class="s2">#define </span><span class="s1">Py_TPFLAGS_CHECKTYPES </span><span class="s4">0</span>
+<span class="s2">#endif</span>
+<span class="s2">#ifndef </span><span class="s1">Py_TPFLAGS_HAVE_INDEX</span>
+  <span class="s2">#define </span><span class="s1">Py_TPFLAGS_HAVE_INDEX </span><span class="s4">0</span>
+<span class="s2">#endif</span>
+<span class="s2">#ifndef </span><span class="s1">Py_TPFLAGS_HAVE_NEWBUFFER</span>
+  <span class="s2">#define </span><span class="s1">Py_TPFLAGS_HAVE_NEWBUFFER </span><span class="s4">0</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#ifndef </span><span class="s1">Py_TPFLAGS_HAVE_VERSION_TAG</span>
+   <span class="s2">#define </span><span class="s1">Py_TPFLAGS_HAVE_VERSION_TAG </span><span class="s4">0</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#define </span><span class="s1">G_TPFLAGS_DEFAULT Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_VERSION_TAG | Py_TPFLAGS_CHECKTYPES | Py_TPFLAGS_HAVE_NEWBUFFER | Py_TPFLAGS_HAVE_GC</span>
+
+
+<span class="s2">#if </span><span class="s1">PY_VERSION_HEX &lt; </span><span class="s4">0x03090000</span>
+<span class="s0">// The official version only became available in 3.9</span>
+<span class="s1">#    define PyObject_GC_IsTracked(o) _PyObject_GC_IS_TRACKED(o)</span>
+<span class="s2">#endif</span>
+
+
+<span class="s0">// bpo-43760 added PyThreadState_EnterTracing() to Python 3.11.0a2</span>
+<span class="s2">#if </span><span class="s1">PY_VERSION_HEX &lt; </span><span class="s4">0x030B00A2 </span><span class="s1">&amp;&amp; !defined(PYPY_VERSION)</span>
+<span class="s2">static </span><span class="s5">inline </span><span class="s2">void </span><span class="s1">PyThreadState_EnterTracing(PyThreadState *tstate)</span>
+<span class="s1">{</span>
+    <span class="s1">tstate</span><span class="s6">-&gt;</span><span class="s1">tracing++;</span>
+<span class="s2">#if </span><span class="s1">PY_VERSION_HEX &gt;= </span><span class="s4">0x030A00A1</span>
+    <span class="s1">tstate</span><span class="s6">-&gt;</span><span class="s1">cframe</span><span class="s6">-&gt;</span><span class="s1">use_tracing = </span><span class="s4">0</span><span class="s1">;</span>
+<span class="s2">#else</span>
+    <span class="s1">tstate</span><span class="s6">-&gt;</span><span class="s1">use_tracing = </span><span class="s4">0</span><span class="s1">;</span>
+<span class="s2">#endif</span>
+<span class="s1">}</span>
+<span class="s2">#endif</span>
+
+<span class="s0">// bpo-43760 added PyThreadState_LeaveTracing() to Python 3.11.0a2</span>
+<span class="s2">#if </span><span class="s1">PY_VERSION_HEX &lt; </span><span class="s4">0x030B00A2 </span><span class="s1">&amp;&amp; !defined(PYPY_VERSION)</span>
+<span class="s2">static </span><span class="s5">inline </span><span class="s2">void </span><span class="s1">PyThreadState_LeaveTracing(PyThreadState *tstate)</span>
+<span class="s1">{</span>
+    <span class="s1">tstate</span><span class="s6">-&gt;</span><span class="s1">tracing--;</span>
+    <span class="s2">int </span><span class="s1">use_tracing = (tstate</span><span class="s6">-&gt;</span><span class="s1">c_tracefunc != NULL</span>
+                       <span class="s1">|| tstate</span><span class="s6">-&gt;</span><span class="s1">c_profilefunc != NULL);</span>
+<span class="s2">#if </span><span class="s1">PY_VERSION_HEX &gt;= </span><span class="s4">0x030A00A1</span>
+    <span class="s1">tstate</span><span class="s6">-&gt;</span><span class="s1">cframe</span><span class="s6">-&gt;</span><span class="s1">use_tracing = use_tracing;</span>
+<span class="s2">#else</span>
+    <span class="s1">tstate</span><span class="s6">-&gt;</span><span class="s1">use_tracing = use_tracing;</span>
+<span class="s2">#endif</span>
+<span class="s1">}</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#if </span><span class="s1">!defined(Py_C_RECURSION_LIMIT) &amp;&amp; defined(C_RECURSION_LIMIT)</span>
+<span class="s1">#  define Py_C_RECURSION_LIMIT C_RECURSION_LIMIT</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#endif </span><span class="s0">/* GREENLET_CPYTHON_COMPAT_H */</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,950 @@
+<html>
+<head>
+<title>symbolic.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #cf8e6d;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+symbolic.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># This module is part of GitPython and is released under the</span>
+<span class="s0"># 3-Clause BSD License: https://opensource.org/license/bsd-3-clause/</span>
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">]</span>
+
+<span class="s4">import </span><span class="s1">os</span>
+
+<span class="s4">from </span><span class="s1">gitdb</span><span class="s2">.</span><span class="s1">exc </span><span class="s4">import </span><span class="s1">BadName</span><span class="s2">, </span><span class="s1">BadObject</span>
+
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">compat </span><span class="s4">import </span><span class="s1">defenc</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">objects</span><span class="s2">.</span><span class="s1">base </span><span class="s4">import </span><span class="s1">Object</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">objects</span><span class="s2">.</span><span class="s1">commit </span><span class="s4">import </span><span class="s1">Commit</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">.</span><span class="s1">log </span><span class="s4">import </span><span class="s1">RefLog</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">util </span><span class="s4">import </span><span class="s2">(</span>
+    <span class="s1">LockedFD</span><span class="s2">,</span>
+    <span class="s1">assure_directory_exists</span><span class="s2">,</span>
+    <span class="s1">hex_to_bin</span><span class="s2">,</span>
+    <span class="s1">join_path</span><span class="s2">,</span>
+    <span class="s1">join_path_native</span><span class="s2">,</span>
+    <span class="s1">to_native_path_linux</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0"># typing ------------------------------------------------------------------</span>
+
+<span class="s4">from </span><span class="s1">typing </span><span class="s4">import </span><span class="s2">(</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+    <span class="s1">Iterator</span><span class="s2">,</span>
+    <span class="s1">List</span><span class="s2">,</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Tuple</span><span class="s2">,</span>
+    <span class="s1">Type</span><span class="s2">,</span>
+    <span class="s1">TypeVar</span><span class="s2">,</span>
+    <span class="s1">Union</span><span class="s2">,</span>
+    <span class="s1">cast</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">types </span><span class="s4">import </span><span class="s1">AnyGitObject</span><span class="s2">, </span><span class="s1">PathLike</span>
+
+<span class="s4">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">config </span><span class="s4">import </span><span class="s1">GitConfigParser</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">objects</span><span class="s2">.</span><span class="s1">commit </span><span class="s4">import </span><span class="s1">Actor</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">refs </span><span class="s4">import </span><span class="s1">Head</span><span class="s2">, </span><span class="s1">TagReference</span><span class="s2">, </span><span class="s1">RemoteReference</span><span class="s2">, </span><span class="s1">Reference</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">.</span><span class="s1">log </span><span class="s4">import </span><span class="s1">RefLogEntry</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">repo </span><span class="s4">import </span><span class="s1">Repo</span>
+
+
+<span class="s1">T_References </span><span class="s2">= </span><span class="s1">TypeVar</span><span class="s2">(</span><span class="s3">&quot;T_References&quot;</span><span class="s2">, </span><span class="s1">bound</span><span class="s2">=</span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">)</span>
+
+<span class="s0"># ------------------------------------------------------------------------------</span>
+
+
+<span class="s4">def </span><span class="s1">_git_dir</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">path</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s4">None</span><span class="s2">]) </span><span class="s1">-&gt; PathLike</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;Find the git dir that is appropriate for the path.&quot;&quot;&quot;</span>
+    <span class="s1">name </span><span class="s2">= </span><span class="s3">f&quot;</span><span class="s4">{</span><span class="s1">path</span><span class="s4">}</span><span class="s3">&quot;</span>
+    <span class="s4">if </span><span class="s1">name </span><span class="s4">in </span><span class="s2">[</span><span class="s3">&quot;HEAD&quot;</span><span class="s2">, </span><span class="s3">&quot;ORIG_HEAD&quot;</span><span class="s2">, </span><span class="s3">&quot;FETCH_HEAD&quot;</span><span class="s2">, </span><span class="s3">&quot;index&quot;</span><span class="s2">, </span><span class="s3">&quot;logs&quot;</span><span class="s2">]:</span>
+        <span class="s4">return </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git_dir</span>
+    <span class="s4">return </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">common_dir</span>
+
+
+<span class="s4">class </span><span class="s1">SymbolicReference</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;Special case of a reference that is symbolic. 
+ 
+    This does not point to a specific commit, but to another 
+    :class:`~git.refs.head.Head`, which itself specifies a commit. 
+ 
+    A typical example for a symbolic reference is :class:`~git.refs.head.HEAD`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s2">= (</span><span class="s3">&quot;repo&quot;</span><span class="s2">, </span><span class="s3">&quot;path&quot;</span><span class="s2">)</span>
+
+    <span class="s1">_resolve_ref_on_create </span><span class="s2">= </span><span class="s4">False</span>
+    <span class="s1">_points_to_commits_only </span><span class="s2">= </span><span class="s4">True</span>
+    <span class="s1">_common_path_default </span><span class="s2">= </span><span class="s3">&quot;&quot;</span>
+    <span class="s1">_remote_common_path_default </span><span class="s2">= </span><span class="s3">&quot;refs/remotes&quot;</span>
+    <span class="s1">_id_attribute_ </span><span class="s2">= </span><span class="s3">&quot;name&quot;</span>
+
+    <span class="s4">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">path</span><span class="s2">: </span><span class="s1">PathLike</span><span class="s2">, </span><span class="s1">check_path</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s4">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">repo </span><span class="s2">= </span><span class="s1">repo</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">path </span><span class="s2">= </span><span class="s1">path</span>
+
+    <span class="s4">def </span><span class="s1">__str__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s4">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">__repr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s4">return </span><span class="s3">'&lt;git.%s &quot;%s&quot;&gt;' </span><span class="s2">% (</span><span class="s1">self</span><span class="s2">.</span><span class="s1">__class__</span><span class="s2">.</span><span class="s1">__name__</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">__eq__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">object</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s4">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s3">&quot;path&quot;</span><span class="s2">):</span>
+            <span class="s1">other </span><span class="s2">= </span><span class="s1">cast</span><span class="s2">(</span><span class="s1">SymbolicReference</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+            <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path </span><span class="s2">== </span><span class="s1">other</span><span class="s2">.</span><span class="s1">path</span>
+        <span class="s4">return False</span>
+
+    <span class="s4">def </span><span class="s1">__ne__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">object</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s4">return not </span><span class="s2">(</span><span class="s1">self </span><span class="s2">== </span><span class="s1">other</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">__hash__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s4">return </span><span class="s1">hash</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">name</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            In case of symbolic references, the shortest assumable name is the path 
+            itself. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; PathLike</span><span class="s2">:</span>
+        <span class="s4">return </span><span class="s1">join_path_native</span><span class="s2">(</span><span class="s1">_git_dir</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">), </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_get_packed_refs_path</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s4">return </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">common_dir</span><span class="s2">, </span><span class="s3">&quot;packed-refs&quot;</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_iter_packed_refs</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">) </span><span class="s1">-&gt; Iterator</span><span class="s2">[</span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]]:</span>
+        <span class="s5">&quot;&quot;&quot;Return an iterator yielding pairs of sha1/path pairs (as strings) for the 
+        corresponding refs. 
+ 
+        :note: 
+            The packed refs file will be kept open as long as we iterate. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s4">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_get_packed_refs_path</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">), </span><span class="s3">&quot;rt&quot;</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s3">&quot;UTF-8&quot;</span><span class="s2">) </span><span class="s4">as </span><span class="s1">fp</span><span class="s2">:</span>
+                <span class="s4">for </span><span class="s1">line </span><span class="s4">in </span><span class="s1">fp</span><span class="s2">:</span>
+                    <span class="s1">line </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+                    <span class="s4">if not </span><span class="s1">line</span><span class="s2">:</span>
+                        <span class="s4">continue</span>
+                    <span class="s4">if </span><span class="s1">line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;#&quot;</span><span class="s2">):</span>
+                        <span class="s0"># &quot;# pack-refs with: peeled fully-peeled sorted&quot;</span>
+                        <span class="s0"># the git source code shows &quot;peeled&quot;,</span>
+                        <span class="s0"># &quot;fully-peeled&quot; and &quot;sorted&quot; as the keywords</span>
+                        <span class="s0"># that can go on this line, as per comments in git file</span>
+                        <span class="s0"># refs/packed-backend.c</span>
+                        <span class="s0"># I looked at master on 2017-10-11,</span>
+                        <span class="s0"># commit 111ef79afe, after tag v2.15.0-rc1</span>
+                        <span class="s0"># from repo https://github.com/git/git.git</span>
+                        <span class="s4">if </span><span class="s1">line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;# pack-refs with:&quot;</span><span class="s2">) </span><span class="s4">and </span><span class="s3">&quot;peeled&quot; </span><span class="s4">not in </span><span class="s1">line</span><span class="s2">:</span>
+                            <span class="s4">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s3">&quot;PackingType of packed-Refs not understood: %r&quot; </span><span class="s2">% </span><span class="s1">line</span><span class="s2">)</span>
+                        <span class="s0"># END abort if we do not understand the packing scheme</span>
+                        <span class="s4">continue</span>
+                    <span class="s0"># END parse comment</span>
+
+                    <span class="s0"># Skip dereferenced tag object entries - previous line was actual</span>
+                    <span class="s0"># tag reference for it.</span>
+                    <span class="s4">if </span><span class="s1">line</span><span class="s2">[</span><span class="s6">0</span><span class="s2">] == </span><span class="s3">&quot;^&quot;</span><span class="s2">:</span>
+                        <span class="s4">continue</span>
+
+                    <span class="s4">yield </span><span class="s1">cast</span><span class="s2">(</span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">], </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">line</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot; &quot;</span><span class="s2">, </span><span class="s6">1</span><span class="s2">)))</span>
+                <span class="s0"># END for each line</span>
+        <span class="s4">except </span><span class="s1">OSError</span><span class="s2">:</span>
+            <span class="s4">return None</span>
+        <span class="s0"># END no packed-refs file handling</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">dereference_recursive</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">ref_path</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s4">None</span><span class="s2">]) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            hexsha stored in the reference at the given `ref_path`, recursively 
+            dereferencing all intermediate references as required 
+ 
+        :param repo: 
+            The repository containing the reference at `ref_path`. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s4">while True</span><span class="s2">:</span>
+            <span class="s1">hexsha</span><span class="s2">, </span><span class="s1">ref_path </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_get_ref_info</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">ref_path</span><span class="s2">)</span>
+            <span class="s4">if </span><span class="s1">hexsha </span><span class="s4">is not None</span><span class="s2">:</span>
+                <span class="s4">return </span><span class="s1">hexsha</span>
+        <span class="s0"># END recursive dereferencing</span>
+
+    <span class="s2">@</span><span class="s1">staticmethod</span>
+    <span class="s4">def </span><span class="s1">_check_ref_name_valid</span><span class="s2">(</span><span class="s1">ref_path</span><span class="s2">: </span><span class="s1">PathLike</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s4">None</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Check a ref name for validity. 
+ 
+        This is based on the rules described in :manpage:`git-check-ref-format(1)`. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">previous</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span>
+        <span class="s1">one_before_previous</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span>
+        <span class="s4">for </span><span class="s1">c </span><span class="s4">in </span><span class="s1">str</span><span class="s2">(</span><span class="s1">ref_path</span><span class="s2">):</span>
+            <span class="s4">if </span><span class="s1">c </span><span class="s4">in </span><span class="s3">&quot; ~^:?*[</span><span class="s4">\\</span><span class="s3">&quot;</span><span class="s2">:</span>
+                <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                    <span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot contain spaces, tildes (~), carets (^),&quot;</span>
+                    <span class="s3">f&quot; colons (:), question marks (?), asterisks (*), open brackets ([) or backslashes (</span><span class="s4">\\</span><span class="s3">)&quot;</span>
+                <span class="s2">)</span>
+            <span class="s4">elif </span><span class="s1">c </span><span class="s2">== </span><span class="s3">&quot;.&quot;</span><span class="s2">:</span>
+                <span class="s4">if </span><span class="s1">previous </span><span class="s4">is None or </span><span class="s1">previous </span><span class="s2">== </span><span class="s3">&quot;/&quot;</span><span class="s2">:</span>
+                    <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                        <span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot start with a period (.) or contain '/.'&quot;</span>
+                    <span class="s2">)</span>
+                <span class="s4">elif </span><span class="s1">previous </span><span class="s2">== </span><span class="s3">&quot;.&quot;</span><span class="s2">:</span>
+                    <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot contain '..'&quot;</span><span class="s2">)</span>
+            <span class="s4">elif </span><span class="s1">c </span><span class="s2">== </span><span class="s3">&quot;/&quot;</span><span class="s2">:</span>
+                <span class="s4">if </span><span class="s1">previous </span><span class="s2">== </span><span class="s3">&quot;/&quot;</span><span class="s2">:</span>
+                    <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot contain '//'&quot;</span><span class="s2">)</span>
+                <span class="s4">elif </span><span class="s1">previous </span><span class="s4">is None</span><span class="s2">:</span>
+                    <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                        <span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot start with forward slashes '/'&quot;</span>
+                    <span class="s2">)</span>
+            <span class="s4">elif </span><span class="s1">c </span><span class="s2">== </span><span class="s3">&quot;{&quot; </span><span class="s4">and </span><span class="s1">previous </span><span class="s2">== </span><span class="s3">&quot;@&quot;</span><span class="s2">:</span>
+                <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot contain '@</span><span class="s4">{{</span><span class="s3">'&quot;</span><span class="s2">)</span>
+            <span class="s4">elif </span><span class="s1">ord</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) &lt; </span><span class="s6">32 </span><span class="s4">or </span><span class="s1">ord</span><span class="s2">(</span><span class="s1">c</span><span class="s2">) == </span><span class="s6">127</span><span class="s2">:</span>
+                <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot contain ASCII control characters&quot;</span><span class="s2">)</span>
+
+            <span class="s1">one_before_previous </span><span class="s2">= </span><span class="s1">previous</span>
+            <span class="s1">previous </span><span class="s2">= </span><span class="s1">c</span>
+
+        <span class="s4">if </span><span class="s1">previous </span><span class="s2">== </span><span class="s3">&quot;.&quot;</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot end with a period (.)&quot;</span><span class="s2">)</span>
+        <span class="s4">elif </span><span class="s1">previous </span><span class="s2">== </span><span class="s3">&quot;/&quot;</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot end with a forward slash (/)&quot;</span><span class="s2">)</span>
+        <span class="s4">elif </span><span class="s1">previous </span><span class="s2">== </span><span class="s3">&quot;@&quot; </span><span class="s4">and </span><span class="s1">one_before_previous </span><span class="s4">is None</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot be '@'&quot;</span><span class="s2">)</span>
+        <span class="s4">elif </span><span class="s1">any</span><span class="s2">(</span><span class="s1">component</span><span class="s2">.</span><span class="s1">endswith</span><span class="s2">(</span><span class="s3">&quot;.lock&quot;</span><span class="s2">) </span><span class="s4">for </span><span class="s1">component </span><span class="s4">in </span><span class="s1">str</span><span class="s2">(</span><span class="s1">ref_path</span><span class="s2">).</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;/&quot;</span><span class="s2">)):</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                <span class="s3">f&quot;Invalid reference '</span><span class="s4">{</span><span class="s1">ref_path</span><span class="s4">}</span><span class="s3">': references cannot have slash-separated components that end with&quot;</span>
+                <span class="s3">&quot; '.lock'&quot;</span>
+            <span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_get_ref_info_helper</span><span class="s2">(</span>
+        <span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">ref_path</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s4">None</span><span class="s2">]</span>
+    <span class="s2">) </span><span class="s1">-&gt; Union</span><span class="s2">[</span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">], </span><span class="s1">Tuple</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]]:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            *(str(sha), str(target_ref_path))*, where: 
+ 
+            * *sha* is of the file at rela_path points to if available, or ``None``. 
+            * *target_ref_path* is the reference we point to, or ``None``. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">if </span><span class="s1">ref_path</span><span class="s2">:</span>
+            <span class="s1">cls</span><span class="s2">.</span><span class="s1">_check_ref_name_valid</span><span class="s2">(</span><span class="s1">ref_path</span><span class="s2">)</span>
+
+        <span class="s1">tokens</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">List</span><span class="s2">[</span><span class="s1">str</span><span class="s2">], </span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]] = </span><span class="s4">None</span>
+        <span class="s1">repodir </span><span class="s2">= </span><span class="s1">_git_dir</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">ref_path</span><span class="s2">)</span>
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s4">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">repodir</span><span class="s2">, </span><span class="s1">str</span><span class="s2">(</span><span class="s1">ref_path</span><span class="s2">)), </span><span class="s3">&quot;rt&quot;</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s3">&quot;UTF-8&quot;</span><span class="s2">) </span><span class="s4">as </span><span class="s1">fp</span><span class="s2">:</span>
+                <span class="s1">value </span><span class="s2">= </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">read</span><span class="s2">().</span><span class="s1">rstrip</span><span class="s2">()</span>
+            <span class="s0"># Don't only split on spaces, but on whitespace, which allows to parse lines like:</span>
+            <span class="s0"># 60b64ef992065e2600bfef6187a97f92398a9144                branch 'master' of git-server:/path/to/repo</span>
+            <span class="s1">tokens </span><span class="s2">= </span><span class="s1">value</span><span class="s2">.</span><span class="s1">split</span><span class="s2">()</span>
+            <span class="s4">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">tokens</span><span class="s2">) != </span><span class="s6">0</span>
+        <span class="s4">except </span><span class="s1">OSError</span><span class="s2">:</span>
+            <span class="s0"># Probably we are just packed. Find our entry in the packed refs file.</span>
+            <span class="s0"># NOTE: We are not a symbolic ref if we are in a packed file, as these</span>
+            <span class="s0"># are excluded explicitly.</span>
+            <span class="s4">for </span><span class="s1">sha</span><span class="s2">, </span><span class="s1">path </span><span class="s4">in </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_iter_packed_refs</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">):</span>
+                <span class="s4">if </span><span class="s1">path </span><span class="s2">!= </span><span class="s1">ref_path</span><span class="s2">:</span>
+                    <span class="s4">continue</span>
+                <span class="s0"># sha will be used.</span>
+                <span class="s1">tokens </span><span class="s2">= </span><span class="s1">sha</span><span class="s2">, </span><span class="s1">path</span>
+                <span class="s4">break</span>
+            <span class="s0"># END for each packed ref</span>
+        <span class="s0"># END handle packed refs</span>
+        <span class="s4">if </span><span class="s1">tokens </span><span class="s4">is None</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Reference at %r does not exist&quot; </span><span class="s2">% </span><span class="s1">ref_path</span><span class="s2">)</span>
+
+        <span class="s0"># Is it a reference?</span>
+        <span class="s4">if </span><span class="s1">tokens</span><span class="s2">[</span><span class="s6">0</span><span class="s2">] == </span><span class="s3">&quot;ref:&quot;</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s2">(</span><span class="s4">None</span><span class="s2">, </span><span class="s1">tokens</span><span class="s2">[</span><span class="s6">1</span><span class="s2">])</span>
+
+        <span class="s0"># It's a commit.</span>
+        <span class="s4">if </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">re_hexsha_only</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s1">tokens</span><span class="s2">[</span><span class="s6">0</span><span class="s2">]):</span>
+            <span class="s4">return </span><span class="s2">(</span><span class="s1">tokens</span><span class="s2">[</span><span class="s6">0</span><span class="s2">], </span><span class="s4">None</span><span class="s2">)</span>
+
+        <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Failed to parse reference information from %r&quot; </span><span class="s2">% </span><span class="s1">ref_path</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_get_ref_info</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">ref_path</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s4">None</span><span class="s2">]) </span><span class="s1">-&gt; Union</span><span class="s2">[</span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">], </span><span class="s1">Tuple</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]]:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            *(str(sha), str(target_ref_path))*, where: 
+ 
+            * *sha* is of the file at rela_path points to if available, or ``None``. 
+            * *target_ref_path* is the reference we point to, or ``None``. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_get_ref_info_helper</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">ref_path</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">_get_object</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; AnyGitObject</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            The object our ref currently refers to. Refs can be cached, they will always 
+            point to the actual object as it gets re-created on each query. 
+        &quot;&quot;&quot;</span>
+        <span class="s0"># We have to be dynamic here as we may be a tag which can point to anything.</span>
+        <span class="s0"># Our path will be resolved to the hexsha which will be used accordingly.</span>
+        <span class="s4">return </span><span class="s1">Object</span><span class="s2">.</span><span class="s1">new_from_sha</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">hex_to_bin</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">dereference_recursive</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)))</span>
+
+    <span class="s4">def </span><span class="s1">_get_commit</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;Commit&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            :class:`~git.objects.commit.Commit` object we point to. This works for 
+            detached and non-detached :class:`SymbolicReference` instances. The symbolic 
+            reference will be dereferenced recursively. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_object</span><span class="s2">()</span>
+        <span class="s4">if </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">type </span><span class="s2">== </span><span class="s3">&quot;tag&quot;</span><span class="s2">:</span>
+            <span class="s1">obj </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">object</span>
+        <span class="s0"># END dereference tag</span>
+
+        <span class="s4">if </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">type </span><span class="s2">!= </span><span class="s1">Commit</span><span class="s2">.</span><span class="s1">type</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s3">&quot;Symbolic Reference pointed to object %r, commit was required&quot; </span><span class="s2">% </span><span class="s1">obj</span><span class="s2">)</span>
+        <span class="s0"># END handle type</span>
+        <span class="s4">return </span><span class="s1">obj</span>
+
+    <span class="s4">def </span><span class="s1">set_commit</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">commit</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Commit</span><span class="s2">, </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">],</span>
+        <span class="s1">logmsg</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Like :meth:`set_object`, but restricts the type of object to be a 
+        :class:`~git.objects.commit.Commit`. 
+ 
+        :raise ValueError: 
+            If `commit` is not a :class:`~git.objects.commit.Commit` object, nor does it 
+            point to a commit. 
+ 
+        :return: 
+            self 
+        &quot;&quot;&quot;</span>
+        <span class="s0"># Check the type - assume the best if it is a base-string.</span>
+        <span class="s1">invalid_type </span><span class="s2">= </span><span class="s4">False</span>
+        <span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">commit</span><span class="s2">, </span><span class="s1">Object</span><span class="s2">):</span>
+            <span class="s1">invalid_type </span><span class="s2">= </span><span class="s1">commit</span><span class="s2">.</span><span class="s1">type </span><span class="s2">!= </span><span class="s1">Commit</span><span class="s2">.</span><span class="s1">type</span>
+        <span class="s4">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">commit</span><span class="s2">, </span><span class="s1">SymbolicReference</span><span class="s2">):</span>
+            <span class="s1">invalid_type </span><span class="s2">= </span><span class="s1">commit</span><span class="s2">.</span><span class="s1">object</span><span class="s2">.</span><span class="s1">type </span><span class="s2">!= </span><span class="s1">Commit</span><span class="s2">.</span><span class="s1">type</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s4">try</span><span class="s2">:</span>
+                <span class="s1">invalid_type </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">rev_parse</span><span class="s2">(</span><span class="s1">commit</span><span class="s2">).</span><span class="s1">type </span><span class="s2">!= </span><span class="s1">Commit</span><span class="s2">.</span><span class="s1">type</span>
+            <span class="s4">except </span><span class="s2">(</span><span class="s1">BadObject</span><span class="s2">, </span><span class="s1">BadName</span><span class="s2">) </span><span class="s4">as </span><span class="s1">e</span><span class="s2">:</span>
+                <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Invalid object: %s&quot; </span><span class="s2">% </span><span class="s1">commit</span><span class="s2">) </span><span class="s4">from </span><span class="s1">e</span>
+            <span class="s0"># END handle exception</span>
+        <span class="s0"># END verify type</span>
+
+        <span class="s4">if </span><span class="s1">invalid_type</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Need commit, got %r&quot; </span><span class="s2">% </span><span class="s1">commit</span><span class="s2">)</span>
+        <span class="s0"># END handle raise</span>
+
+        <span class="s0"># We leave strings to the rev-parse method below.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">set_object</span><span class="s2">(</span><span class="s1">commit</span><span class="s2">, </span><span class="s1">logmsg</span><span class="s2">)</span>
+
+        <span class="s4">return </span><span class="s1">self</span>
+
+    <span class="s4">def </span><span class="s1">set_object</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">object</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">AnyGitObject</span><span class="s2">, </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">],</span>
+        <span class="s1">logmsg</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Set the object we point to, possibly dereference our symbolic reference 
+        first. If the reference does not exist, it will be created. 
+ 
+        :param object: 
+            A refspec, a :class:`SymbolicReference` or an 
+            :class:`~git.objects.base.Object` instance. 
+ 
+            * :class:`SymbolicReference` instances will be dereferenced beforehand to 
+              obtain the git object they point to. 
+            * :class:`~git.objects.base.Object` instances must represent git objects 
+              (:class:`~git.types.AnyGitObject`). 
+ 
+        :param logmsg: 
+            If not ``None``, the message will be used in the reflog entry to be written. 
+            Otherwise the reflog is not altered. 
+ 
+        :note: 
+            Plain :class:`SymbolicReference` instances may not actually point to objects 
+            by convention. 
+ 
+        :return: 
+            self 
+        &quot;&quot;&quot;</span>
+        <span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">object</span><span class="s2">, </span><span class="s1">SymbolicReference</span><span class="s2">):</span>
+            <span class="s1">object </span><span class="s2">= </span><span class="s1">object</span><span class="s2">.</span><span class="s1">object  </span><span class="s0"># @ReservedAssignment</span>
+        <span class="s0"># END resolve references</span>
+
+        <span class="s1">is_detached </span><span class="s2">= </span><span class="s4">True</span>
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s1">is_detached </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">is_detached</span>
+        <span class="s4">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+            <span class="s4">pass</span>
+        <span class="s0"># END handle non-existing ones</span>
+
+        <span class="s4">if </span><span class="s1">is_detached</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">set_reference</span><span class="s2">(</span><span class="s1">object</span><span class="s2">, </span><span class="s1">logmsg</span><span class="s2">)</span>
+
+        <span class="s0"># set the commit on our reference</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_reference</span><span class="s2">().</span><span class="s1">set_object</span><span class="s2">(</span><span class="s1">object</span><span class="s2">, </span><span class="s1">logmsg</span><span class="s2">)</span>
+
+    <span class="s1">commit </span><span class="s2">= </span><span class="s1">property</span><span class="s2">(</span>
+        <span class="s1">_get_commit</span><span class="s2">,</span>
+        <span class="s1">set_commit</span><span class="s2">,  </span><span class="s0"># type: ignore[arg-type]</span>
+        <span class="s1">doc</span><span class="s2">=</span><span class="s3">&quot;Query or set commits directly&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s1">object </span><span class="s2">= </span><span class="s1">property</span><span class="s2">(</span>
+        <span class="s1">_get_object</span><span class="s2">,</span>
+        <span class="s1">set_object</span><span class="s2">,  </span><span class="s0"># type: ignore[arg-type]</span>
+        <span class="s1">doc</span><span class="s2">=</span><span class="s3">&quot;Return the object our ref currently refers to&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">_get_reference</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            :class:`~git.refs.reference.Reference` object we point to 
+ 
+        :raise TypeError: 
+            If this symbolic reference is detached, hence it doesn't point to a 
+            reference, but to a commit. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">sha</span><span class="s2">, </span><span class="s1">target_ref_path </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_ref_info</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s4">if </span><span class="s1">target_ref_path </span><span class="s4">is None</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s3">&quot;%s is a detached symbolic reference as it points to %r&quot; </span><span class="s2">% (</span><span class="s1">self</span><span class="s2">, </span><span class="s1">sha</span><span class="s2">))</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">from_path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">target_ref_path</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">set_reference</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">ref</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">AnyGitObject</span><span class="s2">, </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">],</span>
+        <span class="s1">logmsg</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Set ourselves to the given `ref`. 
+ 
+        It will stay a symbol if the `ref` is a :class:`~git.refs.reference.Reference`. 
+ 
+        Otherwise a git object, specified as a :class:`~git.objects.base.Object` 
+        instance or refspec, is assumed. If it is valid, this reference will be set to 
+        it, which effectively detaches the reference if it was a purely symbolic one. 
+ 
+        :param ref: 
+            A :class:`SymbolicReference` instance, an :class:`~git.objects.base.Object` 
+            instance (specifically an :class:`~git.types.AnyGitObject`), or a refspec 
+            string. Only if the ref is a :class:`SymbolicReference` instance, we will 
+            point to it. Everything else is dereferenced to obtain the actual object. 
+ 
+        :param logmsg: 
+            If set to a string, the message will be used in the reflog. 
+            Otherwise, a reflog entry is not written for the changed reference. 
+            The previous commit of the entry will be the commit we point to now. 
+ 
+            See also: :meth:`log_append` 
+ 
+        :return: 
+            self 
+ 
+        :note: 
+            This symbolic reference will not be dereferenced. For that, see 
+            :meth:`set_object`. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">write_value </span><span class="s2">= </span><span class="s4">None</span>
+        <span class="s1">obj </span><span class="s2">= </span><span class="s4">None</span>
+        <span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">ref</span><span class="s2">, </span><span class="s1">SymbolicReference</span><span class="s2">):</span>
+            <span class="s1">write_value </span><span class="s2">= </span><span class="s3">&quot;ref: %s&quot; </span><span class="s2">% </span><span class="s1">ref</span><span class="s2">.</span><span class="s1">path</span>
+        <span class="s4">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">ref</span><span class="s2">, </span><span class="s1">Object</span><span class="s2">):</span>
+            <span class="s1">obj </span><span class="s2">= </span><span class="s1">ref</span>
+            <span class="s1">write_value </span><span class="s2">= </span><span class="s1">ref</span><span class="s2">.</span><span class="s1">hexsha</span>
+        <span class="s4">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">ref</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s4">try</span><span class="s2">:</span>
+                <span class="s1">obj </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">rev_parse</span><span class="s2">(</span><span class="s1">ref </span><span class="s2">+ </span><span class="s3">&quot;^{}&quot;</span><span class="s2">)  </span><span class="s0"># Optionally dereference tags.</span>
+                <span class="s1">write_value </span><span class="s2">= </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">hexsha</span>
+            <span class="s4">except </span><span class="s2">(</span><span class="s1">BadObject</span><span class="s2">, </span><span class="s1">BadName</span><span class="s2">) </span><span class="s4">as </span><span class="s1">e</span><span class="s2">:</span>
+                <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Could not extract object from %s&quot; </span><span class="s2">% </span><span class="s1">ref</span><span class="s2">) </span><span class="s4">from </span><span class="s1">e</span>
+            <span class="s0"># END end try string</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Unrecognized Value: %r&quot; </span><span class="s2">% </span><span class="s1">ref</span><span class="s2">)</span>
+        <span class="s0"># END try commit attribute</span>
+
+        <span class="s0"># typecheck</span>
+        <span class="s4">if </span><span class="s1">obj </span><span class="s4">is not None and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_points_to_commits_only </span><span class="s4">and </span><span class="s1">obj</span><span class="s2">.</span><span class="s1">type </span><span class="s2">!= </span><span class="s1">Commit</span><span class="s2">.</span><span class="s1">type</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s3">&quot;Require commit, got %r&quot; </span><span class="s2">% </span><span class="s1">obj</span><span class="s2">)</span>
+        <span class="s0"># END verify type</span>
+
+        <span class="s1">oldbinsha</span><span class="s2">: </span><span class="s1">bytes </span><span class="s2">= </span><span class="s7">b&quot;&quot;</span>
+        <span class="s4">if </span><span class="s1">logmsg </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s4">try</span><span class="s2">:</span>
+                <span class="s1">oldbinsha </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">.</span><span class="s1">binsha</span>
+            <span class="s4">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+                <span class="s1">oldbinsha </span><span class="s2">= </span><span class="s1">Commit</span><span class="s2">.</span><span class="s1">NULL_BIN_SHA</span>
+            <span class="s0"># END handle non-existing</span>
+        <span class="s0"># END retrieve old hexsha</span>
+
+        <span class="s1">fpath </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">abspath</span>
+        <span class="s1">assure_directory_exists</span><span class="s2">(</span><span class="s1">fpath</span><span class="s2">, </span><span class="s1">is_file</span><span class="s2">=</span><span class="s4">True</span><span class="s2">)</span>
+
+        <span class="s1">lfd </span><span class="s2">= </span><span class="s1">LockedFD</span><span class="s2">(</span><span class="s1">fpath</span><span class="s2">)</span>
+        <span class="s1">fd </span><span class="s2">= </span><span class="s1">lfd</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">write</span><span class="s2">=</span><span class="s4">True</span><span class="s2">, </span><span class="s1">stream</span><span class="s2">=</span><span class="s4">True</span><span class="s2">)</span>
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s1">fd</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s1">write_value</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s3">&quot;utf-8&quot;</span><span class="s2">) + </span><span class="s7">b&quot;</span><span class="s4">\n</span><span class="s7">&quot;</span><span class="s2">)</span>
+            <span class="s1">lfd</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">()</span>
+        <span class="s4">except </span><span class="s1">BaseException</span><span class="s2">:</span>
+            <span class="s1">lfd</span><span class="s2">.</span><span class="s1">rollback</span><span class="s2">()</span>
+            <span class="s4">raise</span>
+        <span class="s0"># Adjust the reflog</span>
+        <span class="s4">if </span><span class="s1">logmsg </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">log_append</span><span class="s2">(</span><span class="s1">oldbinsha</span><span class="s2">, </span><span class="s1">logmsg</span><span class="s2">)</span>
+
+        <span class="s4">return </span><span class="s1">self</span>
+
+    <span class="s0"># Aliased reference</span>
+    <span class="s1">reference</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s3">&quot;Head&quot;</span><span class="s2">, </span><span class="s3">&quot;TagReference&quot;</span><span class="s2">, </span><span class="s3">&quot;RemoteReference&quot;</span><span class="s2">, </span><span class="s3">&quot;Reference&quot;</span><span class="s2">]</span>
+    <span class="s1">reference </span><span class="s2">= </span><span class="s1">property</span><span class="s2">(  </span><span class="s0"># type: ignore[assignment]</span>
+        <span class="s1">_get_reference</span><span class="s2">,</span>
+        <span class="s1">set_reference</span><span class="s2">,  </span><span class="s0"># type: ignore[arg-type]</span>
+        <span class="s1">doc</span><span class="s2">=</span><span class="s3">&quot;Returns the Reference we point to&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+    <span class="s1">ref </span><span class="s2">= </span><span class="s1">reference</span>
+
+    <span class="s4">def </span><span class="s1">is_valid</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            ``True`` if the reference is valid, hence it can be read and points to a 
+            valid object or reference. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">object  </span><span class="s0"># noqa: B018</span>
+        <span class="s4">except </span><span class="s2">(</span><span class="s1">OSError</span><span class="s2">, </span><span class="s1">ValueError</span><span class="s2">):</span>
+            <span class="s4">return False</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s4">return True</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">is_detached</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            ``True`` if we are a detached reference, hence we point to a specific commit 
+            instead to another reference. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">ref  </span><span class="s0"># noqa: B018</span>
+            <span class="s4">return False</span>
+        <span class="s4">except </span><span class="s1">TypeError</span><span class="s2">:</span>
+            <span class="s4">return True</span>
+
+    <span class="s4">def </span><span class="s1">log</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;RefLog&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            :class:`~git.refs.log.RefLog` for this reference. 
+            Its last entry reflects the latest change applied to this reference. 
+ 
+        :note: 
+            As the log is parsed every time, its recommended to cache it for use instead 
+            of calling this method repeatedly. It should be considered read-only. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">RefLog</span><span class="s2">.</span><span class="s1">from_file</span><span class="s2">(</span><span class="s1">RefLog</span><span class="s2">.</span><span class="s1">path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">))</span>
+
+    <span class="s4">def </span><span class="s1">log_append</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">oldbinsha</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">,</span>
+        <span class="s1">message</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">],</span>
+        <span class="s1">newbinsha</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;RefLogEntry&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Append a logentry to the logfile of this ref. 
+ 
+        :param oldbinsha: 
+            Binary sha this ref used to point to. 
+ 
+        :param message: 
+            A message describing the change. 
+ 
+        :param newbinsha: 
+            The sha the ref points to now. If None, our current commit sha will be used. 
+ 
+        :return: 
+            The added :class:`~git.refs.log.RefLogEntry` instance. 
+        &quot;&quot;&quot;</span>
+        <span class="s0"># NOTE: We use the committer of the currently active commit - this should be</span>
+        <span class="s0"># correct to allow overriding the committer on a per-commit level.</span>
+        <span class="s0"># See https://github.com/gitpython-developers/GitPython/pull/146.</span>
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s1">committer_or_reader</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s3">&quot;Actor&quot;</span><span class="s2">, </span><span class="s3">&quot;GitConfigParser&quot;</span><span class="s2">] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">.</span><span class="s1">committer</span>
+        <span class="s4">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+            <span class="s1">committer_or_reader </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">config_reader</span><span class="s2">()</span>
+        <span class="s0"># END handle newly cloned repositories</span>
+        <span class="s4">if </span><span class="s1">newbinsha </span><span class="s4">is None</span><span class="s2">:</span>
+            <span class="s1">newbinsha </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">.</span><span class="s1">binsha</span>
+
+        <span class="s4">if </span><span class="s1">message </span><span class="s4">is None</span><span class="s2">:</span>
+            <span class="s1">message </span><span class="s2">= </span><span class="s3">&quot;&quot;</span>
+
+        <span class="s4">return </span><span class="s1">RefLog</span><span class="s2">.</span><span class="s1">append_entry</span><span class="s2">(</span><span class="s1">committer_or_reader</span><span class="s2">, </span><span class="s1">RefLog</span><span class="s2">.</span><span class="s1">path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">), </span><span class="s1">oldbinsha</span><span class="s2">, </span><span class="s1">newbinsha</span><span class="s2">, </span><span class="s1">message</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">log_entry</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">index</span><span class="s2">: </span><span class="s1">int</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;RefLogEntry&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            :class:`~git.refs.log.RefLogEntry` at the given index 
+ 
+        :param index: 
+            Python list compatible positive or negative index. 
+ 
+        :note: 
+            This method must read part of the reflog during execution, hence it should 
+            be used sparingly, or only if you need just one index. In that case, it will 
+            be faster than the :meth:`log` method. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">RefLog</span><span class="s2">.</span><span class="s1">entry_at</span><span class="s2">(</span><span class="s1">RefLog</span><span class="s2">.</span><span class="s1">path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">), </span><span class="s1">index</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">to_full_path</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">path</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">]) </span><span class="s1">-&gt; PathLike</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            String with a full repository-relative path which can be used to initialize 
+            a :class:`~git.refs.reference.Reference` instance, for instance by using 
+            :meth:`Reference.from_path &lt;git.refs.reference.Reference.from_path&gt;`. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">SymbolicReference</span><span class="s2">):</span>
+            <span class="s1">path </span><span class="s2">= </span><span class="s1">path</span><span class="s2">.</span><span class="s1">path</span>
+        <span class="s1">full_ref_path </span><span class="s2">= </span><span class="s1">path</span>
+        <span class="s4">if not </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_common_path_default</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s1">full_ref_path</span>
+        <span class="s4">if not </span><span class="s1">str</span><span class="s2">(</span><span class="s1">path</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_common_path_default </span><span class="s2">+ </span><span class="s3">&quot;/&quot;</span><span class="s2">):</span>
+            <span class="s1">full_ref_path </span><span class="s2">= </span><span class="s3">&quot;%s/%s&quot; </span><span class="s2">% (</span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_common_path_default</span><span class="s2">, </span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s4">return </span><span class="s1">full_ref_path</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">delete</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">path</span><span class="s2">: </span><span class="s1">PathLike</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s4">None</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Delete the reference at the given path. 
+ 
+        :param repo: 
+            Repository to delete the reference from. 
+ 
+        :param path: 
+            Short or full path pointing to the reference, e.g. ``refs/myreference`` or 
+            just ``myreference``, hence ``refs/`` is implied. 
+            Alternatively the symbolic reference to be deleted. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">full_ref_path </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">to_full_path</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s1">abs_path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">common_dir</span><span class="s2">, </span><span class="s1">full_ref_path</span><span class="s2">)</span>
+        <span class="s4">if </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">abs_path</span><span class="s2">):</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">remove</span><span class="s2">(</span><span class="s1">abs_path</span><span class="s2">)</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s0"># Check packed refs.</span>
+            <span class="s1">pack_file_path </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_get_packed_refs_path</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">)</span>
+            <span class="s4">try</span><span class="s2">:</span>
+                <span class="s4">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">pack_file_path</span><span class="s2">, </span><span class="s3">&quot;rb&quot;</span><span class="s2">) </span><span class="s4">as </span><span class="s1">reader</span><span class="s2">:</span>
+                    <span class="s1">new_lines </span><span class="s2">= []</span>
+                    <span class="s1">made_change </span><span class="s2">= </span><span class="s4">False</span>
+                    <span class="s1">dropped_last_line </span><span class="s2">= </span><span class="s4">False</span>
+                    <span class="s4">for </span><span class="s1">line_bytes </span><span class="s4">in </span><span class="s1">reader</span><span class="s2">:</span>
+                        <span class="s1">line </span><span class="s2">= </span><span class="s1">line_bytes</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">)</span>
+                        <span class="s1">_</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">line_ref </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">partition</span><span class="s2">(</span><span class="s3">&quot; &quot;</span><span class="s2">)</span>
+                        <span class="s1">line_ref </span><span class="s2">= </span><span class="s1">line_ref</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+                        <span class="s0"># Keep line if it is a comment or if the ref to delete is not in</span>
+                        <span class="s0"># the line.</span>
+                        <span class="s0"># If we deleted the last line and this one is a tag-reference</span>
+                        <span class="s0"># object, we drop it as well.</span>
+                        <span class="s4">if </span><span class="s2">(</span><span class="s1">line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;#&quot;</span><span class="s2">) </span><span class="s4">or </span><span class="s1">full_ref_path </span><span class="s2">!= </span><span class="s1">line_ref</span><span class="s2">) </span><span class="s4">and </span><span class="s2">(</span>
+                            <span class="s4">not </span><span class="s1">dropped_last_line </span><span class="s4">or </span><span class="s1">dropped_last_line </span><span class="s4">and not </span><span class="s1">line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;^&quot;</span><span class="s2">)</span>
+                        <span class="s2">):</span>
+                            <span class="s1">new_lines</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">line</span><span class="s2">)</span>
+                            <span class="s1">dropped_last_line </span><span class="s2">= </span><span class="s4">False</span>
+                            <span class="s4">continue</span>
+                        <span class="s0"># END skip comments and lines without our path</span>
+
+                        <span class="s0"># Drop this line.</span>
+                        <span class="s1">made_change </span><span class="s2">= </span><span class="s4">True</span>
+                        <span class="s1">dropped_last_line </span><span class="s2">= </span><span class="s4">True</span>
+
+                <span class="s0"># Write the new lines.</span>
+                <span class="s4">if </span><span class="s1">made_change</span><span class="s2">:</span>
+                    <span class="s0"># Binary writing is required, otherwise Windows will open the file</span>
+                    <span class="s0"># in text mode and change LF to CRLF!</span>
+                    <span class="s4">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">pack_file_path</span><span class="s2">, </span><span class="s3">&quot;wb&quot;</span><span class="s2">) </span><span class="s4">as </span><span class="s1">fd</span><span class="s2">:</span>
+                        <span class="s1">fd</span><span class="s2">.</span><span class="s1">writelines</span><span class="s2">(</span><span class="s1">line</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">) </span><span class="s4">for </span><span class="s1">line </span><span class="s4">in </span><span class="s1">new_lines</span><span class="s2">)</span>
+
+            <span class="s4">except </span><span class="s1">OSError</span><span class="s2">:</span>
+                <span class="s4">pass  </span><span class="s0"># It didn't exist at all.</span>
+
+        <span class="s0"># Delete the reflog.</span>
+        <span class="s1">reflog_path </span><span class="s2">= </span><span class="s1">RefLog</span><span class="s2">.</span><span class="s1">path</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">full_ref_path</span><span class="s2">))</span>
+        <span class="s4">if </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isfile</span><span class="s2">(</span><span class="s1">reflog_path</span><span class="s2">):</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">remove</span><span class="s2">(</span><span class="s1">reflog_path</span><span class="s2">)</span>
+        <span class="s0"># END remove reflog</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_create</span><span class="s2">(</span>
+        <span class="s1">cls</span><span class="s2">: </span><span class="s1">Type</span><span class="s2">[</span><span class="s1">T_References</span><span class="s2">],</span>
+        <span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">,</span>
+        <span class="s1">path</span><span class="s2">: </span><span class="s1">PathLike</span><span class="s2">,</span>
+        <span class="s1">resolve</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">reference</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">],</span>
+        <span class="s1">force</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">logmsg</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; T_References</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Internal method used to create a new symbolic reference. 
+ 
+        If `resolve` is ``False``, the reference will be taken as is, creating a proper 
+        symbolic reference. Otherwise it will be resolved to the corresponding object 
+        and a detached symbolic reference will be created instead. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">git_dir </span><span class="s2">= </span><span class="s1">_git_dir</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s1">full_ref_path </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">to_full_path</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s1">abs_ref_path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">git_dir</span><span class="s2">, </span><span class="s1">full_ref_path</span><span class="s2">)</span>
+
+        <span class="s0"># Figure out target data.</span>
+        <span class="s1">target </span><span class="s2">= </span><span class="s1">reference</span>
+        <span class="s4">if </span><span class="s1">resolve</span><span class="s2">:</span>
+            <span class="s1">target </span><span class="s2">= </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">rev_parse</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">reference</span><span class="s2">))</span>
+
+        <span class="s4">if not </span><span class="s1">force </span><span class="s4">and </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isfile</span><span class="s2">(</span><span class="s1">abs_ref_path</span><span class="s2">):</span>
+            <span class="s1">target_data </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+            <span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">target</span><span class="s2">, </span><span class="s1">SymbolicReference</span><span class="s2">):</span>
+                <span class="s1">target_data </span><span class="s2">= </span><span class="s1">str</span><span class="s2">(</span><span class="s1">target</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+            <span class="s4">if not </span><span class="s1">resolve</span><span class="s2">:</span>
+                <span class="s1">target_data </span><span class="s2">= </span><span class="s3">&quot;ref: &quot; </span><span class="s2">+ </span><span class="s1">target_data</span>
+            <span class="s4">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">abs_ref_path</span><span class="s2">, </span><span class="s3">&quot;rb&quot;</span><span class="s2">) </span><span class="s4">as </span><span class="s1">fd</span><span class="s2">:</span>
+                <span class="s1">existing_data </span><span class="s2">= </span><span class="s1">fd</span><span class="s2">.</span><span class="s1">read</span><span class="s2">().</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">).</span><span class="s1">strip</span><span class="s2">()</span>
+            <span class="s4">if </span><span class="s1">existing_data </span><span class="s2">!= </span><span class="s1">target_data</span><span class="s2">:</span>
+                <span class="s4">raise </span><span class="s1">OSError</span><span class="s2">(</span>
+                    <span class="s3">&quot;Reference at %r does already exist, pointing to %r, requested was %r&quot;</span>
+                    <span class="s2">% (</span><span class="s1">full_ref_path</span><span class="s2">, </span><span class="s1">existing_data</span><span class="s2">, </span><span class="s1">target_data</span><span class="s2">)</span>
+                <span class="s2">)</span>
+        <span class="s0"># END no force handling</span>
+
+        <span class="s1">ref </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">full_ref_path</span><span class="s2">)</span>
+        <span class="s1">ref</span><span class="s2">.</span><span class="s1">set_reference</span><span class="s2">(</span><span class="s1">target</span><span class="s2">, </span><span class="s1">logmsg</span><span class="s2">)</span>
+        <span class="s4">return </span><span class="s1">ref</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">create</span><span class="s2">(</span>
+        <span class="s1">cls</span><span class="s2">: </span><span class="s1">Type</span><span class="s2">[</span><span class="s1">T_References</span><span class="s2">],</span>
+        <span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">,</span>
+        <span class="s1">path</span><span class="s2">: </span><span class="s1">PathLike</span><span class="s2">,</span>
+        <span class="s1">reference</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">] = </span><span class="s3">&quot;HEAD&quot;</span><span class="s2">,</span>
+        <span class="s1">logmsg</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">force</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; T_References</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Create a new symbolic reference: a reference pointing to another reference. 
+ 
+        :param repo: 
+            Repository to create the reference in. 
+ 
+        :param path: 
+            Full path at which the new symbolic reference is supposed to be created at, 
+            e.g. ``NEW_HEAD`` or ``symrefs/my_new_symref``. 
+ 
+        :param reference: 
+            The reference which the new symbolic reference should point to. 
+            If it is a commit-ish, the symbolic ref will be detached. 
+ 
+        :param force: 
+            If ``True``, force creation even if a symbolic reference with that name 
+            already exists. Raise :exc:`OSError` otherwise. 
+ 
+        :param logmsg: 
+            If not ``None``, the message to append to the reflog. 
+            If ``None``, no reflog entry is written. 
+ 
+        :return: 
+            Newly created symbolic reference 
+ 
+        :raise OSError: 
+            If a (Symbolic)Reference with the same name but different contents already 
+            exists. 
+ 
+        :note: 
+            This does not alter the current HEAD, index or working tree. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_create</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">path</span><span class="s2">, </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_resolve_ref_on_create</span><span class="s2">, </span><span class="s1">reference</span><span class="s2">, </span><span class="s1">force</span><span class="s2">, </span><span class="s1">logmsg</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">rename</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">new_path</span><span class="s2">: </span><span class="s1">PathLike</span><span class="s2">, </span><span class="s1">force</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Rename self to a new path. 
+ 
+        :param new_path: 
+            Either a simple name or a full path, e.g. ``new_name`` or 
+            ``features/new_name``. 
+            The prefix ``refs/`` is implied for references and will be set as needed. 
+            In case this is a symbolic ref, there is no implied prefix. 
+ 
+        :param force: 
+            If ``True``, the rename will succeed even if a head with the target name 
+            already exists. It will be overwritten in that case. 
+ 
+        :return: 
+            self 
+ 
+        :raise OSError: 
+            If a file at path but with different contents already exists. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">new_path </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">to_full_path</span><span class="s2">(</span><span class="s1">new_path</span><span class="s2">)</span>
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path </span><span class="s2">== </span><span class="s1">new_path</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s1">self</span>
+
+        <span class="s1">new_abs_path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">_git_dir</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">new_path</span><span class="s2">), </span><span class="s1">new_path</span><span class="s2">)</span>
+        <span class="s1">cur_abs_path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">_git_dir</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">), </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s4">if </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isfile</span><span class="s2">(</span><span class="s1">new_abs_path</span><span class="s2">):</span>
+            <span class="s4">if not </span><span class="s1">force</span><span class="s2">:</span>
+                <span class="s0"># If they point to the same file, it's not an error.</span>
+                <span class="s4">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">new_abs_path</span><span class="s2">, </span><span class="s3">&quot;rb&quot;</span><span class="s2">) </span><span class="s4">as </span><span class="s1">fd1</span><span class="s2">:</span>
+                    <span class="s1">f1 </span><span class="s2">= </span><span class="s1">fd1</span><span class="s2">.</span><span class="s1">read</span><span class="s2">().</span><span class="s1">strip</span><span class="s2">()</span>
+                <span class="s4">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">cur_abs_path</span><span class="s2">, </span><span class="s3">&quot;rb&quot;</span><span class="s2">) </span><span class="s4">as </span><span class="s1">fd2</span><span class="s2">:</span>
+                    <span class="s1">f2 </span><span class="s2">= </span><span class="s1">fd2</span><span class="s2">.</span><span class="s1">read</span><span class="s2">().</span><span class="s1">strip</span><span class="s2">()</span>
+                <span class="s4">if </span><span class="s1">f1 </span><span class="s2">!= </span><span class="s1">f2</span><span class="s2">:</span>
+                    <span class="s4">raise </span><span class="s1">OSError</span><span class="s2">(</span><span class="s3">&quot;File at path %r already exists&quot; </span><span class="s2">% </span><span class="s1">new_abs_path</span><span class="s2">)</span>
+                <span class="s0"># else: We could remove ourselves and use the other one, but...</span>
+                <span class="s0"># ...for clarity, we just continue as usual.</span>
+            <span class="s0"># END not force handling</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">remove</span><span class="s2">(</span><span class="s1">new_abs_path</span><span class="s2">)</span>
+        <span class="s0"># END handle existing target file</span>
+
+        <span class="s1">dname </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">dirname</span><span class="s2">(</span><span class="s1">new_abs_path</span><span class="s2">)</span>
+        <span class="s4">if not </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isdir</span><span class="s2">(</span><span class="s1">dname</span><span class="s2">):</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">makedirs</span><span class="s2">(</span><span class="s1">dname</span><span class="s2">)</span>
+        <span class="s0"># END create directory</span>
+
+        <span class="s1">os</span><span class="s2">.</span><span class="s1">rename</span><span class="s2">(</span><span class="s1">cur_abs_path</span><span class="s2">, </span><span class="s1">new_abs_path</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">path </span><span class="s2">= </span><span class="s1">new_path</span>
+
+        <span class="s4">return </span><span class="s1">self</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_iter_items</span><span class="s2">(</span>
+        <span class="s1">cls</span><span class="s2">: </span><span class="s1">Type</span><span class="s2">[</span><span class="s1">T_References</span><span class="s2">], </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">common_path</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span>
+    <span class="s2">) </span><span class="s1">-&gt; Iterator</span><span class="s2">[</span><span class="s1">T_References</span><span class="s2">]:</span>
+        <span class="s4">if </span><span class="s1">common_path </span><span class="s4">is None</span><span class="s2">:</span>
+            <span class="s1">common_path </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_common_path_default</span>
+        <span class="s1">rela_paths </span><span class="s2">= </span><span class="s1">set</span><span class="s2">()</span>
+
+        <span class="s0"># Walk loose refs.</span>
+        <span class="s0"># Currently we do not follow links.</span>
+        <span class="s4">for </span><span class="s1">root</span><span class="s2">, </span><span class="s1">dirs</span><span class="s2">, </span><span class="s1">files </span><span class="s4">in </span><span class="s1">os</span><span class="s2">.</span><span class="s1">walk</span><span class="s2">(</span><span class="s1">join_path_native</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">common_dir</span><span class="s2">, </span><span class="s1">common_path</span><span class="s2">)):</span>
+            <span class="s4">if </span><span class="s3">&quot;refs&quot; </span><span class="s4">not in </span><span class="s1">root</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">sep</span><span class="s2">):  </span><span class="s0"># Skip non-refs subfolders.</span>
+                <span class="s1">refs_id </span><span class="s2">= [</span><span class="s1">d </span><span class="s4">for </span><span class="s1">d </span><span class="s4">in </span><span class="s1">dirs </span><span class="s4">if </span><span class="s1">d </span><span class="s2">== </span><span class="s3">&quot;refs&quot;</span><span class="s2">]</span>
+                <span class="s4">if </span><span class="s1">refs_id</span><span class="s2">:</span>
+                    <span class="s1">dirs</span><span class="s2">[</span><span class="s6">0</span><span class="s2">:] = [</span><span class="s3">&quot;refs&quot;</span><span class="s2">]</span>
+            <span class="s0"># END prune non-refs folders</span>
+
+            <span class="s4">for </span><span class="s1">f </span><span class="s4">in </span><span class="s1">files</span><span class="s2">:</span>
+                <span class="s4">if </span><span class="s1">f </span><span class="s2">== </span><span class="s3">&quot;packed-refs&quot;</span><span class="s2">:</span>
+                    <span class="s4">continue</span>
+                <span class="s1">abs_path </span><span class="s2">= </span><span class="s1">to_native_path_linux</span><span class="s2">(</span><span class="s1">join_path</span><span class="s2">(</span><span class="s1">root</span><span class="s2">, </span><span class="s1">f</span><span class="s2">))</span>
+                <span class="s1">rela_paths</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">abs_path</span><span class="s2">.</span><span class="s1">replace</span><span class="s2">(</span><span class="s1">to_native_path_linux</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">common_dir</span><span class="s2">) + </span><span class="s3">&quot;/&quot;</span><span class="s2">, </span><span class="s3">&quot;&quot;</span><span class="s2">))</span>
+            <span class="s0"># END for each file in root directory</span>
+        <span class="s0"># END for each directory to walk</span>
+
+        <span class="s0"># Read packed refs.</span>
+        <span class="s4">for </span><span class="s1">_sha</span><span class="s2">, </span><span class="s1">rela_path </span><span class="s4">in </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_iter_packed_refs</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">):</span>
+            <span class="s4">if </span><span class="s1">rela_path</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">common_path</span><span class="s2">)):</span>
+                <span class="s1">rela_paths</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">rela_path</span><span class="s2">)</span>
+            <span class="s0"># END relative path matches common path</span>
+        <span class="s0"># END packed refs reading</span>
+
+        <span class="s0"># Yield paths in sorted order.</span>
+        <span class="s4">for </span><span class="s1">path </span><span class="s4">in </span><span class="s1">sorted</span><span class="s2">(</span><span class="s1">rela_paths</span><span class="s2">):</span>
+            <span class="s4">try</span><span class="s2">:</span>
+                <span class="s4">yield </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">from_path</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">path</span><span class="s2">)</span>
+            <span class="s4">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+                <span class="s4">continue</span>
+        <span class="s0"># END for each sorted relative refpath</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">iter_items</span><span class="s2">(</span>
+        <span class="s1">cls</span><span class="s2">: </span><span class="s1">Type</span><span class="s2">[</span><span class="s1">T_References</span><span class="s2">],</span>
+        <span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">,</span>
+        <span class="s1">common_path</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s2">*</span><span class="s1">args</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; Iterator</span><span class="s2">[</span><span class="s1">T_References</span><span class="s2">]:</span>
+        <span class="s5">&quot;&quot;&quot;Find all refs in the repository. 
+ 
+        :param repo: 
+            The :class:`~git.repo.base.Repo`. 
+ 
+        :param common_path: 
+            Optional keyword argument to the path which is to be shared by all returned 
+            Ref objects. 
+            Defaults to class specific portion if ``None``, ensuring that only refs 
+            suitable for the actual class are returned. 
+ 
+        :return: 
+            A list of :class:`SymbolicReference`, each guaranteed to be a symbolic ref 
+            which is not detached and pointing to a valid ref. 
+ 
+            The list is lexicographically sorted. The returned objects are instances of 
+            concrete subclasses, such as :class:`~git.refs.head.Head` or 
+            :class:`~git.refs.tag.TagReference`. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s2">(</span><span class="s1">r </span><span class="s4">for </span><span class="s1">r </span><span class="s4">in </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_iter_items</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">common_path</span><span class="s2">) </span><span class="s4">if </span><span class="s1">r</span><span class="s2">.</span><span class="s1">__class__ </span><span class="s4">is </span><span class="s1">SymbolicReference </span><span class="s4">or not </span><span class="s1">r</span><span class="s2">.</span><span class="s1">is_detached</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">from_path</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">: </span><span class="s1">Type</span><span class="s2">[</span><span class="s1">T_References</span><span class="s2">], </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">path</span><span class="s2">: </span><span class="s1">PathLike</span><span class="s2">) </span><span class="s1">-&gt; T_References</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Make a symbolic reference from a path. 
+ 
+        :param path: 
+            Full ``.git``-directory-relative path name to the Reference to instantiate. 
+ 
+        :note: 
+            Use :meth:`to_full_path` if you only have a partial path of a known 
+            Reference type. 
+ 
+        :return: 
+            Instance of type :class:`~git.refs.reference.Reference`, 
+            :class:`~git.refs.head.Head`, or :class:`~git.refs.tag.Tag`, depending on 
+            the given path. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">if not </span><span class="s1">path</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Cannot create Reference from %r&quot; </span><span class="s2">% </span><span class="s1">path</span><span class="s2">)</span>
+
+        <span class="s0"># Names like HEAD are inserted after the refs module is imported - we have an</span>
+        <span class="s0"># import dependency cycle and don't want to import these names in-function.</span>
+        <span class="s4">from </span><span class="s2">. </span><span class="s4">import </span><span class="s1">HEAD</span><span class="s2">, </span><span class="s1">Head</span><span class="s2">, </span><span class="s1">RemoteReference</span><span class="s2">, </span><span class="s1">TagReference</span><span class="s2">, </span><span class="s1">Reference</span>
+
+        <span class="s4">for </span><span class="s1">ref_type </span><span class="s4">in </span><span class="s2">(</span>
+            <span class="s1">HEAD</span><span class="s2">,</span>
+            <span class="s1">Head</span><span class="s2">,</span>
+            <span class="s1">RemoteReference</span><span class="s2">,</span>
+            <span class="s1">TagReference</span><span class="s2">,</span>
+            <span class="s1">Reference</span><span class="s2">,</span>
+            <span class="s1">SymbolicReference</span><span class="s2">,</span>
+        <span class="s2">):</span>
+            <span class="s4">try</span><span class="s2">:</span>
+                <span class="s1">instance</span><span class="s2">: </span><span class="s1">T_References</span>
+                <span class="s1">instance </span><span class="s2">= </span><span class="s1">ref_type</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">path</span><span class="s2">)</span>
+                <span class="s4">if </span><span class="s1">instance</span><span class="s2">.</span><span class="s1">__class__ </span><span class="s4">is </span><span class="s1">SymbolicReference </span><span class="s4">and </span><span class="s1">instance</span><span class="s2">.</span><span class="s1">is_detached</span><span class="s2">:</span>
+                    <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;SymbolicRef was detached, we drop it&quot;</span><span class="s2">)</span>
+                <span class="s4">else</span><span class="s2">:</span>
+                    <span class="s4">return </span><span class="s1">instance</span>
+
+            <span class="s4">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+                <span class="s4">pass</span>
+            <span class="s0"># END exception handling</span>
+        <span class="s0"># END for each type to try</span>
+        <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Could not find reference type suitable to handle path %r&quot; </span><span class="s2">% </span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">is_remote</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;:return: True if this symbolic reference points to a remote branch&quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_remote_common_path_default </span><span class="s2">+ </span><span class="s3">&quot;/&quot;</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<html>
+<head>
+<title>switch_s390_unix.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_s390_unix.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * this is the internal transfer function. 
+ * 
+ * HISTORY 
+ * 25-Jan-12  Alexey Borzenkov &lt;snaury@gmail.com&gt; 
+ *      Fixed Linux/S390 port to work correctly with 
+ *      different optimization options both on 31-bit 
+ *      and 64-bit. Thanks to Stefan Raabe for lots 
+ *      of testing. 
+ * 24-Nov-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      needed to add another magic constant to insure 
+ *      that f in slp_eval_frame(PyFrameObject *f) 
+ *      STACK_REFPLUS will probably be 1 in most cases. 
+ *      gets included into the saved stack area. 
+ * 06-Oct-02  Gustavo Niemeyer &lt;niemeyer@conectiva.com&gt; 
+ *      Ported to Linux/S390. 
+ */</span>
+
+<span class="s2">#define </span><span class="s1">STACK_REFPLUS </span><span class="s3">1</span>
+
+<span class="s2">#ifdef </span><span class="s1">SLP_EVAL</span>
+
+<span class="s2">#ifdef </span><span class="s1">__s390x__</span>
+<span class="s2">#define </span><span class="s1">STACK_MAGIC </span><span class="s3">20 </span><span class="s0">/* 20 * 8 = 160 bytes of function call area */</span>
+<span class="s2">#else</span>
+<span class="s2">#define </span><span class="s1">STACK_MAGIC </span><span class="s3">24 </span><span class="s0">/* 24 * 4 = 96 bytes of function call area */</span>
+<span class="s2">#endif</span>
+
+<span class="s0">/* Technically, r11-r13 also need saving, but function prolog starts 
+   with stm(g) and since there are so many saved registers already 
+   it won't be optimized, resulting in all r6-r15 being saved */</span>
+<span class="s2">#define </span><span class="s1">REGS_TO_SAVE </span><span class="s4">&quot;r6&quot;</span><span class="s1">, </span><span class="s4">&quot;r7&quot;</span><span class="s1">, </span><span class="s4">&quot;r8&quot;</span><span class="s1">, </span><span class="s4">&quot;r9&quot;</span><span class="s1">, </span><span class="s4">&quot;r10&quot;</span><span class="s1">, </span><span class="s4">&quot;r14&quot;</span><span class="s1">, \</span>
+		     <span class="s4">&quot;f0&quot;</span><span class="s1">, </span><span class="s4">&quot;f1&quot;</span><span class="s1">, </span><span class="s4">&quot;f2&quot;</span><span class="s1">, </span><span class="s4">&quot;f3&quot;</span><span class="s1">, </span><span class="s4">&quot;f4&quot;</span><span class="s1">, </span><span class="s4">&quot;f5&quot;</span><span class="s1">, </span><span class="s4">&quot;f6&quot;</span><span class="s1">, </span><span class="s4">&quot;f7&quot;</span><span class="s1">, \</span>
+		     <span class="s4">&quot;f8&quot;</span><span class="s1">, </span><span class="s4">&quot;f9&quot;</span><span class="s1">, </span><span class="s4">&quot;f10&quot;</span><span class="s1">, </span><span class="s4">&quot;f11&quot;</span><span class="s1">, </span><span class="s4">&quot;f12&quot;</span><span class="s1">, </span><span class="s4">&quot;f13&quot;</span><span class="s1">, </span><span class="s4">&quot;f14&quot;</span><span class="s1">, </span><span class="s4">&quot;f15&quot;</span>
+
+<span class="s2">static int</span>
+<span class="s1">slp_switch(</span><span class="s2">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s2">int </span><span class="s1">ret;</span>
+    <span class="s2">long </span><span class="s1">*stackref, stsizediff;</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+<span class="s2">#ifdef </span><span class="s1">__s390x__</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;lgr %0, 15&quot; </span><span class="s1">: </span><span class="s4">&quot;=r&quot; </span><span class="s1">(stackref) : );</span>
+<span class="s2">#else</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;lr %0, 15&quot; </span><span class="s1">: </span><span class="s4">&quot;=r&quot; </span><span class="s1">(stackref) : );</span>
+<span class="s2">#endif</span>
+    <span class="s1">{</span>
+        <span class="s1">SLP_SAVE_STATE(stackref, stsizediff);</span>
+<span class="s0">/* N.B. 
+   r11 may be used as the frame pointer, and in that case it cannot be 
+   clobbered and needs offsetting just like the stack pointer (but in cases 
+   where frame pointer isn't used we might clobber it accidentally). What's 
+   scary is that r11 is 2nd (and even 1st when GOT is used) callee saved 
+   register that gcc would chose for surviving function calls. However, 
+   since r6-r10 are clobbered above, their cost for reuse is reduced, so 
+   gcc IRA will chose them over r11 (not seeing r11 is implicitly saved), 
+   making it relatively safe to offset in all cases. :) */</span>
+        <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span>
+<span class="s2">#ifdef </span><span class="s1">__s390x__</span>
+            <span class="s4">&quot;agr 15, %0</span><span class="s2">\n\t</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;agr 11, %0&quot;</span>
+<span class="s2">#else</span>
+            <span class="s4">&quot;ar 15, %0</span><span class="s2">\n\t</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;ar 11, %0&quot;</span>
+<span class="s2">#endif</span>
+            <span class="s1">: </span><span class="s0">/* no outputs */</span>
+            <span class="s1">: </span><span class="s4">&quot;r&quot; </span><span class="s1">(stsizediff)</span>
+            <span class="s1">);</span>
+        <span class="s1">SLP_RESTORE_STATE();</span>
+    <span class="s1">}</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;lhi %0, 0&quot; </span><span class="s1">: </span><span class="s4">&quot;=r&quot; </span><span class="s1">(ret) : );</span>
+    <span class="s2">return </span><span class="s1">ret;</span>
+<span class="s1">}</span>
+
+<span class="s2">#endif</span>
+
+<span class="s0">/* 
+ * further self-processing support 
+ */</span>
+
+<span class="s0">/*  
+ * if you want to add self-inspection tools, place them 
+ * here. See the x86_msvc for the necessary defines. 
+ * These features are highly experimental und not 
+ * essential yet. 
+ */</span>
+</pre>
+</body>
+</html>

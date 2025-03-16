@@ -1,0 +1,72 @@
+<html>
+<head>
+<title>report.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+report.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">import </span><span class="s1">sys</span>
+
+<span class="s1">LEVELS </span><span class="s2">= {</span>
+    <span class="s3">0</span><span class="s2">: </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">CRITICAL</span><span class="s2">,</span>
+    <span class="s3">1</span><span class="s2">: </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">ERROR</span><span class="s2">,</span>
+    <span class="s3">2</span><span class="s2">: </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">WARNING</span><span class="s2">,</span>
+    <span class="s3">3</span><span class="s2">: </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">INFO</span><span class="s2">,</span>
+    <span class="s3">4</span><span class="s2">: </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">DEBUG</span><span class="s2">,</span>
+    <span class="s3">5</span><span class="s2">: </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">NOTSET</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+<span class="s1">MAX_LEVEL </span><span class="s2">= </span><span class="s1">max</span><span class="s2">(</span><span class="s1">LEVELS</span><span class="s2">.</span><span class="s1">keys</span><span class="s2">())</span>
+<span class="s1">LOGGER </span><span class="s2">= </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">getLogger</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">setup_report</span><span class="s2">(</span><span class="s1">verbosity</span><span class="s2">, </span><span class="s1">show_pid</span><span class="s2">=</span><span class="s0">False</span><span class="s2">):  </span><span class="s4"># noqa: FBT002</span>
+    <span class="s1">_clean_handlers</span><span class="s2">(</span><span class="s1">LOGGER</span><span class="s2">)</span>
+    <span class="s1">verbosity </span><span class="s2">= </span><span class="s1">min</span><span class="s2">(</span><span class="s1">verbosity</span><span class="s2">, </span><span class="s1">MAX_LEVEL</span><span class="s2">)  </span><span class="s4"># pragma: no cover</span>
+    <span class="s1">level </span><span class="s2">= </span><span class="s1">LEVELS</span><span class="s2">[</span><span class="s1">verbosity</span><span class="s2">]</span>
+    <span class="s1">msg_format </span><span class="s2">= </span><span class="s5">&quot;%(message)s&quot;</span>
+    <span class="s0">if </span><span class="s1">level </span><span class="s2">&lt;= </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">DEBUG</span><span class="s2">:</span>
+        <span class="s1">locate </span><span class="s2">= </span><span class="s5">&quot;module&quot;</span>
+        <span class="s1">msg_format </span><span class="s2">= </span><span class="s5">f&quot;%(relativeCreated)d </span><span class="s0">{</span><span class="s1">msg_format</span><span class="s0">} </span><span class="s5">[%(levelname)s %(</span><span class="s0">{</span><span class="s1">locate</span><span class="s0">}</span><span class="s5">)s:%(lineno)d]&quot;</span>
+    <span class="s0">if </span><span class="s1">show_pid</span><span class="s2">:</span>
+        <span class="s1">msg_format </span><span class="s2">= </span><span class="s5">f&quot;[%(process)d] </span><span class="s0">{</span><span class="s1">msg_format</span><span class="s0">}</span><span class="s5">&quot;</span>
+    <span class="s1">formatter </span><span class="s2">= </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">Formatter</span><span class="s2">(</span><span class="s1">msg_format</span><span class="s2">)</span>
+    <span class="s1">stream_handler </span><span class="s2">= </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">StreamHandler</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">=</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdout</span><span class="s2">)</span>
+    <span class="s1">stream_handler</span><span class="s2">.</span><span class="s1">setLevel</span><span class="s2">(</span><span class="s1">level</span><span class="s2">)</span>
+    <span class="s1">LOGGER</span><span class="s2">.</span><span class="s1">setLevel</span><span class="s2">(</span><span class="s1">logging</span><span class="s2">.</span><span class="s1">NOTSET</span><span class="s2">)</span>
+    <span class="s1">stream_handler</span><span class="s2">.</span><span class="s1">setFormatter</span><span class="s2">(</span><span class="s1">formatter</span><span class="s2">)</span>
+    <span class="s1">LOGGER</span><span class="s2">.</span><span class="s1">addHandler</span><span class="s2">(</span><span class="s1">stream_handler</span><span class="s2">)</span>
+    <span class="s1">level_name </span><span class="s2">= </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">getLevelName</span><span class="s2">(</span><span class="s1">level</span><span class="s2">)</span>
+    <span class="s1">logging</span><span class="s2">.</span><span class="s1">debug</span><span class="s2">(</span><span class="s5">&quot;setup logging to %s&quot;</span><span class="s2">, </span><span class="s1">level_name</span><span class="s2">)</span>
+    <span class="s1">logging</span><span class="s2">.</span><span class="s1">getLogger</span><span class="s2">(</span><span class="s5">&quot;distlib&quot;</span><span class="s2">).</span><span class="s1">setLevel</span><span class="s2">(</span><span class="s1">logging</span><span class="s2">.</span><span class="s1">ERROR</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">verbosity</span>
+
+
+<span class="s0">def </span><span class="s1">_clean_handlers</span><span class="s2">(</span><span class="s1">log</span><span class="s2">):</span>
+    <span class="s0">for </span><span class="s1">log_handler </span><span class="s0">in </span><span class="s1">list</span><span class="s2">(</span><span class="s1">log</span><span class="s2">.</span><span class="s1">handlers</span><span class="s2">):  </span><span class="s4"># remove handlers of libraries</span>
+        <span class="s1">log</span><span class="s2">.</span><span class="s1">removeHandler</span><span class="s2">(</span><span class="s1">log_handler</span><span class="s2">)</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s5">&quot;LEVELS&quot;</span><span class="s2">,</span>
+    <span class="s5">&quot;MAX_LEVEL&quot;</span><span class="s2">,</span>
+    <span class="s5">&quot;setup_report&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

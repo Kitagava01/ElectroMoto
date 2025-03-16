@@ -1,0 +1,85 @@
+<html>
+<head>
+<title>switch_mips_unix.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_mips_unix.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * this is the internal transfer function. 
+ * 
+ * HISTORY 
+ * 20-Sep-14 Matt Madison &lt;madison@bliss-m.org&gt; 
+ *      Re-code the saving of the gp register for MIPS64. 
+ * 05-Jan-08 Thiemo Seufer  &lt;ths@debian.org&gt; 
+ *      Ported from ppc. 
+ */</span>
+
+<span class="s2">#define </span><span class="s1">STACK_REFPLUS </span><span class="s3">1</span>
+
+<span class="s2">#ifdef </span><span class="s1">SLP_EVAL</span>
+
+<span class="s2">#define </span><span class="s1">STACK_MAGIC </span><span class="s3">0</span>
+
+<span class="s2">#define </span><span class="s1">REGS_TO_SAVE </span><span class="s4">&quot;$16&quot;</span><span class="s1">, </span><span class="s4">&quot;$17&quot;</span><span class="s1">, </span><span class="s4">&quot;$18&quot;</span><span class="s1">, </span><span class="s4">&quot;$19&quot;</span><span class="s1">, </span><span class="s4">&quot;$20&quot;</span><span class="s1">, </span><span class="s4">&quot;$21&quot;</span><span class="s1">, </span><span class="s4">&quot;$22&quot;</span><span class="s1">, \</span>
+       <span class="s4">&quot;$23&quot;</span><span class="s1">, </span><span class="s4">&quot;$30&quot;</span>
+<span class="s2">static int</span>
+<span class="s1">slp_switch(</span><span class="s2">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s2">int </span><span class="s1">err;</span>
+    <span class="s2">int </span><span class="s1">*stackref, stsizediff;</span>
+<span class="s2">#ifdef </span><span class="s1">__mips64</span>
+    <span class="s1">uint64_t gpsave;</span>
+<span class="s2">#endif</span>
+    <span class="s1">__asm__ __volatile__ (</span><span class="s4">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+<span class="s2">#ifdef </span><span class="s1">__mips64</span>
+    <span class="s1">__asm__ __volatile__ (</span><span class="s4">&quot;sd $28,%0&quot; </span><span class="s1">: </span><span class="s4">&quot;=m&quot; </span><span class="s1">(gpsave) : : );</span>
+<span class="s2">#endif</span>
+    <span class="s1">__asm__ (</span><span class="s4">&quot;move %0, $29&quot; </span><span class="s1">: </span><span class="s4">&quot;=r&quot; </span><span class="s1">(stackref) : );</span>
+    <span class="s1">{</span>
+        <span class="s1">SLP_SAVE_STATE(stackref, stsizediff);</span>
+        <span class="s1">__asm__ __volatile__ (</span>
+<span class="s2">#ifdef </span><span class="s1">__mips64</span>
+            <span class="s4">&quot;daddu $29, %0</span><span class="s2">\n</span><span class="s4">&quot;</span>
+<span class="s2">#else</span>
+            <span class="s4">&quot;addu $29, %0</span><span class="s2">\n</span><span class="s4">&quot;</span>
+<span class="s2">#endif</span>
+            <span class="s1">: </span><span class="s0">/* no outputs */</span>
+            <span class="s1">: </span><span class="s4">&quot;r&quot; </span><span class="s1">(stsizediff)</span>
+            <span class="s1">);</span>
+        <span class="s1">SLP_RESTORE_STATE();</span>
+    <span class="s1">}</span>
+<span class="s2">#ifdef </span><span class="s1">__mips64</span>
+    <span class="s1">__asm__ __volatile__ (</span><span class="s4">&quot;ld $28,%0&quot; </span><span class="s1">: : </span><span class="s4">&quot;m&quot; </span><span class="s1">(gpsave) : );</span>
+<span class="s2">#endif</span>
+    <span class="s1">__asm__ __volatile__ (</span><span class="s4">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s1">__asm__ __volatile__ (</span><span class="s4">&quot;move %0, $0&quot; </span><span class="s1">: </span><span class="s4">&quot;=r&quot; </span><span class="s1">(err));</span>
+    <span class="s2">return </span><span class="s1">err;</span>
+<span class="s1">}</span>
+
+<span class="s2">#endif</span>
+
+<span class="s0">/* 
+ * further self-processing support 
+ */</span>
+
+<span class="s0">/* 
+ * if you want to add self-inspection tools, place them 
+ * here. See the x86_msvc for the necessary defines. 
+ * These features are highly experimental und not 
+ * essential yet. 
+ */</span>
+</pre>
+</body>
+</html>

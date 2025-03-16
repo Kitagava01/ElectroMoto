@@ -1,0 +1,94 @@
+<html>
+<head>
+<title>na.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+na.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">contextlib </span><span class="s0">import </span><span class="s1">contextmanager</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">base </span><span class="s0">import </span><span class="s1">AppData</span><span class="s2">, </span><span class="s1">ContentStore</span>
+
+
+<span class="s0">class </span><span class="s1">AppDataDisabled</span><span class="s2">(</span><span class="s1">AppData</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;No application cache available (most likely as we don't have write permissions).&quot;&quot;&quot;</span>
+
+    <span class="s1">transient </span><span class="s2">= </span><span class="s0">True</span>
+    <span class="s1">can_update </span><span class="s2">= </span><span class="s0">False</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">pass</span>
+
+    <span class="s1">error </span><span class="s2">= </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s4">&quot;no app data folder available, probably no write access to the folder&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">close</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot;Do nothing.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">reset</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot;Do nothing.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">py_info</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">path</span><span class="s2">):  </span><span class="s5"># noqa: ARG002</span>
+        <span class="s0">return </span><span class="s1">ContentStoreNA</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">embed_update_log</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">):  </span><span class="s5"># noqa: ARG002</span>
+        <span class="s0">return </span><span class="s1">ContentStoreNA</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">extract</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">path</span><span class="s2">, </span><span class="s1">to_folder</span><span class="s2">):  </span><span class="s5"># noqa: ARG002</span>
+        <span class="s0">raise </span><span class="s1">self</span><span class="s2">.</span><span class="s1">error</span>
+
+    <span class="s2">@</span><span class="s1">contextmanager</span>
+    <span class="s0">def </span><span class="s1">locked</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">path</span><span class="s2">):  </span><span class="s5"># noqa: ARG002</span>
+        <span class="s3">&quot;&quot;&quot;Do nothing.&quot;&quot;&quot;</span>
+        <span class="s0">yield</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">house</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">self</span><span class="s2">.</span><span class="s1">error</span>
+
+    <span class="s0">def </span><span class="s1">wheel_image</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">, </span><span class="s1">name</span><span class="s2">):  </span><span class="s5"># noqa: ARG002</span>
+        <span class="s0">raise </span><span class="s1">self</span><span class="s2">.</span><span class="s1">error</span>
+
+    <span class="s0">def </span><span class="s1">py_info_clear</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot;Nothing to clear.&quot;&quot;&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">ContentStoreNA</span><span class="s2">(</span><span class="s1">ContentStore</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">exists</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">def </span><span class="s1">read</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot;Nothing to read.&quot;&quot;&quot;</span>
+        <span class="s0">return</span>
+
+    <span class="s0">def </span><span class="s1">write</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">content</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot;Nothing to write.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">remove</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3">&quot;&quot;&quot;Nothing to remove.&quot;&quot;&quot;</span>
+
+    <span class="s2">@</span><span class="s1">contextmanager</span>
+    <span class="s0">def </span><span class="s1">locked</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">yield</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s4">&quot;AppDataDisabled&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;ContentStoreNA&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

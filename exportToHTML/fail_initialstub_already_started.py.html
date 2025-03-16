@@ -1,0 +1,100 @@
+<html>
+<head>
+<title>fail_initialstub_already_started.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+fail_initialstub_already_started.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Testing initialstub throwing an already started exception. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">greenlet</span>
+
+<span class="s1">a </span><span class="s3">= </span><span class="s2">None</span>
+<span class="s1">b </span><span class="s3">= </span><span class="s2">None</span>
+<span class="s1">c </span><span class="s3">= </span><span class="s2">None</span>
+<span class="s1">main </span><span class="s3">= </span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">getcurrent</span><span class="s3">()</span>
+
+<span class="s4"># If we switch into a dead greenlet,</span>
+<span class="s4"># we go looking for its parents.</span>
+<span class="s4"># if a parent is not yet started, we start it.</span>
+
+<span class="s1">results </span><span class="s3">= []</span>
+
+<span class="s2">def </span><span class="s1">a_run</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">):</span>
+    <span class="s4">#results.append('A')</span>
+    <span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s5">'Begin A'</span><span class="s3">, </span><span class="s1">args</span><span class="s3">))</span>
+
+
+<span class="s2">def </span><span class="s1">c_run</span><span class="s3">():</span>
+    <span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">'Begin C'</span><span class="s3">)</span>
+    <span class="s1">b</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">(</span><span class="s5">'From C'</span><span class="s3">)</span>
+    <span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">'C done'</span><span class="s3">)</span>
+
+<span class="s2">class </span><span class="s1">A</span><span class="s3">(</span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">greenlet</span><span class="s3">): </span><span class="s2">pass</span>
+
+<span class="s2">class </span><span class="s1">B</span><span class="s3">(</span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">greenlet</span><span class="s3">):</span>
+    <span class="s1">doing_it </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s2">def </span><span class="s1">__getattribute__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">name </span><span class="s3">== </span><span class="s5">'run' </span><span class="s2">and not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">doing_it</span><span class="s3">:</span>
+            <span class="s2">assert </span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">getcurrent</span><span class="s3">() </span><span class="s2">is </span><span class="s1">c</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">doing_it </span><span class="s3">= </span><span class="s2">True</span>
+            <span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">'Switch to b from B.__getattribute__ in '</span>
+                           <span class="s3">+ </span><span class="s1">type</span><span class="s3">(</span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">getcurrent</span><span class="s3">()).</span><span class="s1">__name__</span><span class="s3">)</span>
+            <span class="s1">b</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">()</span>
+            <span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">'B.__getattribute__ back from main in '</span>
+                           <span class="s3">+ </span><span class="s1">type</span><span class="s3">(</span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">getcurrent</span><span class="s3">()).</span><span class="s1">__name__</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">name </span><span class="s3">== </span><span class="s5">'run'</span><span class="s3">:</span>
+            <span class="s1">name </span><span class="s3">= </span><span class="s5">'_B_run'</span>
+        <span class="s2">return </span><span class="s1">object</span><span class="s3">.</span><span class="s1">__getattribute__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">name</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_B_run</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">arg</span><span class="s3">):</span>
+        <span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s5">'Begin B'</span><span class="s3">, </span><span class="s1">arg</span><span class="s3">))</span>
+        <span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s5">'_B_run switching to main'</span><span class="s3">)</span>
+        <span class="s1">main</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">(</span><span class="s5">'From B'</span><span class="s3">)</span>
+
+<span class="s2">class </span><span class="s1">C</span><span class="s3">(</span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">greenlet</span><span class="s3">):</span>
+    <span class="s2">pass</span>
+<span class="s1">a </span><span class="s3">= </span><span class="s1">A</span><span class="s3">(</span><span class="s1">a_run</span><span class="s3">)</span>
+<span class="s1">b </span><span class="s3">= </span><span class="s1">B</span><span class="s3">(</span><span class="s1">parent</span><span class="s3">=</span><span class="s1">a</span><span class="s3">)</span>
+<span class="s1">c </span><span class="s3">= </span><span class="s1">C</span><span class="s3">(</span><span class="s1">c_run</span><span class="s3">, </span><span class="s1">b</span><span class="s3">)</span>
+
+<span class="s4"># Start a child; while running, it will start B,</span>
+<span class="s4"># but starting B will ALSO start B.</span>
+<span class="s1">result </span><span class="s3">= </span><span class="s1">c</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">()</span>
+<span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s5">'main from c'</span><span class="s3">, </span><span class="s1">result</span><span class="s3">))</span>
+
+<span class="s4"># Switch back to C, which was in the middle of switching</span>
+<span class="s4"># already. This will throw the ``GreenletStartedWhileInPython``</span>
+<span class="s4"># exception, which results in parent A getting started (B is finished)</span>
+<span class="s1">c</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">()</span>
+
+<span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s5">'A dead?'</span><span class="s3">, </span><span class="s1">a</span><span class="s3">.</span><span class="s1">dead</span><span class="s3">, </span><span class="s5">'B dead?'</span><span class="s3">, </span><span class="s1">b</span><span class="s3">.</span><span class="s1">dead</span><span class="s3">, </span><span class="s5">'C dead?'</span><span class="s3">, </span><span class="s1">c</span><span class="s3">.</span><span class="s1">dead</span><span class="s3">))</span>
+
+<span class="s4"># A and B should both be dead now.</span>
+<span class="s2">assert </span><span class="s1">a</span><span class="s3">.</span><span class="s1">dead</span>
+<span class="s2">assert </span><span class="s1">b</span><span class="s3">.</span><span class="s1">dead</span>
+<span class="s2">assert not </span><span class="s1">c</span><span class="s3">.</span><span class="s1">dead</span>
+
+<span class="s1">result </span><span class="s3">= </span><span class="s1">c</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">()</span>
+<span class="s1">results</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s5">'main from c.2'</span><span class="s3">, </span><span class="s1">result</span><span class="s3">))</span>
+<span class="s4"># Now C is dead</span>
+<span class="s2">assert </span><span class="s1">c</span><span class="s3">.</span><span class="s1">dead</span>
+
+<span class="s1">print</span><span class="s3">(</span><span class="s5">&quot;RESULTS:&quot;</span><span class="s3">, </span><span class="s1">results</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

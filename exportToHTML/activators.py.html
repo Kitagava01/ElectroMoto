@@ -1,0 +1,82 @@
+<html>
+<head>
+<title>activators.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+activators.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">argparse </span><span class="s0">import </span><span class="s1">ArgumentTypeError</span>
+<span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">OrderedDict</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">base </span><span class="s0">import </span><span class="s1">ComponentBuilder</span>
+
+
+<span class="s0">class </span><span class="s1">ActivationSelector</span><span class="s2">(</span><span class="s1">ComponentBuilder</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">, </span><span class="s1">parser</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">default </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">possible </span><span class="s2">= </span><span class="s1">OrderedDict</span><span class="s2">(</span>
+            <span class="s2">(</span><span class="s1">k</span><span class="s2">, </span><span class="s1">v</span><span class="s2">) </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">options</span><span class="s2">(</span><span class="s3">&quot;virtualenv.activate&quot;</span><span class="s2">).</span><span class="s1">items</span><span class="s2">() </span><span class="s0">if </span><span class="s1">v</span><span class="s2">.</span><span class="s1">supports</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)</span>
+        <span class="s2">)</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">, </span><span class="s1">parser</span><span class="s2">, </span><span class="s3">&quot;activators&quot;</span><span class="s2">, </span><span class="s1">possible</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">parser</span><span class="s2">.</span><span class="s1">description </span><span class="s2">= </span><span class="s3">&quot;options for activation scripts&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">active </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">add_selector_arg_parse</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">, </span><span class="s1">choices</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">default </span><span class="s2">= </span><span class="s3">&quot;,&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">choices</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">parser</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+            <span class="s3">f&quot;--</span><span class="s0">{</span><span class="s1">name</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">,</span>
+            <span class="s1">default</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">default</span><span class="s2">,</span>
+            <span class="s1">metavar</span><span class="s2">=</span><span class="s3">&quot;comma_sep_list&quot;</span><span class="s2">,</span>
+            <span class="s1">required</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+            <span class="s1">help</span><span class="s2">=</span><span class="s3">&quot;activators to generate - default is all supported&quot;</span><span class="s2">,</span>
+            <span class="s1">type</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_extract_activators</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_extract_activators</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">entered_str</span><span class="s2">):</span>
+        <span class="s1">elements </span><span class="s2">= [</span><span class="s1">e</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">() </span><span class="s0">for </span><span class="s1">e </span><span class="s0">in </span><span class="s1">entered_str</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;,&quot;</span><span class="s2">) </span><span class="s0">if </span><span class="s1">e</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()]</span>
+        <span class="s1">missing </span><span class="s2">= [</span><span class="s1">e </span><span class="s0">for </span><span class="s1">e </span><span class="s0">in </span><span class="s1">elements </span><span class="s0">if </span><span class="s1">e </span><span class="s0">not in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">possible</span><span class="s2">]</span>
+        <span class="s0">if </span><span class="s1">missing</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">= </span><span class="s3">f&quot;the following activators are not available </span><span class="s0">{</span><span class="s3">','</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">missing</span><span class="s2">)</span><span class="s0">}</span><span class="s3">&quot;</span>
+            <span class="s0">raise </span><span class="s1">ArgumentTypeError</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">elements</span>
+
+    <span class="s0">def </span><span class="s1">handle_selected_arg_parse</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">options</span><span class="s2">):</span>
+        <span class="s1">selected_activators </span><span class="s2">= (</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_extract_activators</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">default</span><span class="s2">) </span><span class="s0">if </span><span class="s1">options</span><span class="s2">.</span><span class="s1">activators </span><span class="s0">is </span><span class="s1">self</span><span class="s2">.</span><span class="s1">default </span><span class="s0">else </span><span class="s1">options</span><span class="s2">.</span><span class="s1">activators</span>
+        <span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">active </span><span class="s2">= {</span><span class="s1">k</span><span class="s2">: </span><span class="s1">v </span><span class="s0">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">possible</span><span class="s2">.</span><span class="s1">items</span><span class="s2">() </span><span class="s0">if </span><span class="s1">k </span><span class="s0">in </span><span class="s1">selected_activators</span><span class="s2">}</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">parser</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+            <span class="s3">&quot;--prompt&quot;</span><span class="s2">,</span>
+            <span class="s1">dest</span><span class="s2">=</span><span class="s3">&quot;prompt&quot;</span><span class="s2">,</span>
+            <span class="s1">metavar</span><span class="s2">=</span><span class="s3">&quot;prompt&quot;</span><span class="s2">,</span>
+            <span class="s1">help</span><span class="s2">=(</span>
+                <span class="s3">&quot;provides an alternative prompt prefix for this environment &quot;</span>
+                <span class="s3">&quot;(value of . means name of the current working directory)&quot;</span>
+            <span class="s2">),</span>
+            <span class="s1">default</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">activator </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">active</span><span class="s2">.</span><span class="s1">values</span><span class="s2">():</span>
+            <span class="s1">activator</span><span class="s2">.</span><span class="s1">add_parser_arguments</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">parser</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">create</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">options</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s2">[</span><span class="s1">activator_class</span><span class="s2">(</span><span class="s1">options</span><span class="s2">) </span><span class="s0">for </span><span class="s1">activator_class </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">active</span><span class="s2">.</span><span class="s1">values</span><span class="s2">()]</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s3">&quot;ActivationSelector&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<html>
+<head>
+<title>TMainGreenlet.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #2aacb8;}
+.s6 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TMainGreenlet.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">/* -*- indent-tabs-mode: nil; tab-width: 4; -*- */</span>
+<span class="s0">/** 
+ * Implementation of greenlet::MainGreenlet. 
+ * 
+ * Format with: 
+ *  clang-format -i --style=file src/greenlet/greenlet.c 
+ * 
+ * 
+ * Fix missing braces with: 
+ *   clang-tidy src/greenlet/greenlet.c -fix -checks=&quot;readability-braces-around-statements&quot; 
+*/</span>
+<span class="s2">#ifndef </span><span class="s1">T_MAIN_GREENLET_CPP</span>
+<span class="s2">#define </span><span class="s1">T_MAIN_GREENLET_CPP</span>
+
+<span class="s2">#include </span><span class="s3">&quot;TGreenlet.hpp&quot;</span>
+
+
+
+<span class="s0">// Protected by the GIL. Incremented when we create a main greenlet,</span>
+<span class="s0">// in a new thread, decremented when it is destroyed.</span>
+<span class="s2">static </span><span class="s1">Py_ssize_t G_TOTAL_MAIN_GREENLETS;</span>
+
+<span class="s4">namespace </span><span class="s1">greenlet {</span>
+<span class="s1">greenlet::PythonAllocator&lt;MainGreenlet&gt; MainGreenlet::allocator;</span>
+
+<span class="s2">void</span><span class="s1">* MainGreenlet::</span><span class="s4">operator new</span><span class="s1">(size_t UNUSED(count))</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">allocator.allocate(</span><span class="s5">1</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+
+<span class="s2">void </span><span class="s1">MainGreenlet::</span><span class="s4">operator </span><span class="s2">delete</span><span class="s1">(</span><span class="s2">void</span><span class="s1">* ptr)</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">allocator.deallocate(</span><span class="s4">static_cast</span><span class="s1">&lt;MainGreenlet*&gt;(ptr),</span>
+                                <span class="s5">1</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+
+<span class="s1">MainGreenlet::MainGreenlet(PyGreenlet* p, ThreadState* state)</span>
+    <span class="s1">: Greenlet(p, StackState::make_main()),</span>
+      <span class="s1">_self(p),</span>
+      <span class="s1">_thread_state(state)</span>
+<span class="s1">{</span>
+    <span class="s1">G_TOTAL_MAIN_GREENLETS++;</span>
+<span class="s1">}</span>
+
+<span class="s1">MainGreenlet::~MainGreenlet()</span>
+<span class="s1">{</span>
+    <span class="s1">G_TOTAL_MAIN_GREENLETS--;</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">tp_clear();</span>
+<span class="s1">}</span>
+
+<span class="s1">ThreadState*</span>
+<span class="s1">MainGreenlet::thread_state() </span><span class="s2">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_thread_state;</span>
+<span class="s1">}</span>
+
+<span class="s2">void</span>
+<span class="s1">MainGreenlet::thread_state(ThreadState* t) noexcept</span>
+<span class="s1">{</span>
+    <span class="s1">assert(!t);</span>
+    <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_thread_state = t;</span>
+<span class="s1">}</span>
+
+
+<span class="s2">const </span><span class="s1">BorrowedMainGreenlet</span>
+<span class="s1">MainGreenlet::main_greenlet() </span><span class="s2">const</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_self;</span>
+<span class="s1">}</span>
+
+<span class="s1">BorrowedMainGreenlet</span>
+<span class="s1">MainGreenlet::find_main_greenlet_in_lineage() </span><span class="s2">const</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">BorrowedMainGreenlet(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_self);</span>
+<span class="s1">}</span>
+
+<span class="s2">bool</span>
+<span class="s1">MainGreenlet::was_running_in_dead_thread() </span><span class="s2">const </span><span class="s1">noexcept</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">!</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_thread_state;</span>
+<span class="s1">}</span>
+
+<span class="s1">OwnedObject</span>
+<span class="s1">MainGreenlet::g_switch()</span>
+<span class="s1">{</span>
+    <span class="s4">try </span><span class="s1">{</span>
+        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">check_switch_allowed();</span>
+    <span class="s1">}</span>
+    <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">PyErrOccurred&amp;) {</span>
+        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">release_args();</span>
+        <span class="s4">throw</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">switchstack_result_t err = </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">g_switchstack();</span>
+    <span class="s2">if </span><span class="s1">(err.status &lt; </span><span class="s5">0</span><span class="s1">) {</span>
+        <span class="s0">// XXX: This code path is untested, but it is shared</span>
+        <span class="s0">// with the UserGreenlet path that is tested.</span>
+        <span class="s2">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">on_switchstack_or_initialstub_failure(</span>
+            <span class="s4">this</span><span class="s1">,</span>
+            <span class="s1">err,</span>
+            <span class="s4">true</span><span class="s1">, </span><span class="s0">// target was me</span>
+            <span class="s2">false </span><span class="s0">// was initial stub</span>
+        <span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s2">return </span><span class="s1">err.the_new_current_greenlet</span><span class="s6">-&gt;</span><span class="s1">g_switch_finish(err);</span>
+<span class="s1">}</span>
+
+<span class="s2">int</span>
+<span class="s1">MainGreenlet::tp_traverse(visitproc visit, </span><span class="s2">void</span><span class="s1">* arg)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_thread_state) {</span>
+        <span class="s0">// we've already traversed main, (self), don't do it again.</span>
+        <span class="s2">int </span><span class="s1">result = </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_thread_state</span><span class="s6">-&gt;</span><span class="s1">tp_traverse(visit, arg, </span><span class="s2">false</span><span class="s1">);</span>
+        <span class="s2">if </span><span class="s1">(result) {</span>
+            <span class="s2">return </span><span class="s1">result;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s1">Greenlet::tp_traverse(visit, arg);</span>
+<span class="s1">}</span>
+
+<span class="s2">const </span><span class="s1">OwnedObject&amp;</span>
+<span class="s1">MainGreenlet::run() </span><span class="s2">const</span>
+<span class="s1">{</span>
+    <span class="s4">throw </span><span class="s1">AttributeError(</span><span class="s3">&quot;Main greenlets do not have a run attribute.&quot;</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+<span class="s2">void</span>
+<span class="s1">MainGreenlet::run(</span><span class="s2">const </span><span class="s1">BorrowedObject UNUSED(nrun))</span>
+<span class="s1">{</span>
+   <span class="s4">throw </span><span class="s1">AttributeError(</span><span class="s3">&quot;Main greenlets do not have a run attribute.&quot;</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+<span class="s2">void</span>
+<span class="s1">MainGreenlet::parent(</span><span class="s2">const </span><span class="s1">BorrowedObject raw_new_parent)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(!raw_new_parent) {</span>
+        <span class="s4">throw </span><span class="s1">AttributeError(</span><span class="s3">&quot;can't delete attribute&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s4">throw </span><span class="s1">AttributeError(</span><span class="s3">&quot;cannot set the parent of a main greenlet&quot;</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+<span class="s2">const </span><span class="s1">OwnedGreenlet</span>
+<span class="s1">MainGreenlet::parent() </span><span class="s2">const</span>
+<span class="s1">{</span>
+    <span class="s2">return </span><span class="s1">OwnedGreenlet(); </span><span class="s0">// null becomes None</span>
+<span class="s1">}</span>
+
+<span class="s1">}; </span><span class="s0">// namespace greenlet</span>
+
+<span class="s2">#endif</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<html>
+<head>
+<title>fail_clearing_run_switches.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+fail_clearing_run_switches.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s2">&quot;&quot;&quot; 
+If we have a run callable passed to the constructor or set as an 
+attribute, but we don't actually use that (because ``__getattribute__`` 
+or the like interferes), then when we clear callable before beginning 
+to run, there's an opportunity for Python code to run. 
+ 
+&quot;&quot;&quot;</span>
+<span class="s3">import </span><span class="s1">greenlet</span>
+
+<span class="s1">g </span><span class="s4">= </span><span class="s3">None</span>
+<span class="s1">main </span><span class="s4">= </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">getcurrent</span><span class="s4">()</span>
+
+<span class="s1">results </span><span class="s4">= []</span>
+
+<span class="s3">class </span><span class="s1">RunCallable</span><span class="s4">:</span>
+
+    <span class="s3">def </span><span class="s1">__del__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">results</span><span class="s4">.</span><span class="s1">append</span><span class="s4">((</span><span class="s5">'RunCallable'</span><span class="s4">, </span><span class="s5">'__del__'</span><span class="s4">))</span>
+        <span class="s1">main</span><span class="s4">.</span><span class="s1">switch</span><span class="s4">(</span><span class="s5">'from RunCallable'</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">G</span><span class="s4">(</span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">greenlet</span><span class="s4">):</span>
+
+    <span class="s3">def </span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">name </span><span class="s4">== </span><span class="s5">'run'</span><span class="s4">:</span>
+            <span class="s1">results</span><span class="s4">.</span><span class="s1">append</span><span class="s4">((</span><span class="s5">'G.__getattribute__'</span><span class="s4">, </span><span class="s5">'run'</span><span class="s4">))</span>
+            <span class="s3">return </span><span class="s1">run_func</span>
+        <span class="s3">return </span><span class="s1">object</span><span class="s4">.</span><span class="s1">__getattribute__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">name</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">run_func</span><span class="s4">():</span>
+    <span class="s1">results</span><span class="s4">.</span><span class="s1">append</span><span class="s4">((</span><span class="s5">'run_func'</span><span class="s4">, </span><span class="s5">'enter'</span><span class="s4">))</span>
+
+
+<span class="s1">g </span><span class="s4">= </span><span class="s1">G</span><span class="s4">(</span><span class="s1">RunCallable</span><span class="s4">())</span>
+<span class="s0"># Try to start G. It will get to the point where it deletes</span>
+<span class="s0"># its run callable C++ variable in inner_bootstrap. That triggers</span>
+<span class="s0"># the __del__ method, which switches back to main before g</span>
+<span class="s0"># actually even starts running.</span>
+<span class="s1">x </span><span class="s4">= </span><span class="s1">g</span><span class="s4">.</span><span class="s1">switch</span><span class="s4">()</span>
+<span class="s1">results</span><span class="s4">.</span><span class="s1">append</span><span class="s4">((</span><span class="s5">'main: g.switch()'</span><span class="s4">, </span><span class="s1">x</span><span class="s4">))</span>
+<span class="s0"># In the C++ code, this results in g-&gt;g_switch() appearing to return, even though</span>
+<span class="s0"># it has yet to run.</span>
+<span class="s1">print</span><span class="s4">(</span><span class="s5">'In main with'</span><span class="s4">, </span><span class="s1">x</span><span class="s4">, </span><span class="s1">flush</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+<span class="s1">g</span><span class="s4">.</span><span class="s1">switch</span><span class="s4">()</span>
+<span class="s1">print</span><span class="s4">(</span><span class="s5">'RESULTS'</span><span class="s4">, </span><span class="s1">results</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

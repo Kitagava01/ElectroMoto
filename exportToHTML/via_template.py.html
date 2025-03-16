@@ -1,0 +1,110 @@
+<html>
+<head>
+<title>via_template.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #6aab73;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+via_template.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">shlex</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">from </span><span class="s1">abc </span><span class="s0">import </span><span class="s1">ABC</span><span class="s2">, </span><span class="s1">abstractmethod</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">activator </span><span class="s0">import </span><span class="s1">Activator</span>
+
+<span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&gt;= (</span><span class="s3">3</span><span class="s2">, </span><span class="s3">10</span><span class="s2">):</span>
+    <span class="s0">from </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">resources </span><span class="s0">import </span><span class="s1">files</span>
+
+    <span class="s0">def </span><span class="s1">read_binary</span><span class="s2">(</span><span class="s1">module_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; bytes</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s2">(</span><span class="s1">files</span><span class="s2">(</span><span class="s1">module_name</span><span class="s2">) / </span><span class="s1">filename</span><span class="s2">).</span><span class="s1">read_bytes</span><span class="s2">()</span>
+
+<span class="s0">else</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">resources </span><span class="s0">import </span><span class="s1">read_binary</span>
+
+
+<span class="s0">class </span><span class="s1">ViaTemplateActivator</span><span class="s2">(</span><span class="s1">Activator</span><span class="s2">, </span><span class="s1">ABC</span><span class="s2">):</span>
+    <span class="s2">@</span><span class="s1">abstractmethod</span>
+    <span class="s0">def </span><span class="s1">templates</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s2">@</span><span class="s1">staticmethod</span>
+    <span class="s0">def </span><span class="s1">quote</span><span class="s2">(</span><span class="s1">string</span><span class="s2">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        Quote strings in the activation script. 
+ 
+        :param string: the string to quote 
+        :return: quoted string that works in the activation script 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">shlex</span><span class="s2">.</span><span class="s1">quote</span><span class="s2">(</span><span class="s1">string</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">generate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">creator</span><span class="s2">):</span>
+        <span class="s1">dest_folder </span><span class="s2">= </span><span class="s1">creator</span><span class="s2">.</span><span class="s1">bin_dir</span>
+        <span class="s1">replacements </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">replacements</span><span class="s2">(</span><span class="s1">creator</span><span class="s2">, </span><span class="s1">dest_folder</span><span class="s2">)</span>
+        <span class="s1">generated </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_generate</span><span class="s2">(</span><span class="s1">replacements</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">templates</span><span class="s2">(), </span><span class="s1">dest_folder</span><span class="s2">, </span><span class="s1">creator</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">flag_prompt </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">creator</span><span class="s2">.</span><span class="s1">pyenv_cfg</span><span class="s2">[</span><span class="s5">&quot;prompt&quot;</span><span class="s2">] = </span><span class="s1">self</span><span class="s2">.</span><span class="s1">flag_prompt</span>
+        <span class="s0">return </span><span class="s1">generated</span>
+
+    <span class="s0">def </span><span class="s1">replacements</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">creator</span><span class="s2">, </span><span class="s1">dest_folder</span><span class="s2">):  </span><span class="s6"># noqa: ARG002</span>
+        <span class="s0">return </span><span class="s2">{</span>
+            <span class="s5">&quot;__VIRTUAL_PROMPT__&quot;</span><span class="s2">: </span><span class="s5">&quot;&quot; </span><span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">flag_prompt </span><span class="s0">is None else </span><span class="s1">self</span><span class="s2">.</span><span class="s1">flag_prompt</span><span class="s2">,</span>
+            <span class="s5">&quot;__VIRTUAL_ENV__&quot;</span><span class="s2">: </span><span class="s1">str</span><span class="s2">(</span><span class="s1">creator</span><span class="s2">.</span><span class="s1">dest</span><span class="s2">),</span>
+            <span class="s5">&quot;__VIRTUAL_NAME__&quot;</span><span class="s2">: </span><span class="s1">creator</span><span class="s2">.</span><span class="s1">env_name</span><span class="s2">,</span>
+            <span class="s5">&quot;__BIN_NAME__&quot;</span><span class="s2">: </span><span class="s1">str</span><span class="s2">(</span><span class="s1">creator</span><span class="s2">.</span><span class="s1">bin_dir</span><span class="s2">.</span><span class="s1">relative_to</span><span class="s2">(</span><span class="s1">creator</span><span class="s2">.</span><span class="s1">dest</span><span class="s2">)),</span>
+            <span class="s5">&quot;__PATH_SEP__&quot;</span><span class="s2">: </span><span class="s1">os</span><span class="s2">.</span><span class="s1">pathsep</span><span class="s2">,</span>
+        <span class="s2">}</span>
+
+    <span class="s0">def </span><span class="s1">_generate</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">replacements</span><span class="s2">, </span><span class="s1">templates</span><span class="s2">, </span><span class="s1">to_folder</span><span class="s2">, </span><span class="s1">creator</span><span class="s2">):</span>
+        <span class="s1">generated </span><span class="s2">= []</span>
+        <span class="s0">for </span><span class="s1">template </span><span class="s0">in </span><span class="s1">templates</span><span class="s2">:</span>
+            <span class="s1">text </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">instantiate_template</span><span class="s2">(</span><span class="s1">replacements</span><span class="s2">, </span><span class="s1">template</span><span class="s2">, </span><span class="s1">creator</span><span class="s2">)</span>
+            <span class="s1">dest </span><span class="s2">= </span><span class="s1">to_folder </span><span class="s2">/ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">as_name</span><span class="s2">(</span><span class="s1">template</span><span class="s2">)</span>
+            <span class="s6"># remove the file if it already exists - this prevents permission</span>
+            <span class="s6"># errors when the dest is not writable</span>
+            <span class="s0">if </span><span class="s1">dest</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">():</span>
+                <span class="s1">dest</span><span class="s2">.</span><span class="s1">unlink</span><span class="s2">()</span>
+            <span class="s6"># Powershell assumes Windows 1252 encoding when reading files without BOM</span>
+            <span class="s1">encoding </span><span class="s2">= </span><span class="s5">&quot;utf-8-sig&quot; </span><span class="s0">if </span><span class="s1">str</span><span class="s2">(</span><span class="s1">template</span><span class="s2">).</span><span class="s1">endswith</span><span class="s2">(</span><span class="s5">&quot;.ps1&quot;</span><span class="s2">) </span><span class="s0">else </span><span class="s5">&quot;utf-8&quot;</span>
+            <span class="s6"># use write_bytes to avoid platform specific line normalization (\n -&gt; \r\n)</span>
+            <span class="s1">dest</span><span class="s2">.</span><span class="s1">write_bytes</span><span class="s2">(</span><span class="s1">text</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">))</span>
+            <span class="s1">generated</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">dest</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">generated</span>
+
+    <span class="s0">def </span><span class="s1">as_name</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">template</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">template</span>
+
+    <span class="s0">def </span><span class="s1">instantiate_template</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">replacements</span><span class="s2">, </span><span class="s1">template</span><span class="s2">, </span><span class="s1">creator</span><span class="s2">):</span>
+        <span class="s6"># read content as binary to avoid platform specific line normalization (\n -&gt; \r\n)</span>
+        <span class="s1">binary </span><span class="s2">= </span><span class="s1">read_binary</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">__module__</span><span class="s2">, </span><span class="s1">template</span><span class="s2">)</span>
+        <span class="s1">text </span><span class="s2">= </span><span class="s1">binary</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s5">&quot;utf-8&quot;</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">=</span><span class="s5">&quot;strict&quot;</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">value </span><span class="s0">in </span><span class="s1">replacements</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+            <span class="s1">value_uni </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_repr_unicode</span><span class="s2">(</span><span class="s1">creator</span><span class="s2">, </span><span class="s1">value</span><span class="s2">)</span>
+            <span class="s1">text </span><span class="s2">= </span><span class="s1">text</span><span class="s2">.</span><span class="s1">replace</span><span class="s2">(</span><span class="s1">key</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">quote</span><span class="s2">(</span><span class="s1">value_uni</span><span class="s2">))</span>
+        <span class="s0">return </span><span class="s1">text</span>
+
+    <span class="s2">@</span><span class="s1">staticmethod</span>
+    <span class="s0">def </span><span class="s1">_repr_unicode</span><span class="s2">(</span><span class="s1">creator</span><span class="s2">, </span><span class="s1">value</span><span class="s2">):  </span><span class="s6"># noqa: ARG004</span>
+        <span class="s0">return </span><span class="s1">value  </span><span class="s6"># by default, we just let it be unicode</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s5">&quot;ViaTemplateActivator&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

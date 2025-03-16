@@ -1,0 +1,233 @@
+<html>
+<head>
+<title>test_cte.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_cte.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># testing/suite/test_cte.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+<span class="s0"># mypy: ignore-errors</span>
+
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">fixtures</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">assertions </span><span class="s2">import </span><span class="s1">eq_</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">Column</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">Table</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">ForeignKey</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">Integer</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">select</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">String</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">testing</span>
+
+
+<span class="s2">class </span><span class="s1">CTETest</span><span class="s3">(</span><span class="s1">fixtures</span><span class="s3">.</span><span class="s1">TablesTest</span><span class="s3">):</span>
+    <span class="s1">__backend__ </span><span class="s3">= </span><span class="s2">True</span>
+    <span class="s1">__requires__ </span><span class="s3">= (</span><span class="s4">&quot;ctes&quot;</span><span class="s3">,)</span>
+
+    <span class="s1">run_inserts </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+    <span class="s1">run_deletes </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">define_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">):</span>
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;some_table&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;parent_id&quot;</span><span class="s3">, </span><span class="s1">ForeignKey</span><span class="s3">(</span><span class="s4">&quot;some_table.id&quot;</span><span class="s3">)),</span>
+        <span class="s3">)</span>
+
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;some_other_table&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;parent_id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">),</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">insert_data</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(),</span>
+            <span class="s3">[</span>
+                <span class="s3">{</span><span class="s4">&quot;id&quot;</span><span class="s3">: </span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d1&quot;</span><span class="s3">, </span><span class="s4">&quot;parent_id&quot;</span><span class="s3">: </span><span class="s2">None</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;id&quot;</span><span class="s3">: </span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d2&quot;</span><span class="s3">, </span><span class="s4">&quot;parent_id&quot;</span><span class="s3">: </span><span class="s5">1</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;id&quot;</span><span class="s3">: </span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d3&quot;</span><span class="s3">, </span><span class="s4">&quot;parent_id&quot;</span><span class="s3">: </span><span class="s5">1</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;id&quot;</span><span class="s3">: </span><span class="s5">4</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d4&quot;</span><span class="s3">, </span><span class="s4">&quot;parent_id&quot;</span><span class="s3">: </span><span class="s5">3</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;id&quot;</span><span class="s3">: </span><span class="s5">5</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d5&quot;</span><span class="s3">, </span><span class="s4">&quot;parent_id&quot;</span><span class="s3">: </span><span class="s5">3</span><span class="s3">},</span>
+            <span class="s3">],</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_select_nonrecursive_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">some_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_table</span>
+
+        <span class="s1">cte </span><span class="s3">= (</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">)</span>
+            <span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;d2&quot;</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">, </span><span class="s4">&quot;d4&quot;</span><span class="s3">]))</span>
+            <span class="s3">.</span><span class="s1">cte</span><span class="s3">(</span><span class="s4">&quot;some_cte&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">cte</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">).</span><span class="s1">where</span><span class="s3">(</span><span class="s1">cte</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;d4&quot;</span><span class="s3">, </span><span class="s4">&quot;d5&quot;</span><span class="s3">]))</span>
+        <span class="s3">)</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">result</span><span class="s3">.</span><span class="s1">fetchall</span><span class="s3">(), [(</span><span class="s4">&quot;d4&quot;</span><span class="s3">,)])</span>
+
+    <span class="s2">def </span><span class="s1">test_select_recursive_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">some_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_table</span>
+
+        <span class="s1">cte </span><span class="s3">= (</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">)</span>
+            <span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;d2&quot;</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">, </span><span class="s4">&quot;d4&quot;</span><span class="s3">]))</span>
+            <span class="s3">.</span><span class="s1">cte</span><span class="s3">(</span><span class="s4">&quot;some_cte&quot;</span><span class="s3">, </span><span class="s1">recursive</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">cte_alias </span><span class="s3">= </span><span class="s1">cte</span><span class="s3">.</span><span class="s1">alias</span><span class="s3">(</span><span class="s4">&quot;c1&quot;</span><span class="s3">)</span>
+        <span class="s1">st1 </span><span class="s3">= </span><span class="s1">some_table</span><span class="s3">.</span><span class="s1">alias</span><span class="s3">()</span>
+        <span class="s0"># note that SQL Server requires this to be UNION ALL,</span>
+        <span class="s0"># can't be UNION</span>
+        <span class="s1">cte </span><span class="s3">= </span><span class="s1">cte</span><span class="s3">.</span><span class="s1">union_all</span><span class="s3">(</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">st1</span><span class="s3">).</span><span class="s1">where</span><span class="s3">(</span><span class="s1">st1</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">== </span><span class="s1">cte_alias</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">parent_id</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">cte</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">)</span>
+            <span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">cte</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data </span><span class="s3">!= </span><span class="s4">&quot;d2&quot;</span><span class="s3">)</span>
+            <span class="s3">.</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">cte</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">desc</span><span class="s3">())</span>
+        <span class="s3">)</span>
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">result</span><span class="s3">.</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">[(</span><span class="s4">&quot;d4&quot;</span><span class="s3">,), (</span><span class="s4">&quot;d3&quot;</span><span class="s3">,), (</span><span class="s4">&quot;d3&quot;</span><span class="s3">,), (</span><span class="s4">&quot;d1&quot;</span><span class="s3">,), (</span><span class="s4">&quot;d1&quot;</span><span class="s3">,), (</span><span class="s4">&quot;d1&quot;</span><span class="s3">,)],</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_insert_from_select_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">some_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_table</span>
+        <span class="s1">some_other_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_other_table</span>
+
+        <span class="s1">cte </span><span class="s3">= (</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">)</span>
+            <span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;d2&quot;</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">, </span><span class="s4">&quot;d4&quot;</span><span class="s3">]))</span>
+            <span class="s3">.</span><span class="s1">cte</span><span class="s3">(</span><span class="s4">&quot;some_cte&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">from_select</span><span class="s3">(</span>
+                <span class="s3">[</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s4">&quot;parent_id&quot;</span><span class="s3">], </span><span class="s1">select</span><span class="s3">(</span><span class="s1">cte</span><span class="s3">)</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">some_other_table</span><span class="s3">).</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)</span>
+            <span class="s3">).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">[(</span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;d2&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">), (</span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">, </span><span class="s5">1</span><span class="s3">), (</span><span class="s5">4</span><span class="s3">, </span><span class="s4">&quot;d4&quot;</span><span class="s3">, </span><span class="s5">3</span><span class="s3">)],</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">ctes_with_update_delete</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">update_from</span>
+    <span class="s2">def </span><span class="s1">test_update_from_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">some_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_table</span>
+        <span class="s1">some_other_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_other_table</span>
+
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">from_select</span><span class="s3">(</span>
+                <span class="s3">[</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s4">&quot;parent_id&quot;</span><span class="s3">], </span><span class="s1">select</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">)</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">cte </span><span class="s3">= (</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">)</span>
+            <span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;d2&quot;</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">, </span><span class="s4">&quot;d4&quot;</span><span class="s3">]))</span>
+            <span class="s3">.</span><span class="s1">cte</span><span class="s3">(</span><span class="s4">&quot;some_cte&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">update</span><span class="s3">()</span>
+            <span class="s3">.</span><span class="s1">values</span><span class="s3">(</span><span class="s1">parent_id</span><span class="s3">=</span><span class="s5">5</span><span class="s3">)</span>
+            <span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data </span><span class="s3">== </span><span class="s1">cte</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">some_other_table</span><span class="s3">).</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)</span>
+            <span class="s3">).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">[</span>
+                <span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;d1&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">),</span>
+                <span class="s3">(</span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;d2&quot;</span><span class="s3">, </span><span class="s5">5</span><span class="s3">),</span>
+                <span class="s3">(</span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">, </span><span class="s5">5</span><span class="s3">),</span>
+                <span class="s3">(</span><span class="s5">4</span><span class="s3">, </span><span class="s4">&quot;d4&quot;</span><span class="s3">, </span><span class="s5">5</span><span class="s3">),</span>
+                <span class="s3">(</span><span class="s5">5</span><span class="s3">, </span><span class="s4">&quot;d5&quot;</span><span class="s3">, </span><span class="s5">3</span><span class="s3">),</span>
+            <span class="s3">],</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">ctes_with_update_delete</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">delete_from</span>
+    <span class="s2">def </span><span class="s1">test_delete_from_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">some_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_table</span>
+        <span class="s1">some_other_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_other_table</span>
+
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">from_select</span><span class="s3">(</span>
+                <span class="s3">[</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s4">&quot;parent_id&quot;</span><span class="s3">], </span><span class="s1">select</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">)</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">cte </span><span class="s3">= (</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">)</span>
+            <span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;d2&quot;</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">, </span><span class="s4">&quot;d4&quot;</span><span class="s3">]))</span>
+            <span class="s3">.</span><span class="s1">cte</span><span class="s3">(</span><span class="s4">&quot;some_cte&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">delete</span><span class="s3">().</span><span class="s1">where</span><span class="s3">(</span>
+                <span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data </span><span class="s3">== </span><span class="s1">cte</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">some_other_table</span><span class="s3">).</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)</span>
+            <span class="s3">).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">[(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;d1&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">), (</span><span class="s5">5</span><span class="s3">, </span><span class="s4">&quot;d5&quot;</span><span class="s3">, </span><span class="s5">3</span><span class="s3">)],</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">ctes_with_update_delete</span>
+    <span class="s2">def </span><span class="s1">test_delete_scalar_subq_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">some_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_table</span>
+        <span class="s1">some_other_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">some_other_table</span>
+
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">from_select</span><span class="s3">(</span>
+                <span class="s3">[</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s4">&quot;parent_id&quot;</span><span class="s3">], </span><span class="s1">select</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">)</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">cte </span><span class="s3">= (</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">)</span>
+            <span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">some_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;d2&quot;</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">, </span><span class="s4">&quot;d4&quot;</span><span class="s3">]))</span>
+            <span class="s3">.</span><span class="s1">cte</span><span class="s3">(</span><span class="s4">&quot;some_cte&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">delete</span><span class="s3">().</span><span class="s1">where</span><span class="s3">(</span>
+                <span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span>
+                <span class="s3">== </span><span class="s1">select</span><span class="s3">(</span><span class="s1">cte</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">)</span>
+                <span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">cte</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">== </span><span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)</span>
+                <span class="s3">.</span><span class="s1">scalar_subquery</span><span class="s3">()</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">some_other_table</span><span class="s3">).</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">some_other_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)</span>
+            <span class="s3">).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">[(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;d1&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">), (</span><span class="s5">5</span><span class="s3">, </span><span class="s4">&quot;d5&quot;</span><span class="s3">, </span><span class="s5">3</span><span class="s3">)],</span>
+        <span class="s3">)</span>
+</pre>
+</body>
+</html>

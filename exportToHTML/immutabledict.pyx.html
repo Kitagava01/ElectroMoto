@@ -1,0 +1,155 @@
+<html>
+<head>
+<title>immutabledict.pyx</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+immutabledict.pyx</font>
+</center></td></tr></table>
+<pre><span class="s0"># cyextension/immutabledict.pyx</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+<span class="s2">from </span><span class="s1">cpython</span><span class="s3">.</span><span class="s1">dict </span><span class="s2">cimport </span><span class="s1">PyDict_New</span><span class="s3">, </span><span class="s1">PyDict_Update</span><span class="s3">, </span><span class="s1">PyDict_Size</span>
+
+
+<span class="s2">def </span><span class="s1">_readonly_fn</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">):</span>
+    <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+        <span class="s4">&quot;%s object is immutable and/or readonly&quot; </span><span class="s3">% </span><span class="s1">obj</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">):</span>
+    <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+        <span class="s4">&quot;%s object is immutable&quot; </span><span class="s3">% </span><span class="s1">obj</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">ReadOnlyContainer</span><span class="s3">:</span>
+
+    <span class="s1">__slots__ </span><span class="s3">= ()</span>
+
+    <span class="s2">def </span><span class="s1">_readonly</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">a</span><span class="s3">,**</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s1">_readonly_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s1">__delitem__ </span><span class="s3">= </span><span class="s1">__setitem__ </span><span class="s3">= </span><span class="s1">__setattr__ </span><span class="s3">= </span><span class="s1">_readonly</span>
+
+
+<span class="s2">class </span><span class="s1">ImmutableDictBase</span><span class="s3">(</span><span class="s1">dict</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">_immutable</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">a</span><span class="s3">,**</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">__class_getitem__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">key</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">cls</span>
+
+    <span class="s1">__delitem__ </span><span class="s3">= </span><span class="s1">__setitem__ </span><span class="s3">= </span><span class="s1">__setattr__ </span><span class="s3">= </span><span class="s1">_immutable</span>
+    <span class="s1">clear </span><span class="s3">= </span><span class="s1">pop </span><span class="s3">= </span><span class="s1">popitem </span><span class="s3">= </span><span class="s1">setdefault </span><span class="s3">= </span><span class="s1">update </span><span class="s3">= </span><span class="s1">_immutable</span>
+
+
+<span class="s2">cdef class </span><span class="s1">immutabledict</span><span class="s3">(</span><span class="s1">dict</span><span class="s3">):</span>
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s4">f&quot;immutabledict(</span><span class="s2">{</span><span class="s1">dict</span><span class="s3">.</span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span><span class="s2">}</span><span class="s4">)&quot;</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">__class_getitem__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">key</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">cls</span>
+
+    <span class="s2">def </span><span class="s1">union</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s2">cdef </span><span class="s1">dict to_merge </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">cdef </span><span class="s1">immutabledict result</span>
+        <span class="s2">cdef </span><span class="s1">Py_ssize_t args_len </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">args</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">args_len </span><span class="s3">&gt; </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span>
+                <span class="s4">f'union expected at most 1 argument, got </span><span class="s2">{</span><span class="s1">args_len</span><span class="s2">}</span><span class="s4">'</span>
+            <span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">args_len </span><span class="s3">== </span><span class="s5">1</span><span class="s3">:</span>
+            <span class="s1">attribute </span><span class="s3">= </span><span class="s1">args</span><span class="s3">[</span><span class="s5">0</span><span class="s3">]</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">attribute</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">):</span>
+                <span class="s1">to_merge </span><span class="s3">= &lt;</span><span class="s1">dict</span><span class="s3">&gt; </span><span class="s1">attribute</span>
+        <span class="s2">if </span><span class="s1">to_merge </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">to_merge </span><span class="s3">= </span><span class="s1">dict</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">PyDict_Size</span><span class="s3">(</span><span class="s1">to_merge</span><span class="s3">) == </span><span class="s5">0</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span>
+
+        <span class="s0"># new + update is faster than immutabledict(self)</span>
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">immutabledict</span><span class="s3">()</span>
+        <span class="s1">PyDict_Update</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">self</span><span class="s3">)</span>
+        <span class="s1">PyDict_Update</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">to_merge</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">result</span>
+
+    <span class="s2">def </span><span class="s1">merge_with</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">cdef </span><span class="s1">immutabledict result </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">cdef </span><span class="s1">object d</span>
+        <span class="s2">cdef </span><span class="s1">bint update </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s2">if not </span><span class="s1">other</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span>
+        <span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">other</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">d</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">update </span><span class="s3">== </span><span class="s2">False</span><span class="s3">:</span>
+                    <span class="s1">update </span><span class="s3">= </span><span class="s2">True</span>
+                    <span class="s0"># new + update is faster than immutabledict(self)</span>
+                    <span class="s1">result </span><span class="s3">= </span><span class="s1">immutabledict</span><span class="s3">()</span>
+                    <span class="s1">PyDict_Update</span><span class="s3">(</span><span class="s1">result</span><span class="s3">, </span><span class="s1">self</span><span class="s3">)</span>
+                <span class="s1">PyDict_Update</span><span class="s3">(</span>
+                    <span class="s1">result</span><span class="s3">, &lt;</span><span class="s1">dict</span><span class="s3">&gt;(</span><span class="s1">d </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">) </span><span class="s2">else </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">d</span><span class="s3">))</span>
+                <span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">self </span><span class="s2">if </span><span class="s1">update </span><span class="s3">== </span><span class="s2">False else </span><span class="s1">result</span>
+
+    <span class="s2">def </span><span class="s1">copy</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">__reduce__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">immutabledict</span><span class="s3">, (</span><span class="s1">dict</span><span class="s3">(</span><span class="s1">self</span><span class="s3">), )</span>
+
+    <span class="s2">def </span><span class="s1">__delitem__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">k</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__setitem__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__setattr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">clear</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">pop</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">popitem</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">setdefault</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">update</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s0"># PEP 584</span>
+    <span class="s2">def </span><span class="s1">__ior__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s1">_immutable_fn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__or__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">immutabledict</span><span class="s3">(</span><span class="s1">dict</span><span class="s3">.</span><span class="s1">__or__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">))</span>
+
+    <span class="s2">def </span><span class="s1">__ror__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s0"># NOTE: this is used only in cython 3.x;</span>
+        <span class="s0"># version 0.x will call __or__ with args inversed</span>
+        <span class="s2">return </span><span class="s1">immutabledict</span><span class="s3">(</span><span class="s1">dict</span><span class="s3">.</span><span class="s1">__ror__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">))</span>
+</pre>
+</body>
+</html>

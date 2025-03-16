@@ -1,0 +1,495 @@
+<html>
+<head>
+<title>engines.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+engines.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># testing/engines.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+<span class="s0"># mypy: ignore-errors</span>
+
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">collections</span>
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">import </span><span class="s1">typing</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Any</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Dict</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Optional</span>
+<span class="s2">import </span><span class="s1">warnings</span>
+<span class="s2">import </span><span class="s1">weakref</span>
+
+<span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">config</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s1">decorator</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s1">gc_collect</span>
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">event</span>
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">pool</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">util </span><span class="s2">import </span><span class="s1">await_only</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">util</span><span class="s3">.</span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Literal</span>
+
+
+<span class="s2">if </span><span class="s1">typing</span><span class="s3">.</span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s3">..</span><span class="s1">engine </span><span class="s2">import </span><span class="s1">Engine</span>
+    <span class="s2">from </span><span class="s3">..</span><span class="s1">engine</span><span class="s3">.</span><span class="s1">url </span><span class="s2">import </span><span class="s1">URL</span>
+    <span class="s2">from </span><span class="s3">..</span><span class="s1">ext</span><span class="s3">.</span><span class="s1">asyncio </span><span class="s2">import </span><span class="s1">AsyncEngine</span>
+
+
+<span class="s2">class </span><span class="s1">ConnectionKiller</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">proxy_refs </span><span class="s3">= </span><span class="s1">weakref</span><span class="s3">.</span><span class="s1">WeakKeyDictionary</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">testing_engines </span><span class="s3">= </span><span class="s1">collections</span><span class="s3">.</span><span class="s1">defaultdict</span><span class="s3">(</span><span class="s1">set</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">dbapi_connections </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">add_pool</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">pool</span><span class="s3">):</span>
+        <span class="s1">event</span><span class="s3">.</span><span class="s1">listen</span><span class="s3">(</span><span class="s1">pool</span><span class="s3">, </span><span class="s4">&quot;checkout&quot;</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_add_conn</span><span class="s3">)</span>
+        <span class="s1">event</span><span class="s3">.</span><span class="s1">listen</span><span class="s3">(</span><span class="s1">pool</span><span class="s3">, </span><span class="s4">&quot;checkin&quot;</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_remove_conn</span><span class="s3">)</span>
+        <span class="s1">event</span><span class="s3">.</span><span class="s1">listen</span><span class="s3">(</span><span class="s1">pool</span><span class="s3">, </span><span class="s4">&quot;close&quot;</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_remove_conn</span><span class="s3">)</span>
+        <span class="s1">event</span><span class="s3">.</span><span class="s1">listen</span><span class="s3">(</span><span class="s1">pool</span><span class="s3">, </span><span class="s4">&quot;close_detached&quot;</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_remove_conn</span><span class="s3">)</span>
+        <span class="s0"># note we are keeping &quot;invalidated&quot; here, as those are still</span>
+        <span class="s0"># opened connections we would like to roll back</span>
+
+    <span class="s2">def </span><span class="s1">_add_conn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dbapi_con</span><span class="s3">, </span><span class="s1">con_record</span><span class="s3">, </span><span class="s1">con_proxy</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">dbapi_connections</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">dbapi_con</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">proxy_refs</span><span class="s3">[</span><span class="s1">con_proxy</span><span class="s3">] = </span><span class="s2">True</span>
+
+    <span class="s2">def </span><span class="s1">_remove_conn</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dbapi_conn</span><span class="s3">, *</span><span class="s1">arg</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">dbapi_connections</span><span class="s3">.</span><span class="s1">discard</span><span class="s3">(</span><span class="s1">dbapi_conn</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">add_engine</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">engine</span><span class="s3">, </span><span class="s1">scope</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">add_pool</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">.</span><span class="s1">pool</span><span class="s3">)</span>
+
+        <span class="s2">assert </span><span class="s1">scope </span><span class="s2">in </span><span class="s3">(</span><span class="s4">&quot;class&quot;</span><span class="s3">, </span><span class="s4">&quot;global&quot;</span><span class="s3">, </span><span class="s4">&quot;function&quot;</span><span class="s3">, </span><span class="s4">&quot;fixture&quot;</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">testing_engines</span><span class="s3">[</span><span class="s1">scope</span><span class="s3">].</span><span class="s1">add</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_safe</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">fn</span><span class="s3">):</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">fn</span><span class="s3">()</span>
+        <span class="s2">except </span><span class="s1">Exception </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+            <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span>
+                <span class="s4">&quot;testing_reaper couldn't rollback/close connection: %s&quot; </span><span class="s3">% </span><span class="s1">e</span>
+            <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">rollback_all</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">for </span><span class="s1">rec </span><span class="s2">in </span><span class="s1">list</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">proxy_refs</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">rec </span><span class="s2">is not None and </span><span class="s1">rec</span><span class="s3">.</span><span class="s1">is_valid</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_safe</span><span class="s3">(</span><span class="s1">rec</span><span class="s3">.</span><span class="s1">rollback</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">checkin_all</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0"># run pool.checkin() for all ConnectionFairy instances we have</span>
+        <span class="s0"># tracked.</span>
+
+        <span class="s2">for </span><span class="s1">rec </span><span class="s2">in </span><span class="s1">list</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">proxy_refs</span><span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">rec </span><span class="s2">is not None and </span><span class="s1">rec</span><span class="s3">.</span><span class="s1">is_valid</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">dbapi_connections</span><span class="s3">.</span><span class="s1">discard</span><span class="s3">(</span><span class="s1">rec</span><span class="s3">.</span><span class="s1">dbapi_connection</span><span class="s3">)</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_safe</span><span class="s3">(</span><span class="s1">rec</span><span class="s3">.</span><span class="s1">_checkin</span><span class="s3">)</span>
+
+        <span class="s0"># for fairy refs that were GCed and could not close the connection,</span>
+        <span class="s0"># such as asyncio, roll back those remaining connections</span>
+        <span class="s2">for </span><span class="s1">con </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dbapi_connections</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_safe</span><span class="s3">(</span><span class="s1">con</span><span class="s3">.</span><span class="s1">rollback</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">dbapi_connections</span><span class="s3">.</span><span class="s1">clear</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">close_all</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">checkin_all</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">prepare_for_drop_tables</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s0"># don't do aggressive checks for third party test suites</span>
+        <span class="s2">if not </span><span class="s1">config</span><span class="s3">.</span><span class="s1">bootstrapped_as_sqlalchemy</span><span class="s3">:</span>
+            <span class="s2">return</span>
+
+        <span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">provision</span>
+
+        <span class="s1">provision</span><span class="s3">.</span><span class="s1">prepare_for_drop_tables</span><span class="s3">(</span><span class="s1">connection</span><span class="s3">.</span><span class="s1">engine</span><span class="s3">.</span><span class="s1">url</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_drop_testing_engines</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">scope</span><span class="s3">):</span>
+        <span class="s1">eng </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">testing_engines</span><span class="s3">[</span><span class="s1">scope</span><span class="s3">]</span>
+        <span class="s2">for </span><span class="s1">rec </span><span class="s2">in </span><span class="s1">list</span><span class="s3">(</span><span class="s1">eng</span><span class="s3">):</span>
+            <span class="s2">for </span><span class="s1">proxy_ref </span><span class="s2">in </span><span class="s1">list</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">proxy_refs</span><span class="s3">):</span>
+                <span class="s2">if </span><span class="s1">proxy_ref </span><span class="s2">is not None and </span><span class="s1">proxy_ref</span><span class="s3">.</span><span class="s1">is_valid</span><span class="s3">:</span>
+                    <span class="s2">if </span><span class="s3">(</span>
+                        <span class="s1">proxy_ref</span><span class="s3">.</span><span class="s1">_pool </span><span class="s2">is not None</span>
+                        <span class="s2">and </span><span class="s1">proxy_ref</span><span class="s3">.</span><span class="s1">_pool </span><span class="s2">is </span><span class="s1">rec</span><span class="s3">.</span><span class="s1">pool</span>
+                    <span class="s3">):</span>
+                        <span class="s1">self</span><span class="s3">.</span><span class="s1">_safe</span><span class="s3">(</span><span class="s1">proxy_ref</span><span class="s3">.</span><span class="s1">_checkin</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">rec</span><span class="s3">, </span><span class="s4">&quot;sync_engine&quot;</span><span class="s3">):</span>
+                <span class="s1">await_only</span><span class="s3">(</span><span class="s1">rec</span><span class="s3">.</span><span class="s1">dispose</span><span class="s3">())</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">rec</span><span class="s3">.</span><span class="s1">dispose</span><span class="s3">()</span>
+        <span class="s1">eng</span><span class="s3">.</span><span class="s1">clear</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">after_test</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_drop_testing_engines</span><span class="s3">(</span><span class="s4">&quot;function&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">after_test_outside_fixtures</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">test</span><span class="s3">):</span>
+        <span class="s0"># don't do aggressive checks for third party test suites</span>
+        <span class="s2">if not </span><span class="s1">config</span><span class="s3">.</span><span class="s1">bootstrapped_as_sqlalchemy</span><span class="s3">:</span>
+            <span class="s2">return</span>
+
+        <span class="s2">if </span><span class="s1">test</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">__leave_connections_for_teardown__</span><span class="s3">:</span>
+            <span class="s2">return</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">checkin_all</span><span class="s3">()</span>
+
+        <span class="s0"># on PostgreSQL, this will test for any &quot;idle in transaction&quot;</span>
+        <span class="s0"># connections.   useful to identify tests with unusual patterns</span>
+        <span class="s0"># that can't be cleaned up correctly.</span>
+        <span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">provision</span>
+
+        <span class="s2">with </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">connect</span><span class="s3">() </span><span class="s2">as </span><span class="s1">conn</span><span class="s3">:</span>
+            <span class="s1">provision</span><span class="s3">.</span><span class="s1">prepare_for_drop_tables</span><span class="s3">(</span><span class="s1">conn</span><span class="s3">.</span><span class="s1">engine</span><span class="s3">.</span><span class="s1">url</span><span class="s3">, </span><span class="s1">conn</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">stop_test_class_inside_fixtures</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">checkin_all</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_drop_testing_engines</span><span class="s3">(</span><span class="s4">&quot;function&quot;</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_drop_testing_engines</span><span class="s3">(</span><span class="s4">&quot;class&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">stop_test_class_outside_fixtures</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0"># ensure no refs to checked out connections at all.</span>
+
+        <span class="s2">if </span><span class="s1">pool</span><span class="s3">.</span><span class="s1">base</span><span class="s3">.</span><span class="s1">_strong_ref_connection_records</span><span class="s3">:</span>
+            <span class="s1">gc_collect</span><span class="s3">()</span>
+
+            <span class="s2">if </span><span class="s1">pool</span><span class="s3">.</span><span class="s1">base</span><span class="s3">.</span><span class="s1">_strong_ref_connection_records</span><span class="s3">:</span>
+                <span class="s1">ln </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">pool</span><span class="s3">.</span><span class="s1">base</span><span class="s3">.</span><span class="s1">_strong_ref_connection_records</span><span class="s3">)</span>
+                <span class="s1">pool</span><span class="s3">.</span><span class="s1">base</span><span class="s3">.</span><span class="s1">_strong_ref_connection_records</span><span class="s3">.</span><span class="s1">clear</span><span class="s3">()</span>
+                <span class="s2">assert </span><span class="s3">(</span>
+                    <span class="s2">False</span>
+                <span class="s3">), </span><span class="s4">&quot;%d connection recs not cleared after test suite&quot; </span><span class="s3">% (</span><span class="s1">ln</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">final_cleanup</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">checkin_all</span><span class="s3">()</span>
+        <span class="s2">for </span><span class="s1">scope </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">testing_engines</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_drop_testing_engines</span><span class="s3">(</span><span class="s1">scope</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">assert_all_closed</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">for </span><span class="s1">rec </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">proxy_refs</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">rec</span><span class="s3">.</span><span class="s1">is_valid</span><span class="s3">:</span>
+                <span class="s2">assert False</span>
+
+
+<span class="s1">testing_reaper </span><span class="s3">= </span><span class="s1">ConnectionKiller</span><span class="s3">()</span>
+
+
+<span class="s3">@</span><span class="s1">decorator</span>
+<span class="s2">def </span><span class="s1">assert_conns_closed</span><span class="s3">(</span><span class="s1">fn</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">fn</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+    <span class="s2">finally</span><span class="s3">:</span>
+        <span class="s1">testing_reaper</span><span class="s3">.</span><span class="s1">assert_all_closed</span><span class="s3">()</span>
+
+
+<span class="s3">@</span><span class="s1">decorator</span>
+<span class="s2">def </span><span class="s1">rollback_open_connections</span><span class="s3">(</span><span class="s1">fn</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+    <span class="s5">&quot;&quot;&quot;Decorator that rolls back all open connections after fn execution.&quot;&quot;&quot;</span>
+
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">fn</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+    <span class="s2">finally</span><span class="s3">:</span>
+        <span class="s1">testing_reaper</span><span class="s3">.</span><span class="s1">rollback_all</span><span class="s3">()</span>
+
+
+<span class="s3">@</span><span class="s1">decorator</span>
+<span class="s2">def </span><span class="s1">close_first</span><span class="s3">(</span><span class="s1">fn</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+    <span class="s5">&quot;&quot;&quot;Decorator that closes all connections before fn execution.&quot;&quot;&quot;</span>
+
+    <span class="s1">testing_reaper</span><span class="s3">.</span><span class="s1">checkin_all</span><span class="s3">()</span>
+    <span class="s1">fn</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+
+
+<span class="s3">@</span><span class="s1">decorator</span>
+<span class="s2">def </span><span class="s1">close_open_connections</span><span class="s3">(</span><span class="s1">fn</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+    <span class="s5">&quot;&quot;&quot;Decorator that closes all connections after fn execution.&quot;&quot;&quot;</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">fn</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+    <span class="s2">finally</span><span class="s3">:</span>
+        <span class="s1">testing_reaper</span><span class="s3">.</span><span class="s1">checkin_all</span><span class="s3">()</span>
+
+
+<span class="s2">def </span><span class="s1">all_dialects</span><span class="s3">(</span><span class="s1">exclude</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s2">import </span><span class="s1">sqlalchemy</span><span class="s3">.</span><span class="s1">dialects </span><span class="s2">as </span><span class="s1">d</span>
+
+    <span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">d</span><span class="s3">.</span><span class="s1">__all__</span><span class="s3">:</span>
+        <span class="s0"># TEMPORARY</span>
+        <span class="s2">if </span><span class="s1">exclude </span><span class="s2">and </span><span class="s1">name </span><span class="s2">in </span><span class="s1">exclude</span><span class="s3">:</span>
+            <span class="s2">continue</span>
+        <span class="s1">mod </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+        <span class="s2">if not </span><span class="s1">mod</span><span class="s3">:</span>
+            <span class="s1">mod </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span>
+                <span class="s1">__import__</span><span class="s3">(</span><span class="s4">&quot;sqlalchemy.dialects.%s&quot; </span><span class="s3">% </span><span class="s1">name</span><span class="s3">).</span><span class="s1">dialects</span><span class="s3">, </span><span class="s1">name</span>
+            <span class="s3">)</span>
+        <span class="s2">yield </span><span class="s1">mod</span><span class="s3">.</span><span class="s1">dialect</span><span class="s3">()</span>
+
+
+<span class="s2">class </span><span class="s1">ReconnectFixture</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dbapi</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">dbapi </span><span class="s3">= </span><span class="s1">dbapi</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">connections </span><span class="s3">= []</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">is_stopped </span><span class="s3">= </span><span class="s2">False</span>
+
+    <span class="s2">def </span><span class="s1">__getattr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">dbapi</span><span class="s3">, </span><span class="s1">key</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">connect</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">):</span>
+        <span class="s1">conn </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">dbapi</span><span class="s3">.</span><span class="s1">connect</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_stopped</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_safe</span><span class="s3">(</span><span class="s1">conn</span><span class="s3">.</span><span class="s1">close</span><span class="s3">)</span>
+            <span class="s1">curs </span><span class="s3">= </span><span class="s1">conn</span><span class="s3">.</span><span class="s1">cursor</span><span class="s3">()  </span><span class="s0"># should fail on Oracle etc.</span>
+            <span class="s0"># should fail for everything that didn't fail</span>
+            <span class="s0"># above, connection is closed</span>
+            <span class="s1">curs</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s4">&quot;select 1&quot;</span><span class="s3">)</span>
+            <span class="s2">assert False</span><span class="s3">, </span><span class="s4">&quot;simulated connect failure didn't work&quot;</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">connections</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">conn</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">conn</span>
+
+    <span class="s2">def </span><span class="s1">_safe</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">fn</span><span class="s3">):</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">fn</span><span class="s3">()</span>
+        <span class="s2">except </span><span class="s1">Exception </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+            <span class="s1">warnings</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span><span class="s4">&quot;ReconnectFixture couldn't close connection: %s&quot; </span><span class="s3">% </span><span class="s1">e</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">shutdown</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">stop</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):</span>
+        <span class="s0"># TODO: this doesn't cover all cases</span>
+        <span class="s0"># as nicely as we'd like, namely MySQLdb.</span>
+        <span class="s0"># would need to implement R. Brewer's</span>
+        <span class="s0"># proxy server idea to get better</span>
+        <span class="s0"># coverage.</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">is_stopped </span><span class="s3">= </span><span class="s1">stop</span>
+        <span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">list</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">connections</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_safe</span><span class="s3">(</span><span class="s1">c</span><span class="s3">.</span><span class="s1">close</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">connections </span><span class="s3">= []</span>
+
+    <span class="s2">def </span><span class="s1">restart</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">is_stopped </span><span class="s3">= </span><span class="s2">False</span>
+
+
+<span class="s2">def </span><span class="s1">reconnecting_engine</span><span class="s3">(</span><span class="s1">url</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">options</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s1">url </span><span class="s3">= </span><span class="s1">url </span><span class="s2">or </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">url</span>
+    <span class="s1">dbapi </span><span class="s3">= </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">dialect</span><span class="s3">.</span><span class="s1">dbapi</span>
+    <span class="s2">if not </span><span class="s1">options</span><span class="s3">:</span>
+        <span class="s1">options </span><span class="s3">= {}</span>
+    <span class="s1">options</span><span class="s3">[</span><span class="s4">&quot;module&quot;</span><span class="s3">] = </span><span class="s1">ReconnectFixture</span><span class="s3">(</span><span class="s1">dbapi</span><span class="s3">)</span>
+    <span class="s1">engine </span><span class="s3">= </span><span class="s1">testing_engine</span><span class="s3">(</span><span class="s1">url</span><span class="s3">, </span><span class="s1">options</span><span class="s3">)</span>
+    <span class="s1">_dispose </span><span class="s3">= </span><span class="s1">engine</span><span class="s3">.</span><span class="s1">dispose</span>
+
+    <span class="s2">def </span><span class="s1">dispose</span><span class="s3">():</span>
+        <span class="s1">engine</span><span class="s3">.</span><span class="s1">dialect</span><span class="s3">.</span><span class="s1">dbapi</span><span class="s3">.</span><span class="s1">shutdown</span><span class="s3">()</span>
+        <span class="s1">engine</span><span class="s3">.</span><span class="s1">dialect</span><span class="s3">.</span><span class="s1">dbapi</span><span class="s3">.</span><span class="s1">is_stopped </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s1">_dispose</span><span class="s3">()</span>
+
+    <span class="s1">engine</span><span class="s3">.</span><span class="s1">test_shutdown </span><span class="s3">= </span><span class="s1">engine</span><span class="s3">.</span><span class="s1">dialect</span><span class="s3">.</span><span class="s1">dbapi</span><span class="s3">.</span><span class="s1">shutdown</span>
+    <span class="s1">engine</span><span class="s3">.</span><span class="s1">test_restart </span><span class="s3">= </span><span class="s1">engine</span><span class="s3">.</span><span class="s1">dialect</span><span class="s3">.</span><span class="s1">dbapi</span><span class="s3">.</span><span class="s1">restart</span>
+    <span class="s1">engine</span><span class="s3">.</span><span class="s1">dispose </span><span class="s3">= </span><span class="s1">dispose</span>
+    <span class="s2">return </span><span class="s1">engine</span>
+
+
+<span class="s3">@</span><span class="s1">typing</span><span class="s3">.</span><span class="s1">overload</span>
+<span class="s2">def </span><span class="s1">testing_engine</span><span class="s3">(</span>
+    <span class="s1">url</span><span class="s3">: </span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">URL</span><span class="s3">] = </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">options</span><span class="s3">: </span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">Dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]] = </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">asyncio</span><span class="s3">: </span><span class="s1">Literal</span><span class="s3">[</span><span class="s2">False</span><span class="s3">] = </span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">transfer_staticpool</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; Engine</span><span class="s3">: ...</span>
+
+
+<span class="s3">@</span><span class="s1">typing</span><span class="s3">.</span><span class="s1">overload</span>
+<span class="s2">def </span><span class="s1">testing_engine</span><span class="s3">(</span>
+    <span class="s1">url</span><span class="s3">: </span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">URL</span><span class="s3">] = </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">options</span><span class="s3">: </span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">Dict</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">Any</span><span class="s3">]] = </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">asyncio</span><span class="s3">: </span><span class="s1">Literal</span><span class="s3">[</span><span class="s2">True</span><span class="s3">] = </span><span class="s2">True</span><span class="s3">,</span>
+    <span class="s1">transfer_staticpool</span><span class="s3">: </span><span class="s1">bool </span><span class="s3">= </span><span class="s2">False</span><span class="s3">,</span>
+<span class="s3">) </span><span class="s1">-&gt; AsyncEngine</span><span class="s3">: ...</span>
+
+
+<span class="s2">def </span><span class="s1">testing_engine</span><span class="s3">(</span>
+    <span class="s1">url</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">options</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s1">asyncio</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">transfer_staticpool</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">share_pool</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s1">_sqlite_savepoint</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">if </span><span class="s1">asyncio</span><span class="s3">:</span>
+        <span class="s2">assert not </span><span class="s1">_sqlite_savepoint</span>
+        <span class="s2">from </span><span class="s1">sqlalchemy</span><span class="s3">.</span><span class="s1">ext</span><span class="s3">.</span><span class="s1">asyncio </span><span class="s2">import </span><span class="s3">(</span>
+            <span class="s1">create_async_engine </span><span class="s2">as </span><span class="s1">create_engine</span><span class="s3">,</span>
+        <span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">from </span><span class="s1">sqlalchemy </span><span class="s2">import </span><span class="s1">create_engine</span>
+    <span class="s2">from </span><span class="s1">sqlalchemy</span><span class="s3">.</span><span class="s1">engine</span><span class="s3">.</span><span class="s1">url </span><span class="s2">import </span><span class="s1">make_url</span>
+
+    <span class="s2">if not </span><span class="s1">options</span><span class="s3">:</span>
+        <span class="s1">use_reaper </span><span class="s3">= </span><span class="s2">True</span>
+        <span class="s1">scope </span><span class="s3">= </span><span class="s4">&quot;function&quot;</span>
+        <span class="s1">sqlite_savepoint </span><span class="s3">= </span><span class="s2">False</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">use_reaper </span><span class="s3">= </span><span class="s1">options</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;use_reaper&quot;</span><span class="s3">, </span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s1">scope </span><span class="s3">= </span><span class="s1">options</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;scope&quot;</span><span class="s3">, </span><span class="s4">&quot;function&quot;</span><span class="s3">)</span>
+        <span class="s1">sqlite_savepoint </span><span class="s3">= </span><span class="s1">options</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;sqlite_savepoint&quot;</span><span class="s3">, </span><span class="s2">False</span><span class="s3">)</span>
+
+    <span class="s1">url </span><span class="s3">= </span><span class="s1">url </span><span class="s2">or </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">url</span>
+
+    <span class="s1">url </span><span class="s3">= </span><span class="s1">make_url</span><span class="s3">(</span><span class="s1">url</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">options </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db </span><span class="s2">is None or </span><span class="s1">url</span><span class="s3">.</span><span class="s1">drivername </span><span class="s3">== </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">url</span><span class="s3">.</span><span class="s1">drivername</span><span class="s3">:</span>
+            <span class="s1">options </span><span class="s3">= </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db_opts</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">options </span><span class="s3">= {}</span>
+    <span class="s2">elif </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db </span><span class="s2">is not None and </span><span class="s1">url</span><span class="s3">.</span><span class="s1">drivername </span><span class="s3">== </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">url</span><span class="s3">.</span><span class="s1">drivername</span><span class="s3">:</span>
+        <span class="s1">default_opt </span><span class="s3">= </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db_opts</span><span class="s3">.</span><span class="s1">copy</span><span class="s3">()</span>
+        <span class="s1">default_opt</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">options</span><span class="s3">)</span>
+
+    <span class="s1">engine </span><span class="s3">= </span><span class="s1">create_engine</span><span class="s3">(</span><span class="s1">url</span><span class="s3">, **</span><span class="s1">options</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">sqlite_savepoint </span><span class="s2">and </span><span class="s1">engine</span><span class="s3">.</span><span class="s1">name </span><span class="s3">== </span><span class="s4">&quot;sqlite&quot;</span><span class="s3">:</span>
+        <span class="s0"># apply SQLite savepoint workaround</span>
+        <span class="s3">@</span><span class="s1">event</span><span class="s3">.</span><span class="s1">listens_for</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">, </span><span class="s4">&quot;connect&quot;</span><span class="s3">)</span>
+        <span class="s2">def </span><span class="s1">do_connect</span><span class="s3">(</span><span class="s1">dbapi_connection</span><span class="s3">, </span><span class="s1">connection_record</span><span class="s3">):</span>
+            <span class="s1">dbapi_connection</span><span class="s3">.</span><span class="s1">isolation_level </span><span class="s3">= </span><span class="s2">None</span>
+
+        <span class="s3">@</span><span class="s1">event</span><span class="s3">.</span><span class="s1">listens_for</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">, </span><span class="s4">&quot;begin&quot;</span><span class="s3">)</span>
+        <span class="s2">def </span><span class="s1">do_begin</span><span class="s3">(</span><span class="s1">conn</span><span class="s3">):</span>
+            <span class="s1">conn</span><span class="s3">.</span><span class="s1">exec_driver_sql</span><span class="s3">(</span><span class="s4">&quot;BEGIN&quot;</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">transfer_staticpool</span><span class="s3">:</span>
+        <span class="s2">from </span><span class="s1">sqlalchemy</span><span class="s3">.</span><span class="s1">pool </span><span class="s2">import </span><span class="s1">StaticPool</span>
+
+        <span class="s2">if </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db </span><span class="s2">is not None and </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">pool</span><span class="s3">, </span><span class="s1">StaticPool</span><span class="s3">):</span>
+            <span class="s1">use_reaper </span><span class="s3">= </span><span class="s2">False</span>
+            <span class="s1">engine</span><span class="s3">.</span><span class="s1">pool</span><span class="s3">.</span><span class="s1">_transfer_from</span><span class="s3">(</span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">pool</span><span class="s3">)</span>
+    <span class="s2">elif </span><span class="s1">share_pool</span><span class="s3">:</span>
+        <span class="s1">engine</span><span class="s3">.</span><span class="s1">pool </span><span class="s3">= </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">pool</span>
+
+    <span class="s2">if </span><span class="s1">scope </span><span class="s3">== </span><span class="s4">&quot;global&quot;</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">asyncio</span><span class="s3">:</span>
+            <span class="s1">engine</span><span class="s3">.</span><span class="s1">sync_engine</span><span class="s3">.</span><span class="s1">_has_events </span><span class="s3">= </span><span class="s2">True</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">engine</span><span class="s3">.</span><span class="s1">_has_events </span><span class="s3">= (</span>
+                <span class="s2">True  </span><span class="s0"># enable event blocks, helps with profiling</span>
+            <span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s3">(</span>
+        <span class="s1">isinstance</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">.</span><span class="s1">pool</span><span class="s3">, </span><span class="s1">pool</span><span class="s3">.</span><span class="s1">QueuePool</span><span class="s3">)</span>
+        <span class="s2">and </span><span class="s4">&quot;pool&quot; </span><span class="s2">not in </span><span class="s1">options</span>
+        <span class="s2">and </span><span class="s4">&quot;pool_timeout&quot; </span><span class="s2">not in </span><span class="s1">options</span>
+        <span class="s2">and </span><span class="s4">&quot;max_overflow&quot; </span><span class="s2">not in </span><span class="s1">options</span>
+    <span class="s3">):</span>
+        <span class="s1">engine</span><span class="s3">.</span><span class="s1">pool</span><span class="s3">.</span><span class="s1">_timeout </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s1">engine</span><span class="s3">.</span><span class="s1">pool</span><span class="s3">.</span><span class="s1">_max_overflow </span><span class="s3">= </span><span class="s6">0</span>
+    <span class="s2">if </span><span class="s1">use_reaper</span><span class="s3">:</span>
+        <span class="s1">testing_reaper</span><span class="s3">.</span><span class="s1">add_engine</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">, </span><span class="s1">scope</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">engine</span>
+
+
+<span class="s2">def </span><span class="s1">mock_engine</span><span class="s3">(</span><span class="s1">dialect_name</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+    <span class="s5">&quot;&quot;&quot;Provides a mocking engine based on the current testing.db. 
+ 
+    This is normally used to test DDL generation flow as emitted 
+    by an Engine. 
+ 
+    It should not be used in other cases, as assert_compile() and 
+    assert_sql_execution() are much better choices with fewer 
+    moving parts. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">from </span><span class="s1">sqlalchemy </span><span class="s2">import </span><span class="s1">create_mock_engine</span>
+
+    <span class="s2">if not </span><span class="s1">dialect_name</span><span class="s3">:</span>
+        <span class="s1">dialect_name </span><span class="s3">= </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">name</span>
+
+    <span class="s1">buffer </span><span class="s3">= []</span>
+
+    <span class="s2">def </span><span class="s1">executor</span><span class="s3">(</span><span class="s1">sql</span><span class="s3">, *</span><span class="s1">a</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s1">buffer</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">sql</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">assert_sql</span><span class="s3">(</span><span class="s1">stmts</span><span class="s3">):</span>
+        <span class="s1">recv </span><span class="s3">= [</span><span class="s1">re</span><span class="s3">.</span><span class="s1">sub</span><span class="s3">(</span><span class="s4">r&quot;[\n\t]&quot;</span><span class="s3">, </span><span class="s4">&quot;&quot;</span><span class="s3">, </span><span class="s1">str</span><span class="s3">(</span><span class="s1">s</span><span class="s3">)) </span><span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">buffer</span><span class="s3">]</span>
+        <span class="s2">assert </span><span class="s1">recv </span><span class="s3">== </span><span class="s1">stmts</span><span class="s3">, </span><span class="s1">recv</span>
+
+    <span class="s2">def </span><span class="s1">print_sql</span><span class="s3">():</span>
+        <span class="s1">d </span><span class="s3">= </span><span class="s1">engine</span><span class="s3">.</span><span class="s1">dialect</span>
+        <span class="s2">return </span><span class="s4">&quot;</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">s</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s1">dialect</span><span class="s3">=</span><span class="s1">d</span><span class="s3">)) </span><span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">engine</span><span class="s3">.</span><span class="s1">mock</span><span class="s3">)</span>
+
+    <span class="s1">engine </span><span class="s3">= </span><span class="s1">create_mock_engine</span><span class="s3">(</span><span class="s1">dialect_name </span><span class="s3">+ </span><span class="s4">&quot;://&quot;</span><span class="s3">, </span><span class="s1">executor</span><span class="s3">)</span>
+    <span class="s2">assert not </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">engine</span><span class="s3">, </span><span class="s4">&quot;mock&quot;</span><span class="s3">)</span>
+    <span class="s1">engine</span><span class="s3">.</span><span class="s1">mock </span><span class="s3">= </span><span class="s1">buffer</span>
+    <span class="s1">engine</span><span class="s3">.</span><span class="s1">assert_sql </span><span class="s3">= </span><span class="s1">assert_sql</span>
+    <span class="s1">engine</span><span class="s3">.</span><span class="s1">print_sql </span><span class="s3">= </span><span class="s1">print_sql</span>
+    <span class="s2">return </span><span class="s1">engine</span>
+
+
+<span class="s2">class </span><span class="s1">DBAPIProxyCursor</span><span class="s3">:</span>
+    <span class="s5">&quot;&quot;&quot;Proxy a DBAPI cursor. 
+ 
+    Tests can provide subclasses of this to intercept 
+    DBAPI-level cursor operations. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">engine</span><span class="s3">, </span><span class="s1">conn</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">engine </span><span class="s3">= </span><span class="s1">engine</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">connection </span><span class="s3">= </span><span class="s1">conn</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">cursor </span><span class="s3">= </span><span class="s1">conn</span><span class="s3">.</span><span class="s1">cursor</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">execute</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">stmt</span><span class="s3">, </span><span class="s1">parameters</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">parameters</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">cursor</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">stmt</span><span class="s3">, </span><span class="s1">parameters</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">cursor</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">stmt</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">executemany</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">stmt</span><span class="s3">, </span><span class="s1">params</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">cursor</span><span class="s3">.</span><span class="s1">executemany</span><span class="s3">(</span><span class="s1">stmt</span><span class="s3">, </span><span class="s1">params</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__iter__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">iter</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">cursor</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__getattr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">cursor</span><span class="s3">, </span><span class="s1">key</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">DBAPIProxyConnection</span><span class="s3">:</span>
+    <span class="s5">&quot;&quot;&quot;Proxy a DBAPI connection. 
+ 
+    Tests can provide subclasses of this to intercept 
+    DBAPI-level connection operations. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">engine</span><span class="s3">, </span><span class="s1">conn</span><span class="s3">, </span><span class="s1">cursor_cls</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">conn </span><span class="s3">= </span><span class="s1">conn</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">engine </span><span class="s3">= </span><span class="s1">engine</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">cursor_cls </span><span class="s3">= </span><span class="s1">cursor_cls</span>
+
+    <span class="s2">def </span><span class="s1">cursor</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">cursor_cls</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">engine</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">conn</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">conn</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">__getattr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">key</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">conn</span><span class="s3">, </span><span class="s1">key</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<html>
+<head>
+<title>info.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+info.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">platform</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">tempfile</span>
+
+<span class="s1">IMPLEMENTATION </span><span class="s2">= </span><span class="s1">platform</span><span class="s2">.</span><span class="s1">python_implementation</span><span class="s2">()</span>
+<span class="s1">IS_PYPY </span><span class="s2">= </span><span class="s1">IMPLEMENTATION </span><span class="s2">== </span><span class="s3">&quot;PyPy&quot;</span>
+<span class="s1">IS_CPYTHON </span><span class="s2">= </span><span class="s1">IMPLEMENTATION </span><span class="s2">== </span><span class="s3">&quot;CPython&quot;</span>
+<span class="s1">IS_WIN </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s3">&quot;win32&quot;</span>
+<span class="s1">IS_MAC_ARM64 </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s3">&quot;darwin&quot; </span><span class="s0">and </span><span class="s1">platform</span><span class="s2">.</span><span class="s1">machine</span><span class="s2">() == </span><span class="s3">&quot;arm64&quot;</span>
+<span class="s1">ROOT </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">realpath</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">(</span><span class="s1">__file__</span><span class="s2">), </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">pardir</span><span class="s2">, </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">pardir</span><span class="s2">))</span>
+<span class="s1">IS_ZIPAPP </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isfile</span><span class="s2">(</span><span class="s1">ROOT</span><span class="s2">)</span>
+<span class="s1">_CAN_SYMLINK </span><span class="s2">= </span><span class="s1">_FS_CASE_SENSITIVE </span><span class="s2">= </span><span class="s1">_CFG_DIR </span><span class="s2">= </span><span class="s1">_DATA_DIR </span><span class="s2">= </span><span class="s0">None</span>
+
+
+<span class="s0">def </span><span class="s1">fs_is_case_sensitive</span><span class="s2">():</span>
+    <span class="s0">global </span><span class="s1">_FS_CASE_SENSITIVE  </span><span class="s4"># noqa: PLW0603</span>
+
+    <span class="s0">if </span><span class="s1">_FS_CASE_SENSITIVE </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">with </span><span class="s1">tempfile</span><span class="s2">.</span><span class="s1">NamedTemporaryFile</span><span class="s2">(</span><span class="s1">prefix</span><span class="s2">=</span><span class="s3">&quot;TmP&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">tmp_file</span><span class="s2">:</span>
+            <span class="s1">_FS_CASE_SENSITIVE </span><span class="s2">= </span><span class="s0">not </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">tmp_file</span><span class="s2">.</span><span class="s1">name</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">())</span>
+            <span class="s1">logging</span><span class="s2">.</span><span class="s1">debug</span><span class="s2">(</span><span class="s3">&quot;filesystem is %scase-sensitive&quot;</span><span class="s2">, </span><span class="s3">&quot;&quot; </span><span class="s0">if </span><span class="s1">_FS_CASE_SENSITIVE </span><span class="s0">else </span><span class="s3">&quot;not &quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">_FS_CASE_SENSITIVE</span>
+
+
+<span class="s0">def </span><span class="s1">fs_supports_symlink</span><span class="s2">():</span>
+    <span class="s0">global </span><span class="s1">_CAN_SYMLINK  </span><span class="s4"># noqa: PLW0603</span>
+
+    <span class="s0">if </span><span class="s1">_CAN_SYMLINK </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">can </span><span class="s2">= </span><span class="s0">False</span>
+        <span class="s0">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">os</span><span class="s2">, </span><span class="s3">&quot;symlink&quot;</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">IS_WIN</span><span class="s2">:</span>
+                <span class="s0">with </span><span class="s1">tempfile</span><span class="s2">.</span><span class="s1">NamedTemporaryFile</span><span class="s2">(</span><span class="s1">prefix</span><span class="s2">=</span><span class="s3">&quot;TmP&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">tmp_file</span><span class="s2">:</span>
+                    <span class="s1">temp_dir </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">dirname</span><span class="s2">(</span><span class="s1">tmp_file</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+                    <span class="s1">dest </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">temp_dir</span><span class="s2">, </span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">tmp_file</span><span class="s2">.</span><span class="s1">name</span><span class="s0">}</span><span class="s3">-</span><span class="s0">{</span><span class="s3">'b'</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+                    <span class="s0">try</span><span class="s2">:</span>
+                        <span class="s1">os</span><span class="s2">.</span><span class="s1">symlink</span><span class="s2">(</span><span class="s1">tmp_file</span><span class="s2">.</span><span class="s1">name</span><span class="s2">, </span><span class="s1">dest</span><span class="s2">)</span>
+                        <span class="s1">can </span><span class="s2">= </span><span class="s0">True</span>
+                    <span class="s0">except </span><span class="s2">(</span><span class="s1">OSError</span><span class="s2">, </span><span class="s1">NotImplementedError</span><span class="s2">):</span>
+                        <span class="s0">pass</span>
+                <span class="s1">logging</span><span class="s2">.</span><span class="s1">debug</span><span class="s2">(</span><span class="s3">&quot;symlink on filesystem does%s work&quot;</span><span class="s2">, </span><span class="s3">&quot;&quot; </span><span class="s0">if </span><span class="s1">can </span><span class="s0">else </span><span class="s3">&quot; not&quot;</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">can </span><span class="s2">= </span><span class="s0">True</span>
+        <span class="s1">_CAN_SYMLINK </span><span class="s2">= </span><span class="s1">can</span>
+    <span class="s0">return </span><span class="s1">_CAN_SYMLINK</span>
+
+
+<span class="s0">def </span><span class="s1">fs_path_id</span><span class="s2">(</span><span class="s1">path</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s0">return </span><span class="s1">path</span><span class="s2">.</span><span class="s1">casefold</span><span class="s2">() </span><span class="s0">if </span><span class="s1">fs_is_case_sensitive</span><span class="s2">() </span><span class="s0">else </span><span class="s1">path</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= (</span>
+    <span class="s3">&quot;IS_CPYTHON&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;IS_MAC_ARM64&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;IS_PYPY&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;IS_WIN&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;IS_ZIPAPP&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;ROOT&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;fs_is_case_sensitive&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;fs_path_id&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;fs_supports_symlink&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+</pre>
+</body>
+</html>

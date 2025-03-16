@@ -1,0 +1,150 @@
+<html>
+<head>
+<title>form.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+form.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">current_app</span>
+<span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">request</span>
+<span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">session</span>
+<span class="s0">from </span><span class="s1">markupsafe </span><span class="s0">import </span><span class="s1">Markup</span>
+<span class="s0">from </span><span class="s1">werkzeug</span><span class="s2">.</span><span class="s1">datastructures </span><span class="s0">import </span><span class="s1">CombinedMultiDict</span>
+<span class="s0">from </span><span class="s1">werkzeug</span><span class="s2">.</span><span class="s1">datastructures </span><span class="s0">import </span><span class="s1">ImmutableMultiDict</span>
+<span class="s0">from </span><span class="s1">werkzeug</span><span class="s2">.</span><span class="s1">utils </span><span class="s0">import </span><span class="s1">cached_property</span>
+<span class="s0">from </span><span class="s1">wtforms </span><span class="s0">import </span><span class="s1">Form</span>
+<span class="s0">from </span><span class="s1">wtforms</span><span class="s2">.</span><span class="s1">meta </span><span class="s0">import </span><span class="s1">DefaultMeta</span>
+<span class="s0">from </span><span class="s1">wtforms</span><span class="s2">.</span><span class="s1">widgets </span><span class="s0">import </span><span class="s1">HiddenInput</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">csrf </span><span class="s0">import </span><span class="s1">_FlaskFormCSRF</span>
+
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s2">.</span><span class="s1">i18n </span><span class="s0">import </span><span class="s1">translations</span>
+<span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+    <span class="s1">translations </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># babel not installed</span>
+
+
+<span class="s1">SUBMIT_METHODS </span><span class="s2">= {</span><span class="s4">&quot;POST&quot;</span><span class="s2">, </span><span class="s4">&quot;PUT&quot;</span><span class="s2">, </span><span class="s4">&quot;PATCH&quot;</span><span class="s2">, </span><span class="s4">&quot;DELETE&quot;</span><span class="s2">}</span>
+<span class="s1">_Auto </span><span class="s2">= </span><span class="s1">object</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">FlaskForm</span><span class="s2">(</span><span class="s1">Form</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Flask-specific subclass of WTForms :class:`~wtforms.form.Form`. 
+ 
+    If ``formdata`` is not specified, this will use :attr:`flask.request.form` 
+    and :attr:`flask.request.files`.  Explicitly pass ``formdata=None`` to 
+    prevent this. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">class </span><span class="s1">Meta</span><span class="s2">(</span><span class="s1">DefaultMeta</span><span class="s2">):</span>
+        <span class="s1">csrf_class </span><span class="s2">= </span><span class="s1">_FlaskFormCSRF</span>
+        <span class="s1">csrf_context </span><span class="s2">= </span><span class="s1">session  </span><span class="s3"># not used, provided for custom csrf_class</span>
+
+        <span class="s2">@</span><span class="s1">cached_property</span>
+        <span class="s0">def </span><span class="s1">csrf</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;WTF_CSRF_ENABLED&quot;</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+
+        <span class="s2">@</span><span class="s1">cached_property</span>
+        <span class="s0">def </span><span class="s1">csrf_secret</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;WTF_CSRF_SECRET_KEY&quot;</span><span class="s2">, </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">secret_key</span><span class="s2">)</span>
+
+        <span class="s2">@</span><span class="s1">cached_property</span>
+        <span class="s0">def </span><span class="s1">csrf_field_name</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;WTF_CSRF_FIELD_NAME&quot;</span><span class="s2">, </span><span class="s4">&quot;csrf_token&quot;</span><span class="s2">)</span>
+
+        <span class="s2">@</span><span class="s1">cached_property</span>
+        <span class="s0">def </span><span class="s1">csrf_time_limit</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;WTF_CSRF_TIME_LIMIT&quot;</span><span class="s2">, </span><span class="s6">3600</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">wrap_formdata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">form</span><span class="s2">, </span><span class="s1">formdata</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">formdata </span><span class="s0">is </span><span class="s1">_Auto</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">_is_submitted</span><span class="s2">():</span>
+                    <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">files</span><span class="s2">:</span>
+                        <span class="s0">return </span><span class="s1">CombinedMultiDict</span><span class="s2">((</span><span class="s1">request</span><span class="s2">.</span><span class="s1">files</span><span class="s2">, </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">))</span>
+                    <span class="s0">elif </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">:</span>
+                        <span class="s0">return </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span>
+                    <span class="s0">elif </span><span class="s1">request</span><span class="s2">.</span><span class="s1">is_json</span><span class="s2">:</span>
+                        <span class="s0">return </span><span class="s1">ImmutableMultiDict</span><span class="s2">(</span><span class="s1">request</span><span class="s2">.</span><span class="s1">get_json</span><span class="s2">())</span>
+
+                <span class="s0">return None</span>
+
+            <span class="s0">return </span><span class="s1">formdata</span>
+
+        <span class="s0">def </span><span class="s1">get_translations</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">form</span><span class="s2">):</span>
+            <span class="s0">if not </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s4">&quot;WTF_I18N_ENABLED&quot;</span><span class="s2">, </span><span class="s0">True</span><span class="s2">):</span>
+                <span class="s0">return </span><span class="s1">super</span><span class="s2">().</span><span class="s1">get_translations</span><span class="s2">(</span><span class="s1">form</span><span class="s2">)</span>
+
+            <span class="s0">return </span><span class="s1">translations</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">formdata</span><span class="s2">=</span><span class="s1">_Auto</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">formdata</span><span class="s2">=</span><span class="s1">formdata</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">is_submitted</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;Consider the form submitted if there is an active request and 
+        the method is ``POST``, ``PUT``, ``PATCH``, or ``DELETE``. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s0">return </span><span class="s1">_is_submitted</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">validate_on_submit</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">extra_validators</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;Call :meth:`validate` only if the form is submitted. 
+        This is a shortcut for ``form.is_submitted() and form.validate()``. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">is_submitted</span><span class="s2">() </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">validate</span><span class="s2">(</span><span class="s1">extra_validators</span><span class="s2">=</span><span class="s1">extra_validators</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">hidden_tag</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, *</span><span class="s1">fields</span><span class="s2">):</span>
+        <span class="s5">&quot;&quot;&quot;Render the form's hidden fields in one call. 
+ 
+        A field is considered hidden if it uses the 
+        :class:`~wtforms.widgets.HiddenInput` widget. 
+ 
+        If ``fields`` are given, only render the given fields that 
+        are hidden.  If a string is passed, render the field with that 
+        name if it exists. 
+ 
+        .. versionchanged:: 0.13 
+ 
+           No longer wraps inputs in hidden div. 
+           This is valid HTML 5. 
+ 
+        .. versionchanged:: 0.13 
+ 
+           Skip passed fields that aren't hidden. 
+           Skip passed names that don't exist. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s0">def </span><span class="s1">hidden_fields</span><span class="s2">(</span><span class="s1">fields</span><span class="s2">):</span>
+            <span class="s0">for </span><span class="s1">f </span><span class="s0">in </span><span class="s1">fields</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">f</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+                    <span class="s1">f </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">f</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+                <span class="s0">if </span><span class="s1">f </span><span class="s0">is None or not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">f</span><span class="s2">.</span><span class="s1">widget</span><span class="s2">, </span><span class="s1">HiddenInput</span><span class="s2">):</span>
+                    <span class="s0">continue</span>
+
+                <span class="s0">yield </span><span class="s1">f</span>
+
+        <span class="s0">return </span><span class="s1">Markup</span><span class="s2">(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">f</span><span class="s2">) </span><span class="s0">for </span><span class="s1">f </span><span class="s0">in </span><span class="s1">hidden_fields</span><span class="s2">(</span><span class="s1">fields </span><span class="s0">or </span><span class="s1">self</span><span class="s2">)))</span>
+
+
+<span class="s0">def </span><span class="s1">_is_submitted</span><span class="s2">():</span>
+    <span class="s5">&quot;&quot;&quot;Consider the form submitted if there is an active request and 
+    the method is ``POST``, ``PUT``, ``PATCH``, or ``DELETE``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">return </span><span class="s1">bool</span><span class="s2">(</span><span class="s1">request</span><span class="s2">) </span><span class="s0">and </span><span class="s1">request</span><span class="s2">.</span><span class="s1">method </span><span class="s0">in </span><span class="s1">SUBMIT_METHODS</span>
+</pre>
+</body>
+</html>

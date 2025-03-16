@@ -1,0 +1,246 @@
+<html>
+<head>
+<title>test_mman.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_mman.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s2">.</span><span class="s1">lib </span><span class="s0">import </span><span class="s1">TestBase</span><span class="s2">, </span><span class="s1">FileCreator</span>
+
+<span class="s0">from </span><span class="s1">smmap</span><span class="s2">.</span><span class="s1">mman </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">WindowCursor</span><span class="s2">,</span>
+    <span class="s1">SlidingWindowMapManager</span><span class="s2">,</span>
+    <span class="s1">StaticWindowMapManager</span>
+<span class="s2">)</span>
+<span class="s0">from </span><span class="s1">smmap</span><span class="s2">.</span><span class="s1">util </span><span class="s0">import </span><span class="s1">align_to_mmap</span>
+
+<span class="s0">from </span><span class="s1">random </span><span class="s0">import </span><span class="s1">randint</span>
+<span class="s0">from </span><span class="s1">time </span><span class="s0">import </span><span class="s1">time</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">from </span><span class="s1">copy </span><span class="s0">import </span><span class="s1">copy</span>
+
+
+<span class="s0">class </span><span class="s1">TestMMan</span><span class="s2">(</span><span class="s1">TestBase</span><span class="s2">):</span>
+
+    <span class="s0">def </span><span class="s1">test_cursor</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">FileCreator</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">k_window_test_size</span><span class="s2">, </span><span class="s3">&quot;cursor_test&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fc</span><span class="s2">:</span>
+            <span class="s1">man </span><span class="s2">= </span><span class="s1">SlidingWindowMapManager</span><span class="s2">()</span>
+            <span class="s1">ci </span><span class="s2">= </span><span class="s1">WindowCursor</span><span class="s2">(</span><span class="s1">man</span><span class="s2">)  </span><span class="s4"># invalid cursor</span>
+            <span class="s0">assert not </span><span class="s1">ci</span><span class="s2">.</span><span class="s1">is_valid</span><span class="s2">()</span>
+            <span class="s0">assert not </span><span class="s1">ci</span><span class="s2">.</span><span class="s1">is_associated</span><span class="s2">()</span>
+            <span class="s0">assert </span><span class="s1">ci</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() == </span><span class="s5">0       </span><span class="s4"># this is cached, so we can query it in invalid state</span>
+
+            <span class="s1">cv </span><span class="s2">= </span><span class="s1">man</span><span class="s2">.</span><span class="s1">make_cursor</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+            <span class="s0">assert not </span><span class="s1">cv</span><span class="s2">.</span><span class="s1">is_valid</span><span class="s2">()    </span><span class="s4"># no region mapped yet</span>
+            <span class="s0">assert </span><span class="s1">cv</span><span class="s2">.</span><span class="s1">is_associated</span><span class="s2">()  </span><span class="s4"># but it know where to map it from</span>
+            <span class="s0">assert </span><span class="s1">cv</span><span class="s2">.</span><span class="s1">file_size</span><span class="s2">() == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span>
+            <span class="s0">assert </span><span class="s1">cv</span><span class="s2">.</span><span class="s1">path</span><span class="s2">() == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span>
+
+        <span class="s4"># copy module</span>
+        <span class="s1">cio </span><span class="s2">= </span><span class="s1">copy</span><span class="s2">(</span><span class="s1">cv</span><span class="s2">)</span>
+        <span class="s0">assert not </span><span class="s1">cio</span><span class="s2">.</span><span class="s1">is_valid</span><span class="s2">() </span><span class="s0">and </span><span class="s1">cio</span><span class="s2">.</span><span class="s1">is_associated</span><span class="s2">()</span>
+
+        <span class="s4"># assign method</span>
+        <span class="s0">assert not </span><span class="s1">ci</span><span class="s2">.</span><span class="s1">is_associated</span><span class="s2">()</span>
+        <span class="s1">ci</span><span class="s2">.</span><span class="s1">assign</span><span class="s2">(</span><span class="s1">cv</span><span class="s2">)</span>
+        <span class="s0">assert not </span><span class="s1">ci</span><span class="s2">.</span><span class="s1">is_valid</span><span class="s2">() </span><span class="s0">and </span><span class="s1">ci</span><span class="s2">.</span><span class="s1">is_associated</span><span class="s2">()</span>
+
+        <span class="s4"># unuse non-existing region is fine</span>
+        <span class="s1">cv</span><span class="s2">.</span><span class="s1">unuse_region</span><span class="s2">()</span>
+        <span class="s1">cv</span><span class="s2">.</span><span class="s1">unuse_region</span><span class="s2">()</span>
+
+        <span class="s4"># destruction is fine (even multiple times)</span>
+        <span class="s1">cv</span><span class="s2">.</span><span class="s1">_destroy</span><span class="s2">()</span>
+        <span class="s1">WindowCursor</span><span class="s2">(</span><span class="s1">man</span><span class="s2">).</span><span class="s1">_destroy</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_memory_manager</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">slide_man </span><span class="s2">= </span><span class="s1">SlidingWindowMapManager</span><span class="s2">()</span>
+        <span class="s1">static_man </span><span class="s2">= </span><span class="s1">StaticWindowMapManager</span><span class="s2">()</span>
+
+        <span class="s0">for </span><span class="s1">man </span><span class="s0">in </span><span class="s2">(</span><span class="s1">static_man</span><span class="s2">, </span><span class="s1">slide_man</span><span class="s2">):</span>
+            <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s5">0</span>
+            <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_open_files</span><span class="s2">() == </span><span class="s5">0</span>
+            <span class="s1">winsize_cmp_val </span><span class="s2">= </span><span class="s5">0</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">man</span><span class="s2">, </span><span class="s1">StaticWindowMapManager</span><span class="s2">):</span>
+                <span class="s1">winsize_cmp_val </span><span class="s2">= -</span><span class="s5">1</span>
+            <span class="s4"># END handle window size</span>
+            <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">window_size</span><span class="s2">() &gt; </span><span class="s1">winsize_cmp_val</span>
+            <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">mapped_memory_size</span><span class="s2">() == </span><span class="s5">0</span>
+            <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">max_mapped_memory_size</span><span class="s2">() &gt; </span><span class="s5">0</span>
+
+            <span class="s4"># collection doesn't raise in 'any' mode</span>
+            <span class="s1">man</span><span class="s2">.</span><span class="s1">_collect_lru_region</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+            <span class="s4"># doesn't raise if we are within the limit</span>
+            <span class="s1">man</span><span class="s2">.</span><span class="s1">_collect_lru_region</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+
+            <span class="s4"># doesn't fail if we over-allocate</span>
+            <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">_collect_lru_region</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">maxsize</span><span class="s2">) == </span><span class="s5">0</span>
+
+            <span class="s4"># use a region, verify most basic functionality</span>
+            <span class="s0">with </span><span class="s1">FileCreator</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">k_window_test_size</span><span class="s2">, </span><span class="s3">&quot;manager_test&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fc</span><span class="s2">:</span>
+                <span class="s1">fd </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_RDONLY</span><span class="s2">)</span>
+                <span class="s0">try</span><span class="s2">:</span>
+                    <span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">fd</span><span class="s2">):</span>
+                        <span class="s1">c </span><span class="s2">= </span><span class="s1">man</span><span class="s2">.</span><span class="s1">make_cursor</span><span class="s2">(</span><span class="s1">item</span><span class="s2">)</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">path_or_fd</span><span class="s2">() </span><span class="s0">is </span><span class="s1">item</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">use_region</span><span class="s2">(</span><span class="s5">10</span><span class="s2">, </span><span class="s5">10</span><span class="s2">).</span><span class="s1">is_valid</span><span class="s2">()</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() == </span><span class="s5">10</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() == </span><span class="s5">10</span>
+                        <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s3">'rb'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fp</span><span class="s2">:</span>
+                            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">()[:] == </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">read</span><span class="s2">(</span><span class="s5">20</span><span class="s2">)[</span><span class="s5">10</span><span class="s2">:]</span>
+
+                    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">item</span><span class="s2">, </span><span class="s1">int</span><span class="s2">):</span>
+                        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">c</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+                    <span class="s0">else</span><span class="s2">:</span>
+                        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">c</span><span class="s2">.</span><span class="s1">fd</span><span class="s2">)</span>
+                    <span class="s4"># END handle value error</span>
+                <span class="s4"># END for each input</span>
+                <span class="s0">finally</span><span class="s2">:</span>
+                    <span class="s1">os</span><span class="s2">.</span><span class="s1">close</span><span class="s2">(</span><span class="s1">fd</span><span class="s2">)</span>
+        <span class="s4"># END for each manasger type</span>
+
+    <span class="s0">def </span><span class="s1">test_memman_operation</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s4"># test more access, force it to actually unmap regions</span>
+        <span class="s0">with </span><span class="s1">FileCreator</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">k_window_test_size</span><span class="s2">, </span><span class="s3">&quot;manager_operation_test&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fc</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s3">'rb'</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fp</span><span class="s2">:</span>
+                <span class="s1">data </span><span class="s2">= </span><span class="s1">fp</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+            <span class="s1">fd </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_RDONLY</span><span class="s2">)</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">max_num_handles </span><span class="s2">= </span><span class="s5">15</span>
+                <span class="s4"># small_size =</span>
+                <span class="s0">for </span><span class="s1">mtype</span><span class="s2">, </span><span class="s1">args </span><span class="s0">in </span><span class="s2">((</span><span class="s1">StaticWindowMapManager</span><span class="s2">, (</span><span class="s5">0</span><span class="s2">, </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">// </span><span class="s5">3</span><span class="s2">, </span><span class="s1">max_num_handles</span><span class="s2">)),</span>
+                                    <span class="s2">(</span><span class="s1">SlidingWindowMapManager</span><span class="s2">, (</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">// </span><span class="s5">100</span><span class="s2">, </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">// </span><span class="s5">3</span><span class="s2">, </span><span class="s1">max_num_handles</span><span class="s2">)),):</span>
+                    <span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">fd</span><span class="s2">):</span>
+                        <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">) == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span>
+
+                        <span class="s4"># small windows, a reasonable max memory. Not too many regions at once</span>
+                        <span class="s1">man </span><span class="s2">= </span><span class="s1">mtype</span><span class="s2">(</span><span class="s1">window_size</span><span class="s2">=</span><span class="s1">args</span><span class="s2">[</span><span class="s5">0</span><span class="s2">], </span><span class="s1">max_memory_size</span><span class="s2">=</span><span class="s1">args</span><span class="s2">[</span><span class="s5">1</span><span class="s2">], </span><span class="s1">max_open_handles</span><span class="s2">=</span><span class="s1">args</span><span class="s2">[</span><span class="s5">2</span><span class="s2">])</span>
+                        <span class="s1">c </span><span class="s2">= </span><span class="s1">man</span><span class="s2">.</span><span class="s1">make_cursor</span><span class="s2">(</span><span class="s1">item</span><span class="s2">)</span>
+
+                        <span class="s4"># still empty (more about that is tested in test_memory_manager()</span>
+                        <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_open_files</span><span class="s2">() == </span><span class="s5">0</span>
+                        <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">mapped_memory_size</span><span class="s2">() == </span><span class="s5">0</span>
+
+                        <span class="s1">base_offset </span><span class="s2">= </span><span class="s5">5000</span>
+                        <span class="s4"># window size is 0 for static managers, hence size will be 0. We take that into consideration</span>
+                        <span class="s1">size </span><span class="s2">= </span><span class="s1">man</span><span class="s2">.</span><span class="s1">window_size</span><span class="s2">() // </span><span class="s5">2</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">use_region</span><span class="s2">(</span><span class="s1">base_offset</span><span class="s2">, </span><span class="s1">size</span><span class="s2">).</span><span class="s1">is_valid</span><span class="s2">()</span>
+                        <span class="s1">rr </span><span class="s2">= </span><span class="s1">c</span><span class="s2">.</span><span class="s1">region</span><span class="s2">()</span>
+                        <span class="s0">assert </span><span class="s1">rr</span><span class="s2">.</span><span class="s1">client_count</span><span class="s2">() == </span><span class="s5">2  </span><span class="s4"># the manager and the cursor and us</span>
+
+                        <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_open_files</span><span class="s2">() == </span><span class="s5">1</span>
+                        <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s5">1</span>
+                        <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">mapped_memory_size</span><span class="s2">() == </span><span class="s1">rr</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()</span>
+
+                        <span class="s4"># assert c.size() == size        # the cursor may overallocate in its static version</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() == </span><span class="s1">base_offset</span>
+                        <span class="s0">assert </span><span class="s1">rr</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() == </span><span class="s5">0        </span><span class="s4"># it was aligned and expanded</span>
+                        <span class="s0">if </span><span class="s1">man</span><span class="s2">.</span><span class="s1">window_size</span><span class="s2">():</span>
+                            <span class="s4"># but isn't larger than the max window (aligned)</span>
+                            <span class="s0">assert </span><span class="s1">rr</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() == </span><span class="s1">align_to_mmap</span><span class="s2">(</span><span class="s1">man</span><span class="s2">.</span><span class="s1">window_size</span><span class="s2">(), </span><span class="s0">True</span><span class="s2">)</span>
+                        <span class="s0">else</span><span class="s2">:</span>
+                            <span class="s0">assert </span><span class="s1">rr</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span>
+                        <span class="s4"># END ignore static managers which dont use windows and are aligned to file boundaries</span>
+
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">()[:] == </span><span class="s1">data</span><span class="s2">[</span><span class="s1">base_offset</span><span class="s2">:</span><span class="s1">base_offset </span><span class="s2">+ (</span><span class="s1">size </span><span class="s0">or </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">())]</span>
+
+                        <span class="s4"># obtain second window, which spans the first part of the file - it is a still the same window</span>
+                        <span class="s1">nsize </span><span class="s2">= (</span><span class="s1">size </span><span class="s0">or </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span><span class="s2">) - </span><span class="s5">10</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">use_region</span><span class="s2">(</span><span class="s5">0</span><span class="s2">, </span><span class="s1">nsize</span><span class="s2">).</span><span class="s1">is_valid</span><span class="s2">()</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">region</span><span class="s2">() == </span><span class="s1">rr</span>
+                        <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s5">1</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() == </span><span class="s1">nsize</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() == </span><span class="s5">0</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">()[:] == </span><span class="s1">data</span><span class="s2">[:</span><span class="s1">nsize</span><span class="s2">]</span>
+
+                        <span class="s4"># map some part at the end, our requested size cannot be kept</span>
+                        <span class="s1">overshoot </span><span class="s2">= </span><span class="s5">4000</span>
+                        <span class="s1">base_offset </span><span class="s2">= </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">- (</span><span class="s1">size </span><span class="s0">or </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()) + </span><span class="s1">overshoot</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">use_region</span><span class="s2">(</span><span class="s1">base_offset</span><span class="s2">, </span><span class="s1">size</span><span class="s2">).</span><span class="s1">is_valid</span><span class="s2">()</span>
+                        <span class="s0">if </span><span class="s1">man</span><span class="s2">.</span><span class="s1">window_size</span><span class="s2">():</span>
+                            <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s5">2</span>
+                            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() &lt; </span><span class="s1">size</span>
+                            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">region</span><span class="s2">() </span><span class="s0">is not </span><span class="s1">rr  </span><span class="s4"># old region is still available, but has not cursor ref anymore</span>
+                            <span class="s0">assert </span><span class="s1">rr</span><span class="s2">.</span><span class="s1">client_count</span><span class="s2">() == </span><span class="s5">1  </span><span class="s4"># only held by manager</span>
+                        <span class="s0">else</span><span class="s2">:</span>
+                            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() &lt; </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span>
+                        <span class="s4"># END ignore static managers which only have one handle per file</span>
+                        <span class="s1">rr </span><span class="s2">= </span><span class="s1">c</span><span class="s2">.</span><span class="s1">region</span><span class="s2">()</span>
+                        <span class="s0">assert </span><span class="s1">rr</span><span class="s2">.</span><span class="s1">client_count</span><span class="s2">() == </span><span class="s5">2  </span><span class="s4"># manager + cursor</span>
+                        <span class="s0">assert </span><span class="s1">rr</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() &lt; </span><span class="s1">c</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">()  </span><span class="s4"># it should have extended itself to the left</span>
+                        <span class="s0">assert </span><span class="s1">rr</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">() &lt;= </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size  </span><span class="s4"># it cannot be larger than the file</span>
+                        <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">()[:] == </span><span class="s1">data</span><span class="s2">[</span><span class="s1">base_offset</span><span class="s2">:</span><span class="s1">base_offset </span><span class="s2">+ (</span><span class="s1">size </span><span class="s0">or </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">())]</span>
+
+                        <span class="s4"># unising a region makes the cursor invalid</span>
+                        <span class="s1">c</span><span class="s2">.</span><span class="s1">unuse_region</span><span class="s2">()</span>
+                        <span class="s0">assert not </span><span class="s1">c</span><span class="s2">.</span><span class="s1">is_valid</span><span class="s2">()</span>
+                        <span class="s0">if </span><span class="s1">man</span><span class="s2">.</span><span class="s1">window_size</span><span class="s2">():</span>
+                            <span class="s4"># but doesn't change anything regarding the handle count - we cache it and only</span>
+                            <span class="s4"># remove mapped regions if we have to</span>
+                            <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s5">2</span>
+                        <span class="s4"># END ignore this for static managers</span>
+
+                        <span class="s4"># iterate through the windows, verify data contents</span>
+                        <span class="s4"># this will trigger map collection after a while</span>
+                        <span class="s1">max_random_accesses </span><span class="s2">= </span><span class="s5">5000</span>
+                        <span class="s1">num_random_accesses </span><span class="s2">= </span><span class="s1">max_random_accesses</span>
+                        <span class="s1">memory_read </span><span class="s2">= </span><span class="s5">0</span>
+                        <span class="s1">st </span><span class="s2">= </span><span class="s1">time</span><span class="s2">()</span>
+
+                        <span class="s4"># cache everything to get some more performance</span>
+                        <span class="s1">includes_ofs </span><span class="s2">= </span><span class="s1">c</span><span class="s2">.</span><span class="s1">includes_ofs</span>
+                        <span class="s1">max_mapped_memory_size </span><span class="s2">= </span><span class="s1">man</span><span class="s2">.</span><span class="s1">max_mapped_memory_size</span><span class="s2">()</span>
+                        <span class="s1">max_file_handles </span><span class="s2">= </span><span class="s1">man</span><span class="s2">.</span><span class="s1">max_file_handles</span><span class="s2">()</span>
+                        <span class="s1">mapped_memory_size </span><span class="s2">= </span><span class="s1">man</span><span class="s2">.</span><span class="s1">mapped_memory_size</span>
+                        <span class="s1">num_file_handles </span><span class="s2">= </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_file_handles</span>
+                        <span class="s0">while </span><span class="s1">num_random_accesses</span><span class="s2">:</span>
+                            <span class="s1">num_random_accesses </span><span class="s2">-= </span><span class="s5">1</span>
+                            <span class="s1">base_offset </span><span class="s2">= </span><span class="s1">randint</span><span class="s2">(</span><span class="s5">0</span><span class="s2">, </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">- </span><span class="s5">1</span><span class="s2">)</span>
+
+                            <span class="s4"># precondition</span>
+                            <span class="s0">if </span><span class="s1">man</span><span class="s2">.</span><span class="s1">window_size</span><span class="s2">():</span>
+                                <span class="s0">assert </span><span class="s1">max_mapped_memory_size </span><span class="s2">&gt;= </span><span class="s1">mapped_memory_size</span><span class="s2">()</span>
+                            <span class="s4"># END statistics will overshoot, which is fine</span>
+                            <span class="s0">assert </span><span class="s1">max_file_handles </span><span class="s2">&gt;= </span><span class="s1">num_file_handles</span><span class="s2">()</span>
+                            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">use_region</span><span class="s2">(</span><span class="s1">base_offset</span><span class="s2">, (</span><span class="s1">size </span><span class="s0">or </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">())).</span><span class="s1">is_valid</span><span class="s2">()</span>
+                            <span class="s1">csize </span><span class="s2">= </span><span class="s1">c</span><span class="s2">.</span><span class="s1">size</span><span class="s2">()</span>
+                            <span class="s0">assert </span><span class="s1">c</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">()[:] == </span><span class="s1">data</span><span class="s2">[</span><span class="s1">base_offset</span><span class="s2">:</span><span class="s1">base_offset </span><span class="s2">+ </span><span class="s1">csize</span><span class="s2">]</span>
+                            <span class="s1">memory_read </span><span class="s2">+= </span><span class="s1">csize</span>
+
+                            <span class="s0">assert </span><span class="s1">includes_ofs</span><span class="s2">(</span><span class="s1">base_offset</span><span class="s2">)</span>
+                            <span class="s0">assert </span><span class="s1">includes_ofs</span><span class="s2">(</span><span class="s1">base_offset </span><span class="s2">+ </span><span class="s1">csize </span><span class="s2">- </span><span class="s5">1</span><span class="s2">)</span>
+                            <span class="s0">assert not </span><span class="s1">includes_ofs</span><span class="s2">(</span><span class="s1">base_offset </span><span class="s2">+ </span><span class="s1">csize</span><span class="s2">)</span>
+                        <span class="s4"># END while we should do an access</span>
+                        <span class="s1">elapsed </span><span class="s2">= </span><span class="s1">max</span><span class="s2">(</span><span class="s1">time</span><span class="s2">() - </span><span class="s1">st</span><span class="s2">, </span><span class="s5">0.001</span><span class="s2">)  </span><span class="s4"># prevent zero division errors on windows</span>
+                        <span class="s1">mb </span><span class="s2">= </span><span class="s1">float</span><span class="s2">(</span><span class="s5">1000 </span><span class="s2">* </span><span class="s5">1000</span><span class="s2">)</span>
+                        <span class="s1">print</span><span class="s2">(</span><span class="s3">&quot;%s: Read %i mb of memory with %i random on cursor initialized with %s accesses in %fs (%f mb/s)</span><span class="s0">\n</span><span class="s3">&quot;</span>
+                              <span class="s2">% (</span><span class="s1">mtype</span><span class="s2">, </span><span class="s1">memory_read </span><span class="s2">/ </span><span class="s1">mb</span><span class="s2">, </span><span class="s1">max_random_accesses</span><span class="s2">, </span><span class="s1">type</span><span class="s2">(</span><span class="s1">item</span><span class="s2">), </span><span class="s1">elapsed</span><span class="s2">, (</span><span class="s1">memory_read </span><span class="s2">/ </span><span class="s1">mb</span><span class="s2">) / </span><span class="s1">elapsed</span><span class="s2">),</span>
+                              <span class="s1">file</span><span class="s2">=</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">)</span>
+
+                        <span class="s4"># an offset as large as the size doesn't work !</span>
+                        <span class="s0">assert not </span><span class="s1">c</span><span class="s2">.</span><span class="s1">use_region</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span><span class="s2">, </span><span class="s1">size</span><span class="s2">).</span><span class="s1">is_valid</span><span class="s2">()</span>
+
+                        <span class="s4"># collection - it should be able to collect all</span>
+                        <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">()</span>
+                        <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+                        <span class="s0">assert </span><span class="s1">man</span><span class="s2">.</span><span class="s1">num_file_handles</span><span class="s2">() == </span><span class="s5">0</span>
+                    <span class="s4"># END for each item</span>
+                <span class="s4"># END for each manager type</span>
+            <span class="s0">finally</span><span class="s2">:</span>
+                <span class="s1">os</span><span class="s2">.</span><span class="s1">close</span><span class="s2">(</span><span class="s1">fd</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<html>
+<head>
+<title>base_embed.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+base_embed.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">abc </span><span class="s0">import </span><span class="s1">ABC</span>
+<span class="s0">from </span><span class="s1">pathlib </span><span class="s0">import </span><span class="s1">Path</span>
+
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s2">.</span><span class="s1">seed</span><span class="s2">.</span><span class="s1">seeder </span><span class="s0">import </span><span class="s1">Seeder</span>
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s2">.</span><span class="s1">seed</span><span class="s2">.</span><span class="s1">wheels </span><span class="s0">import </span><span class="s1">Version</span>
+
+<span class="s1">PERIODIC_UPDATE_ON_BY_DEFAULT </span><span class="s2">= </span><span class="s0">True</span>
+
+
+<span class="s0">class </span><span class="s1">BaseEmbed</span><span class="s2">(</span><span class="s1">Seeder</span><span class="s2">, </span><span class="s1">ABC</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">options</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">options</span><span class="s2">, </span><span class="s1">enabled</span><span class="s2">=</span><span class="s1">options</span><span class="s2">.</span><span class="s1">no_seed </span><span class="s0">is False</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">download </span><span class="s2">= </span><span class="s1">options</span><span class="s2">.</span><span class="s1">download</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">extra_search_dir </span><span class="s2">= [</span><span class="s1">i</span><span class="s2">.</span><span class="s1">resolve</span><span class="s2">() </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">options</span><span class="s2">.</span><span class="s1">extra_search_dir </span><span class="s0">if </span><span class="s1">i</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">()]</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">pip_version </span><span class="s2">= </span><span class="s1">options</span><span class="s2">.</span><span class="s1">pip</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">setuptools_version </span><span class="s2">= </span><span class="s1">options</span><span class="s2">.</span><span class="s1">setuptools</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">wheel_version </span><span class="s2">= </span><span class="s1">options</span><span class="s2">.</span><span class="s1">wheel</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">no_pip </span><span class="s2">= </span><span class="s1">options</span><span class="s2">.</span><span class="s1">no_pip</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">no_setuptools </span><span class="s2">= </span><span class="s1">options</span><span class="s2">.</span><span class="s1">no_setuptools</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">no_wheel </span><span class="s2">= </span><span class="s1">options</span><span class="s2">.</span><span class="s1">no_wheel</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">app_data </span><span class="s2">= </span><span class="s1">options</span><span class="s2">.</span><span class="s1">app_data</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">periodic_update </span><span class="s2">= </span><span class="s0">not </span><span class="s1">options</span><span class="s2">.</span><span class="s1">no_periodic_update</span>
+
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">distribution_to_versions</span><span class="s2">():</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">enabled </span><span class="s2">= </span><span class="s0">False</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">distributions</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">) </span><span class="s1">-&gt; dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">Version</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s2">{</span>
+            <span class="s3">&quot;pip&quot;</span><span class="s2">: </span><span class="s1">Version</span><span class="s2">.</span><span class="s1">bundle</span><span class="s2">,</span>
+            <span class="s3">&quot;setuptools&quot;</span><span class="s2">: </span><span class="s1">Version</span><span class="s2">.</span><span class="s1">bundle</span><span class="s2">,</span>
+            <span class="s3">&quot;wheel&quot;</span><span class="s2">: </span><span class="s1">Version</span><span class="s2">.</span><span class="s1">bundle</span><span class="s2">,</span>
+        <span class="s2">}</span>
+
+    <span class="s0">def </span><span class="s1">distribution_to_versions</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s0">return </span><span class="s2">{</span>
+            <span class="s1">distribution</span><span class="s2">: </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}</span><span class="s3">_version&quot;</span><span class="s2">)</span>
+            <span class="s0">for </span><span class="s1">distribution </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">distributions</span><span class="s2">()</span>
+            <span class="s0">if </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s3">f&quot;no_</span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">) </span><span class="s0">is False and </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}</span><span class="s3">_version&quot;</span><span class="s2">) != </span><span class="s3">&quot;none&quot;</span>
+        <span class="s2">}</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">add_parser_arguments</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">parser</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">, </span><span class="s1">app_data</span><span class="s2">):  </span><span class="s4"># noqa: ARG003</span>
+        <span class="s1">group </span><span class="s2">= </span><span class="s1">parser</span><span class="s2">.</span><span class="s1">add_mutually_exclusive_group</span><span class="s2">()</span>
+        <span class="s1">group</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+            <span class="s3">&quot;--no-download&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;--never-download&quot;</span><span class="s2">,</span>
+            <span class="s1">dest</span><span class="s2">=</span><span class="s3">&quot;download&quot;</span><span class="s2">,</span>
+            <span class="s1">action</span><span class="s2">=</span><span class="s3">&quot;store_false&quot;</span><span class="s2">,</span>
+            <span class="s1">help</span><span class="s2">=</span><span class="s3">f&quot;pass to disable download of the latest </span><span class="s0">{</span><span class="s3">'/'</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">.</span><span class="s1">distributions</span><span class="s2">())</span><span class="s0">} </span><span class="s3">from PyPI&quot;</span><span class="s2">,</span>
+            <span class="s1">default</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s1">group</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+            <span class="s3">&quot;--download&quot;</span><span class="s2">,</span>
+            <span class="s1">dest</span><span class="s2">=</span><span class="s3">&quot;download&quot;</span><span class="s2">,</span>
+            <span class="s1">action</span><span class="s2">=</span><span class="s3">&quot;store_true&quot;</span><span class="s2">,</span>
+            <span class="s1">help</span><span class="s2">=</span><span class="s3">f&quot;pass to enable download of the latest </span><span class="s0">{</span><span class="s3">'/'</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">.</span><span class="s1">distributions</span><span class="s2">())</span><span class="s0">} </span><span class="s3">from PyPI&quot;</span><span class="s2">,</span>
+            <span class="s1">default</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s1">parser</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+            <span class="s3">&quot;--extra-search-dir&quot;</span><span class="s2">,</span>
+            <span class="s1">metavar</span><span class="s2">=</span><span class="s3">&quot;d&quot;</span><span class="s2">,</span>
+            <span class="s1">type</span><span class="s2">=</span><span class="s1">Path</span><span class="s2">,</span>
+            <span class="s1">nargs</span><span class="s2">=</span><span class="s3">&quot;+&quot;</span><span class="s2">,</span>
+            <span class="s1">help</span><span class="s2">=</span><span class="s3">&quot;a path containing wheels to extend the internal wheel list (can be set 1+ times)&quot;</span><span class="s2">,</span>
+            <span class="s1">default</span><span class="s2">=[],</span>
+        <span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">default </span><span class="s0">in </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">distributions</span><span class="s2">().</span><span class="s1">items</span><span class="s2">():</span>
+            <span class="s0">if </span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">version_info</span><span class="s2">[:</span><span class="s5">2</span><span class="s2">] &gt;= (</span><span class="s5">3</span><span class="s2">, </span><span class="s5">12</span><span class="s2">) </span><span class="s0">and </span><span class="s1">distribution </span><span class="s0">in </span><span class="s2">{</span><span class="s3">&quot;wheel&quot;</span><span class="s2">, </span><span class="s3">&quot;setuptools&quot;</span><span class="s2">}:</span>
+                <span class="s1">default </span><span class="s2">= </span><span class="s3">&quot;none&quot;  </span><span class="s4"># noqa: PLW2901</span>
+            <span class="s1">parser</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+                <span class="s3">f&quot;--</span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">,</span>
+                <span class="s1">dest</span><span class="s2">=</span><span class="s1">distribution</span><span class="s2">,</span>
+                <span class="s1">metavar</span><span class="s2">=</span><span class="s3">&quot;version&quot;</span><span class="s2">,</span>
+                <span class="s1">help</span><span class="s2">=</span><span class="s3">f&quot;version of </span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">} </span><span class="s3">to install as seed: embed, bundle, none or exact version&quot;</span><span class="s2">,</span>
+                <span class="s1">default</span><span class="s2">=</span><span class="s1">default</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">distribution </span><span class="s0">in </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">distributions</span><span class="s2">():</span>
+            <span class="s1">parser</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+                <span class="s3">f&quot;--no-</span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">,</span>
+                <span class="s1">dest</span><span class="s2">=</span><span class="s3">f&quot;no_</span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">,</span>
+                <span class="s1">action</span><span class="s2">=</span><span class="s3">&quot;store_true&quot;</span><span class="s2">,</span>
+                <span class="s1">help</span><span class="s2">=</span><span class="s3">f&quot;do not install </span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">,</span>
+                <span class="s1">default</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s1">parser</span><span class="s2">.</span><span class="s1">add_argument</span><span class="s2">(</span>
+            <span class="s3">&quot;--no-periodic-update&quot;</span><span class="s2">,</span>
+            <span class="s1">dest</span><span class="s2">=</span><span class="s3">&quot;no_periodic_update&quot;</span><span class="s2">,</span>
+            <span class="s1">action</span><span class="s2">=</span><span class="s3">&quot;store_true&quot;</span><span class="s2">,</span>
+            <span class="s1">help</span><span class="s2">=</span><span class="s3">&quot;disable the periodic (once every 14 days) update of the embedded wheels&quot;</span><span class="s2">,</span>
+            <span class="s1">default</span><span class="s2">=</span><span class="s0">not </span><span class="s1">PERIODIC_UPDATE_ON_BY_DEFAULT</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__repr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__class__</span><span class="s2">.</span><span class="s1">__name__</span>
+        <span class="s1">result </span><span class="s2">+= </span><span class="s3">&quot;(&quot;</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">extra_search_dir</span><span class="s2">:</span>
+            <span class="s1">result </span><span class="s2">+= </span><span class="s3">f&quot;extra_search_dir=</span><span class="s0">{</span><span class="s3">', '</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">i</span><span class="s2">) </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">extra_search_dir</span><span class="s2">)</span><span class="s0">}</span><span class="s3">,&quot;</span>
+        <span class="s1">result </span><span class="s2">+= </span><span class="s3">f&quot;download=</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">download</span><span class="s0">}</span><span class="s3">,&quot;</span>
+        <span class="s0">for </span><span class="s1">distribution </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">distributions</span><span class="s2">():</span>
+            <span class="s0">if </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s3">f&quot;no_</span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">):</span>
+                <span class="s0">continue</span>
+            <span class="s1">version </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}</span><span class="s3">_version&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">version </span><span class="s2">== </span><span class="s3">&quot;none&quot;</span><span class="s2">:</span>
+                <span class="s0">continue</span>
+            <span class="s1">ver </span><span class="s2">= </span><span class="s3">f&quot;=</span><span class="s0">{</span><span class="s1">version </span><span class="s0">or </span><span class="s3">'latest'</span><span class="s0">}</span><span class="s3">&quot;</span>
+            <span class="s1">result </span><span class="s2">+= </span><span class="s3">f&quot; </span><span class="s0">{</span><span class="s1">distribution</span><span class="s0">}{</span><span class="s1">ver</span><span class="s0">}</span><span class="s3">,&quot;</span>
+        <span class="s0">return </span><span class="s1">result</span><span class="s2">[:-</span><span class="s5">1</span><span class="s2">] + </span><span class="s3">&quot;)&quot;</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s3">&quot;BaseEmbed&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

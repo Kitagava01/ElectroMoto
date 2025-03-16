@@ -1,0 +1,647 @@
+<html>
+<head>
+<title>_compat.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_compat.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">codecs</span>
+<span class="s0">import </span><span class="s1">io</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+<span class="s0">from </span><span class="s1">weakref </span><span class="s0">import </span><span class="s1">WeakKeyDictionary</span>
+
+<span class="s1">CYGWIN </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;cygwin&quot;</span><span class="s2">)</span>
+<span class="s1">WIN </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;win&quot;</span><span class="s2">)</span>
+<span class="s1">auto_wrap_for_ansi</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">], </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">]] = </span><span class="s0">None</span>
+<span class="s1">_ansi_re </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s3">r&quot;\033\[[;?0-9]*[a-zA-Z]&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_make_text_stream</span><span class="s2">(</span>
+    <span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">,</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">force_readable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">force_writable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">:</span>
+    <span class="s0">if </span><span class="s1">encoding </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">encoding </span><span class="s2">= </span><span class="s1">get_best_encoding</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">errors </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">errors </span><span class="s2">= </span><span class="s3">&quot;replace&quot;</span>
+    <span class="s0">return </span><span class="s1">_NonClosingTextIOWrapper</span><span class="s2">(</span>
+        <span class="s1">stream</span><span class="s2">,</span>
+        <span class="s1">encoding</span><span class="s2">,</span>
+        <span class="s1">errors</span><span class="s2">,</span>
+        <span class="s1">line_buffering</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s1">force_readable</span><span class="s2">=</span><span class="s1">force_readable</span><span class="s2">,</span>
+        <span class="s1">force_writable</span><span class="s2">=</span><span class="s1">force_writable</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">is_ascii_encoding</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot;Checks if a given encoding is ascii.&quot;&quot;&quot;</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">codecs</span><span class="s2">.</span><span class="s1">lookup</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">).</span><span class="s1">name </span><span class="s2">== </span><span class="s3">&quot;ascii&quot;</span>
+    <span class="s0">except </span><span class="s1">LookupError</span><span class="s2">:</span>
+        <span class="s0">return False</span>
+
+
+<span class="s0">def </span><span class="s1">get_best_encoding</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot;Returns the default stream encoding if not found.&quot;&quot;&quot;</span>
+    <span class="s1">rv </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s3">&quot;encoding&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">) </span><span class="s0">or </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getdefaultencoding</span><span class="s2">()</span>
+    <span class="s0">if </span><span class="s1">is_ascii_encoding</span><span class="s2">(</span><span class="s1">rv</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s3">&quot;utf-8&quot;</span>
+    <span class="s0">return </span><span class="s1">rv</span>
+
+
+<span class="s0">class </span><span class="s1">_NonClosingTextIOWrapper</span><span class="s2">(</span><span class="s1">io</span><span class="s2">.</span><span class="s1">TextIOWrapper</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">,</span>
+        <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+        <span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+        <span class="s1">force_readable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+        <span class="s1">force_writable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">extra</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_stream </span><span class="s2">= </span><span class="s1">stream </span><span class="s2">= </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span>
+            <span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">, </span><span class="s1">_FixupStream</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s1">force_readable</span><span class="s2">, </span><span class="s1">force_writable</span><span class="s2">)</span>
+        <span class="s2">)</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">, **</span><span class="s1">extra</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__del__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">detach</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+
+    <span class="s0">def </span><span class="s1">isatty</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s5"># https://bitbucket.org/pypy/pypy/issue/1803</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">.</span><span class="s1">isatty</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">_FixupStream</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot;The new io interface needs more from streams than streams 
+    traditionally implement.  As such, this fix-up code is necessary in 
+    some circumstances. 
+ 
+    The forcing of readable and writable flags are there because some tools 
+    put badly patched objects on sys (one such offender are certain version 
+    of jupyter notebook). 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">,</span>
+        <span class="s1">force_readable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+        <span class="s1">force_writable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_stream </span><span class="s2">= </span><span class="s1">stream</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_force_readable </span><span class="s2">= </span><span class="s1">force_readable</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_force_writable </span><span class="s2">= </span><span class="s1">force_writable</span>
+
+    <span class="s0">def </span><span class="s1">__getattr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">read1</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">size</span><span class="s2">: </span><span class="s1">int</span><span class="s2">) </span><span class="s1">-&gt; bytes</span><span class="s2">:</span>
+        <span class="s1">f </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">, </span><span class="s3">&quot;read1&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">f </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">f</span><span class="s2">(</span><span class="s1">size</span><span class="s2">))</span>
+
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">.</span><span class="s1">read</span><span class="s2">(</span><span class="s1">size</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">readable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_force_readable</span><span class="s2">:</span>
+            <span class="s0">return True</span>
+        <span class="s1">x </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">, </span><span class="s3">&quot;readable&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">x </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">bool</span><span class="s2">, </span><span class="s1">x</span><span class="s2">())</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">.</span><span class="s1">read</span><span class="s2">(</span><span class="s6">0</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s0">return False</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">writable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_force_writable</span><span class="s2">:</span>
+            <span class="s0">return True</span>
+        <span class="s1">x </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">, </span><span class="s3">&quot;writable&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">x </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">bool</span><span class="s2">, </span><span class="s1">x</span><span class="s2">())</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s3">&quot;&quot;</span><span class="s2">)  </span><span class="s5"># type: ignore</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s7">b&quot;&quot;</span><span class="s2">)</span>
+            <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+                <span class="s0">return False</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">seekable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s1">x </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">, </span><span class="s3">&quot;seekable&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">x </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">bool</span><span class="s2">, </span><span class="s1">x</span><span class="s2">())</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">.</span><span class="s1">seek</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_stream</span><span class="s2">.</span><span class="s1">tell</span><span class="s2">())</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s0">return False</span>
+        <span class="s0">return True</span>
+
+
+<span class="s0">def </span><span class="s1">_is_binary_reader</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">default</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">.</span><span class="s1">read</span><span class="s2">(</span><span class="s6">0</span><span class="s2">), </span><span class="s1">bytes</span><span class="s2">)</span>
+    <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">default</span>
+        <span class="s5"># This happens in some cases where the stream was already</span>
+        <span class="s5"># closed.  In this case, we assume the default.</span>
+
+
+<span class="s0">def </span><span class="s1">_is_binary_writer</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">default</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">stream</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s7">b&quot;&quot;</span><span class="s2">)</span>
+    <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">stream</span><span class="s2">.</span><span class="s1">write</span><span class="s2">(</span><span class="s3">&quot;&quot;</span><span class="s2">)</span>
+            <span class="s0">return False</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+        <span class="s0">return </span><span class="s1">default</span>
+    <span class="s0">return True</span>
+
+
+<span class="s0">def </span><span class="s1">_find_binary_reader</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">]:</span>
+    <span class="s5"># We need to figure out if the given stream is already binary.</span>
+    <span class="s5"># This can happen because the official docs recommend detaching</span>
+    <span class="s5"># the streams to get binary streams.  Some code might do this, so</span>
+    <span class="s5"># we need to deal with this case explicitly.</span>
+    <span class="s0">if </span><span class="s1">_is_binary_reader</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s0">False</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">, </span><span class="s1">stream</span><span class="s2">)</span>
+
+    <span class="s1">buf </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s3">&quot;buffer&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s5"># Same situation here; this time we assume that the buffer is</span>
+    <span class="s5"># actually binary in case it's closed.</span>
+    <span class="s0">if </span><span class="s1">buf </span><span class="s0">is not None and </span><span class="s1">_is_binary_reader</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">, </span><span class="s0">True</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">, </span><span class="s1">buf</span><span class="s2">)</span>
+
+    <span class="s0">return None</span>
+
+
+<span class="s0">def </span><span class="s1">_find_binary_writer</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">]:</span>
+    <span class="s5"># We need to figure out if the given stream is already binary.</span>
+    <span class="s5"># This can happen because the official docs recommend detaching</span>
+    <span class="s5"># the streams to get binary streams.  Some code might do this, so</span>
+    <span class="s5"># we need to deal with this case explicitly.</span>
+    <span class="s0">if </span><span class="s1">_is_binary_writer</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s0">False</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">, </span><span class="s1">stream</span><span class="s2">)</span>
+
+    <span class="s1">buf </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s3">&quot;buffer&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s5"># Same situation here; this time we assume that the buffer is</span>
+    <span class="s5"># actually binary in case it's closed.</span>
+    <span class="s0">if </span><span class="s1">buf </span><span class="s0">is not None and </span><span class="s1">_is_binary_writer</span><span class="s2">(</span><span class="s1">buf</span><span class="s2">, </span><span class="s0">True</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">, </span><span class="s1">buf</span><span class="s2">)</span>
+
+    <span class="s0">return None</span>
+
+
+<span class="s0">def </span><span class="s1">_stream_is_misconfigured</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot;A stream is misconfigured if its encoding is ASCII.&quot;&quot;&quot;</span>
+    <span class="s5"># If the stream does not have an encoding set, we assume it's set</span>
+    <span class="s5"># to ASCII.  This appears to happen in certain unittest</span>
+    <span class="s5"># environments.  It's not quite clear what the correct behavior is</span>
+    <span class="s5"># but this at least will force Click to recover somehow.</span>
+    <span class="s0">return </span><span class="s1">is_ascii_encoding</span><span class="s2">(</span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s3">&quot;encoding&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">) </span><span class="s0">or </span><span class="s3">&quot;ascii&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_is_compat_stream_attr</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">, </span><span class="s1">attr</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot;A stream attribute is compatible if it is equal to the 
+    desired value or the desired value is unset and the attribute 
+    has a value. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">stream_value </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s1">attr</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">stream_value </span><span class="s2">== </span><span class="s1">value </span><span class="s0">or </span><span class="s2">(</span><span class="s1">value </span><span class="s0">is None and </span><span class="s1">stream_value </span><span class="s0">is not None</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_is_compatible_text_stream</span><span class="s2">(</span>
+    <span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">], </span><span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]</span>
+<span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot;Check if a stream's encoding and errors attributes are 
+    compatible with the desired values. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">_is_compat_stream_attr</span><span class="s2">(</span>
+        <span class="s1">stream</span><span class="s2">, </span><span class="s3">&quot;encoding&quot;</span><span class="s2">, </span><span class="s1">encoding</span>
+    <span class="s2">) </span><span class="s0">and </span><span class="s1">_is_compat_stream_attr</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s3">&quot;errors&quot;</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_force_correct_text_stream</span><span class="s2">(</span>
+    <span class="s1">text_stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">],</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">is_binary</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">bool</span><span class="s2">], </span><span class="s1">bool</span><span class="s2">],</span>
+    <span class="s1">find_binary</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]], </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">]],</span>
+    <span class="s1">force_readable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">force_writable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">:</span>
+    <span class="s0">if </span><span class="s1">is_binary</span><span class="s2">(</span><span class="s1">text_stream</span><span class="s2">, </span><span class="s0">False</span><span class="s2">):</span>
+        <span class="s1">binary_reader </span><span class="s2">= </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">, </span><span class="s1">text_stream</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">text_stream </span><span class="s2">= </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">, </span><span class="s1">text_stream</span><span class="s2">)</span>
+        <span class="s5"># If the stream looks compatible, and won't default to a</span>
+        <span class="s5"># misconfigured ascii encoding, return it as-is.</span>
+        <span class="s0">if </span><span class="s1">_is_compatible_text_stream</span><span class="s2">(</span><span class="s1">text_stream</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">) </span><span class="s0">and not </span><span class="s2">(</span>
+            <span class="s1">encoding </span><span class="s0">is None and </span><span class="s1">_stream_is_misconfigured</span><span class="s2">(</span><span class="s1">text_stream</span><span class="s2">)</span>
+        <span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">text_stream</span>
+
+        <span class="s5"># Otherwise, get the underlying binary reader.</span>
+        <span class="s1">possible_binary_reader </span><span class="s2">= </span><span class="s1">find_binary</span><span class="s2">(</span><span class="s1">text_stream</span><span class="s2">)</span>
+
+        <span class="s5"># If that's not possible, silently use the original reader</span>
+        <span class="s5"># and get mojibake instead of exceptions.</span>
+        <span class="s0">if </span><span class="s1">possible_binary_reader </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">text_stream</span>
+
+        <span class="s1">binary_reader </span><span class="s2">= </span><span class="s1">possible_binary_reader</span>
+
+    <span class="s5"># Default errors to replace instead of strict in order to get</span>
+    <span class="s5"># something that works.</span>
+    <span class="s0">if </span><span class="s1">errors </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">errors </span><span class="s2">= </span><span class="s3">&quot;replace&quot;</span>
+
+    <span class="s5"># Wrap the binary stream in a text stream with the correct</span>
+    <span class="s5"># encoding parameters.</span>
+    <span class="s0">return </span><span class="s1">_make_text_stream</span><span class="s2">(</span>
+        <span class="s1">binary_reader</span><span class="s2">,</span>
+        <span class="s1">encoding</span><span class="s2">,</span>
+        <span class="s1">errors</span><span class="s2">,</span>
+        <span class="s1">force_readable</span><span class="s2">=</span><span class="s1">force_readable</span><span class="s2">,</span>
+        <span class="s1">force_writable</span><span class="s2">=</span><span class="s1">force_writable</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_force_correct_text_reader</span><span class="s2">(</span>
+    <span class="s1">text_reader</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">],</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">force_readable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">:</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_stream</span><span class="s2">(</span>
+        <span class="s1">text_reader</span><span class="s2">,</span>
+        <span class="s1">encoding</span><span class="s2">,</span>
+        <span class="s1">errors</span><span class="s2">,</span>
+        <span class="s1">_is_binary_reader</span><span class="s2">,</span>
+        <span class="s1">_find_binary_reader</span><span class="s2">,</span>
+        <span class="s1">force_readable</span><span class="s2">=</span><span class="s1">force_readable</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_force_correct_text_writer</span><span class="s2">(</span>
+    <span class="s1">text_writer</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">],</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">force_writable</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">:</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_stream</span><span class="s2">(</span>
+        <span class="s1">text_writer</span><span class="s2">,</span>
+        <span class="s1">encoding</span><span class="s2">,</span>
+        <span class="s1">errors</span><span class="s2">,</span>
+        <span class="s1">_is_binary_writer</span><span class="s2">,</span>
+        <span class="s1">_find_binary_writer</span><span class="s2">,</span>
+        <span class="s1">force_writable</span><span class="s2">=</span><span class="s1">force_writable</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_binary_stdin</span><span class="s2">() </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">:</span>
+    <span class="s1">reader </span><span class="s2">= </span><span class="s1">_find_binary_reader</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdin</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">reader </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s3">&quot;Was not able to determine binary stream for sys.stdin.&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">reader</span>
+
+
+<span class="s0">def </span><span class="s1">get_binary_stdout</span><span class="s2">() </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">:</span>
+    <span class="s1">writer </span><span class="s2">= </span><span class="s1">_find_binary_writer</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdout</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">writer </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s3">&quot;Was not able to determine binary stream for sys.stdout.&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">writer</span>
+
+
+<span class="s0">def </span><span class="s1">get_binary_stderr</span><span class="s2">() </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">:</span>
+    <span class="s1">writer </span><span class="s2">= </span><span class="s1">_find_binary_writer</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">writer </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s3">&quot;Was not able to determine binary stream for sys.stderr.&quot;</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">writer</span>
+
+
+<span class="s0">def </span><span class="s1">get_text_stdin</span><span class="s2">(</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">None</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">None</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">:</span>
+    <span class="s1">rv </span><span class="s2">= </span><span class="s1">_get_windows_console_stream</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdin</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_reader</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdin</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">, </span><span class="s1">force_readable</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_text_stdout</span><span class="s2">(</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">None</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">None</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">:</span>
+    <span class="s1">rv </span><span class="s2">= </span><span class="s1">_get_windows_console_stream</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdout</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_writer</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdout</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">, </span><span class="s1">force_writable</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_text_stderr</span><span class="s2">(</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">None</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">None</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">:</span>
+    <span class="s1">rv </span><span class="s2">= </span><span class="s1">_get_windows_console_stream</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_writer</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">, </span><span class="s1">force_writable</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_wrap_io_open</span><span class="s2">(</span>
+    <span class="s1">file</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s3">&quot;os.PathLike[str]&quot;</span><span class="s2">, </span><span class="s1">int</span><span class="s2">],</span>
+    <span class="s1">mode</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+    <span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]:</span>
+    <span class="s4">&quot;&quot;&quot;Handles not passing ``encoding`` and ``errors`` in binary mode.&quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s3">&quot;b&quot; </span><span class="s0">in </span><span class="s1">mode</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">open</span><span class="s2">(</span><span class="s1">file</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">open</span><span class="s2">(</span><span class="s1">file</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">=</span><span class="s1">errors</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">open_stream</span><span class="s2">(</span>
+    <span class="s1">filename</span><span class="s2">: </span><span class="s3">&quot;t.Union[str, os.PathLike[str]]&quot;</span><span class="s2">,</span>
+    <span class="s1">mode</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= </span><span class="s3">&quot;r&quot;</span><span class="s2">,</span>
+    <span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] = </span><span class="s3">&quot;strict&quot;</span><span class="s2">,</span>
+    <span class="s1">atomic</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">bool</span><span class="s2">]:</span>
+    <span class="s1">binary </span><span class="s2">= </span><span class="s3">&quot;b&quot; </span><span class="s0">in </span><span class="s1">mode</span>
+    <span class="s1">filename </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">fspath</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">)</span>
+
+    <span class="s5"># Standard streams first. These are simple because they ignore the</span>
+    <span class="s5"># atomic flag. Use fsdecode to handle Path(&quot;-&quot;).</span>
+    <span class="s0">if </span><span class="s1">os</span><span class="s2">.</span><span class="s1">fsdecode</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">) == </span><span class="s3">&quot;-&quot;</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">any</span><span class="s2">(</span><span class="s1">m </span><span class="s0">in </span><span class="s1">mode </span><span class="s0">for </span><span class="s1">m </span><span class="s0">in </span><span class="s2">[</span><span class="s3">&quot;w&quot;</span><span class="s2">, </span><span class="s3">&quot;a&quot;</span><span class="s2">, </span><span class="s3">&quot;x&quot;</span><span class="s2">]):</span>
+            <span class="s0">if </span><span class="s1">binary</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">get_binary_stdout</span><span class="s2">(), </span><span class="s0">False</span>
+            <span class="s0">return </span><span class="s1">get_text_stdout</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">=</span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">=</span><span class="s1">errors</span><span class="s2">), </span><span class="s0">False</span>
+        <span class="s0">if </span><span class="s1">binary</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">get_binary_stdin</span><span class="s2">(), </span><span class="s0">False</span>
+        <span class="s0">return </span><span class="s1">get_text_stdin</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">=</span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">=</span><span class="s1">errors</span><span class="s2">), </span><span class="s0">False</span>
+
+    <span class="s5"># Non-atomic writes directly go out through the regular open functions.</span>
+    <span class="s0">if not </span><span class="s1">atomic</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">_wrap_io_open</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">), </span><span class="s0">True</span>
+
+    <span class="s5"># Some usability stuff for atomic writes</span>
+    <span class="s0">if </span><span class="s3">&quot;a&quot; </span><span class="s0">in </span><span class="s1">mode</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+            <span class="s3">&quot;Appending to an existing file is not supported, because that&quot;</span>
+            <span class="s3">&quot; would involve an expensive `copy`-operation to a temporary&quot;</span>
+            <span class="s3">&quot; file. Open the file in normal `w`-mode and copy explicitly&quot;</span>
+            <span class="s3">&quot; if that's what you're after.&quot;</span>
+        <span class="s2">)</span>
+    <span class="s0">if </span><span class="s3">&quot;x&quot; </span><span class="s0">in </span><span class="s1">mode</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Use the `overwrite`-parameter instead.&quot;</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s3">&quot;w&quot; </span><span class="s0">not in </span><span class="s1">mode</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Atomic writes only make sense with `w`-mode.&quot;</span><span class="s2">)</span>
+
+    <span class="s5"># Atomic writes are more complicated.  They work by opening a file</span>
+    <span class="s5"># as a proxy in the same folder and then using the fdopen</span>
+    <span class="s5"># functionality to wrap it in a Python file.  Then we wrap it in an</span>
+    <span class="s5"># atomic file that moves the file over on close.</span>
+    <span class="s0">import </span><span class="s1">errno</span>
+    <span class="s0">import </span><span class="s1">random</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">perm</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">int</span><span class="s2">] = </span><span class="s1">os</span><span class="s2">.</span><span class="s1">stat</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">).</span><span class="s1">st_mode</span>
+    <span class="s0">except </span><span class="s1">OSError</span><span class="s2">:</span>
+        <span class="s1">perm </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s1">flags </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_RDWR </span><span class="s2">| </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_CREAT </span><span class="s2">| </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_EXCL</span>
+
+    <span class="s0">if </span><span class="s1">binary</span><span class="s2">:</span>
+        <span class="s1">flags </span><span class="s2">|= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">os</span><span class="s2">, </span><span class="s3">&quot;O_BINARY&quot;</span><span class="s2">, </span><span class="s6">0</span><span class="s2">)</span>
+
+    <span class="s0">while True</span><span class="s2">:</span>
+        <span class="s1">tmp_filename </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span>
+            <span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">dirname</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">),</span>
+            <span class="s3">f&quot;.__atomic-write</span><span class="s0">{</span><span class="s1">random</span><span class="s2">.</span><span class="s1">randrange</span><span class="s2">(</span><span class="s6">1 </span><span class="s2">&lt;&lt; </span><span class="s6">32</span><span class="s2">)</span><span class="s0">:</span><span class="s3">08x</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">fd </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">tmp_filename</span><span class="s2">, </span><span class="s1">flags</span><span class="s2">, </span><span class="s6">0o666 </span><span class="s0">if </span><span class="s1">perm </span><span class="s0">is None else </span><span class="s1">perm</span><span class="s2">)</span>
+            <span class="s0">break</span>
+        <span class="s0">except </span><span class="s1">OSError </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">e</span><span class="s2">.</span><span class="s1">errno </span><span class="s2">== </span><span class="s1">errno</span><span class="s2">.</span><span class="s1">EEXIST </span><span class="s0">or </span><span class="s2">(</span>
+                <span class="s1">os</span><span class="s2">.</span><span class="s1">name </span><span class="s2">== </span><span class="s3">&quot;nt&quot;</span>
+                <span class="s0">and </span><span class="s1">e</span><span class="s2">.</span><span class="s1">errno </span><span class="s2">== </span><span class="s1">errno</span><span class="s2">.</span><span class="s1">EACCES</span>
+                <span class="s0">and </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isdir</span><span class="s2">(</span><span class="s1">e</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">)</span>
+                <span class="s0">and </span><span class="s1">os</span><span class="s2">.</span><span class="s1">access</span><span class="s2">(</span><span class="s1">e</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">, </span><span class="s1">os</span><span class="s2">.</span><span class="s1">W_OK</span><span class="s2">)</span>
+            <span class="s2">):</span>
+                <span class="s0">continue</span>
+            <span class="s0">raise</span>
+
+    <span class="s0">if </span><span class="s1">perm </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s1">os</span><span class="s2">.</span><span class="s1">chmod</span><span class="s2">(</span><span class="s1">tmp_filename</span><span class="s2">, </span><span class="s1">perm</span><span class="s2">)  </span><span class="s5"># in case perm includes bits in umask</span>
+
+    <span class="s1">f </span><span class="s2">= </span><span class="s1">_wrap_io_open</span><span class="s2">(</span><span class="s1">fd</span><span class="s2">, </span><span class="s1">mode</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">, </span><span class="s1">errors</span><span class="s2">)</span>
+    <span class="s1">af </span><span class="s2">= </span><span class="s1">_AtomicFile</span><span class="s2">(</span><span class="s1">f</span><span class="s2">, </span><span class="s1">tmp_filename</span><span class="s2">, </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">realpath</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">))</span>
+    <span class="s0">return </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">af</span><span class="s2">), </span><span class="s0">True</span>
+
+
+<span class="s0">class </span><span class="s1">_AtomicFile</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">f</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">], </span><span class="s1">tmp_filename</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">real_filename</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_f </span><span class="s2">= </span><span class="s1">f</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_tmp_filename </span><span class="s2">= </span><span class="s1">tmp_filename</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_real_filename </span><span class="s2">= </span><span class="s1">real_filename</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">closed </span><span class="s2">= </span><span class="s0">False</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s0">def </span><span class="s1">name</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_real_filename</span>
+
+    <span class="s0">def </span><span class="s1">close</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">delete</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">False</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">closed</span><span class="s2">:</span>
+            <span class="s0">return</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_f</span><span class="s2">.</span><span class="s1">close</span><span class="s2">()</span>
+        <span class="s1">os</span><span class="s2">.</span><span class="s1">replace</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_tmp_filename</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_real_filename</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">closed </span><span class="s2">= </span><span class="s0">True</span>
+
+    <span class="s0">def </span><span class="s1">__getattr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_f</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__enter__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;_AtomicFile&quot;</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">__exit__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">exc_type</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Type</span><span class="s2">[</span><span class="s1">BaseException</span><span class="s2">]], *</span><span class="s1">_</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">close</span><span class="s2">(</span><span class="s1">delete</span><span class="s2">=</span><span class="s1">exc_type </span><span class="s0">is not None</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__repr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">repr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_f</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">strip_ansi</span><span class="s2">(</span><span class="s1">value</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s0">return </span><span class="s1">_ansi_re</span><span class="s2">.</span><span class="s1">sub</span><span class="s2">(</span><span class="s3">&quot;&quot;</span><span class="s2">, </span><span class="s1">value</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_is_jupyter_kernel_output</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s0">while </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, (</span><span class="s1">_FixupStream</span><span class="s2">, </span><span class="s1">_NonClosingTextIOWrapper</span><span class="s2">)):</span>
+        <span class="s1">stream </span><span class="s2">= </span><span class="s1">stream</span><span class="s2">.</span><span class="s1">_stream</span>
+
+    <span class="s0">return </span><span class="s1">stream</span><span class="s2">.</span><span class="s1">__class__</span><span class="s2">.</span><span class="s1">__module__</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;ipykernel.&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">should_strip_ansi</span><span class="s2">(</span>
+    <span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]] = </span><span class="s0">None</span><span class="s2">, </span><span class="s1">color</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">bool</span><span class="s2">] = </span><span class="s0">None</span>
+<span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s0">if </span><span class="s1">color </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">stream </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">stream </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdin</span>
+        <span class="s0">return not </span><span class="s1">isatty</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">) </span><span class="s0">and not </span><span class="s1">_is_jupyter_kernel_output</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">)</span>
+    <span class="s0">return not </span><span class="s1">color</span>
+
+
+<span class="s5"># On Windows, wrap the output streams with colorama to support ANSI</span>
+<span class="s5"># color codes.</span>
+<span class="s5"># NOTE: double check is needed so mypy does not analyze this on Linux</span>
+<span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s3">&quot;win&quot;</span><span class="s2">) </span><span class="s0">and </span><span class="s1">WIN</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s2">.</span><span class="s1">_winconsole </span><span class="s0">import </span><span class="s1">_get_windows_console_stream</span>
+
+    <span class="s0">def </span><span class="s1">_get_argv_encoding</span><span class="s2">() </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s0">import </span><span class="s1">locale</span>
+
+        <span class="s0">return </span><span class="s1">locale</span><span class="s2">.</span><span class="s1">getpreferredencoding</span><span class="s2">()</span>
+
+    <span class="s1">_ansi_stream_wrappers</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">MutableMapping</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">] = </span><span class="s1">WeakKeyDictionary</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">auto_wrap_for_ansi</span><span class="s2">(  </span><span class="s5"># noqa: F811</span>
+        <span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">, </span><span class="s1">color</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">bool</span><span class="s2">] = </span><span class="s0">None</span>
+    <span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">:</span>
+        <span class="s4">&quot;&quot;&quot;Support ANSI color and style codes on Windows by wrapping a 
+        stream with colorama. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">cached </span><span class="s2">= </span><span class="s1">_ansi_stream_wrappers</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s1">cached </span><span class="s2">= </span><span class="s0">None</span>
+
+        <span class="s0">if </span><span class="s1">cached </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">cached</span>
+
+        <span class="s0">import </span><span class="s1">colorama</span>
+
+        <span class="s1">strip </span><span class="s2">= </span><span class="s1">should_strip_ansi</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s1">color</span><span class="s2">)</span>
+        <span class="s1">ansi_wrapper </span><span class="s2">= </span><span class="s1">colorama</span><span class="s2">.</span><span class="s1">AnsiToWin32</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">, </span><span class="s1">strip</span><span class="s2">=</span><span class="s1">strip</span><span class="s2">)</span>
+        <span class="s1">rv </span><span class="s2">= </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">, </span><span class="s1">ansi_wrapper</span><span class="s2">.</span><span class="s1">stream</span><span class="s2">)</span>
+        <span class="s1">_write </span><span class="s2">= </span><span class="s1">rv</span><span class="s2">.</span><span class="s1">write</span>
+
+        <span class="s0">def </span><span class="s1">_safe_write</span><span class="s2">(</span><span class="s1">s</span><span class="s2">):</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">_write</span><span class="s2">(</span><span class="s1">s</span><span class="s2">)</span>
+            <span class="s0">except </span><span class="s1">BaseException</span><span class="s2">:</span>
+                <span class="s1">ansi_wrapper</span><span class="s2">.</span><span class="s1">reset_all</span><span class="s2">()</span>
+                <span class="s0">raise</span>
+
+        <span class="s1">rv</span><span class="s2">.</span><span class="s1">write </span><span class="s2">= </span><span class="s1">_safe_write</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">_ansi_stream_wrappers</span><span class="s2">[</span><span class="s1">stream</span><span class="s2">] = </span><span class="s1">rv</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+
+        <span class="s0">return </span><span class="s1">rv</span>
+
+<span class="s0">else</span><span class="s2">:</span>
+
+    <span class="s0">def </span><span class="s1">_get_argv_encoding</span><span class="s2">() </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdin</span><span class="s2">, </span><span class="s3">&quot;encoding&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">) </span><span class="s0">or </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getfilesystemencoding</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">_get_windows_console_stream</span><span class="s2">(</span>
+        <span class="s1">f</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">], </span><span class="s1">errors</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]</span>
+    <span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">]:</span>
+        <span class="s0">return None</span>
+
+
+<span class="s0">def </span><span class="s1">term_len</span><span class="s2">(</span><span class="s1">x</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+    <span class="s0">return </span><span class="s1">len</span><span class="s2">(</span><span class="s1">strip_ansi</span><span class="s2">(</span><span class="s1">x</span><span class="s2">))</span>
+
+
+<span class="s0">def </span><span class="s1">isatty</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">IO</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">stream</span><span class="s2">.</span><span class="s1">isatty</span><span class="s2">()</span>
+    <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+        <span class="s0">return False</span>
+
+
+<span class="s0">def </span><span class="s1">_make_cached_stream_func</span><span class="s2">(</span>
+    <span class="s1">src_func</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[], </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">]],</span>
+    <span class="s1">wrapper_func</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[], </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">],</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[], </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">]]:</span>
+    <span class="s1">cache</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">MutableMapping</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">] = </span><span class="s1">WeakKeyDictionary</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">func</span><span class="s2">() </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">]:</span>
+        <span class="s1">stream </span><span class="s2">= </span><span class="s1">src_func</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">stream </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">rv </span><span class="s2">= </span><span class="s1">cache</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s1">rv </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">rv</span>
+        <span class="s1">rv </span><span class="s2">= </span><span class="s1">wrapper_func</span><span class="s2">()</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">cache</span><span class="s2">[</span><span class="s1">stream</span><span class="s2">] = </span><span class="s1">rv</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s0">return </span><span class="s1">func</span>
+
+
+<span class="s1">_default_text_stdin </span><span class="s2">= </span><span class="s1">_make_cached_stream_func</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdin</span><span class="s2">, </span><span class="s1">get_text_stdin</span><span class="s2">)</span>
+<span class="s1">_default_text_stdout </span><span class="s2">= </span><span class="s1">_make_cached_stream_func</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stdout</span><span class="s2">, </span><span class="s1">get_text_stdout</span><span class="s2">)</span>
+<span class="s1">_default_text_stderr </span><span class="s2">= </span><span class="s1">_make_cached_stream_func</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">stderr</span><span class="s2">, </span><span class="s1">get_text_stderr</span><span class="s2">)</span>
+
+
+<span class="s1">binary_streams</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Mapping</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[], </span><span class="s1">t</span><span class="s2">.</span><span class="s1">BinaryIO</span><span class="s2">]] = {</span>
+    <span class="s3">&quot;stdin&quot;</span><span class="s2">: </span><span class="s1">get_binary_stdin</span><span class="s2">,</span>
+    <span class="s3">&quot;stdout&quot;</span><span class="s2">: </span><span class="s1">get_binary_stdout</span><span class="s2">,</span>
+    <span class="s3">&quot;stderr&quot;</span><span class="s2">: </span><span class="s1">get_binary_stderr</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+<span class="s1">text_streams</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Mapping</span><span class="s2">[</span>
+    <span class="s1">str</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">], </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]], </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TextIO</span><span class="s2">]</span>
+<span class="s2">] = {</span>
+    <span class="s3">&quot;stdin&quot;</span><span class="s2">: </span><span class="s1">get_text_stdin</span><span class="s2">,</span>
+    <span class="s3">&quot;stdout&quot;</span><span class="s2">: </span><span class="s1">get_text_stdout</span><span class="s2">,</span>
+    <span class="s3">&quot;stderr&quot;</span><span class="s2">: </span><span class="s1">get_text_stderr</span><span class="s2">,</span>
+<span class="s2">}</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<html>
+<head>
+<title>switch_arm64_msvc.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_arm64_msvc.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * this is the internal transfer function. 
+ * 
+ * HISTORY 
+ * 21-Oct-21  Niyas Sait  &lt;niyas.sait@linaro.org&gt; 
+ *      First version to enable win/arm64 support. 
+ */</span>
+
+<span class="s2">#define </span><span class="s1">STACK_REFPLUS </span><span class="s3">1</span>
+<span class="s2">#define </span><span class="s1">STACK_MAGIC </span><span class="s3">0</span>
+
+<span class="s0">/* Use the generic support for an external assembly language slp_switch function. */</span>
+<span class="s2">#define </span><span class="s1">EXTERNAL_ASM</span>
+
+<span class="s2">#ifdef </span><span class="s1">SLP_EVAL</span>
+<span class="s0">/* This always uses the external masm assembly file. */</span>
+<span class="s2">#endif</span></pre>
+</body>
+</html>

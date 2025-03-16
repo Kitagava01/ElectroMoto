@@ -1,0 +1,75 @@
+<html>
+<head>
+<title>_util.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_util.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">stat</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">from </span><span class="s1">errno </span><span class="s0">import </span><span class="s1">EACCES</span><span class="s2">, </span><span class="s1">EISDIR</span>
+<span class="s0">from </span><span class="s1">pathlib </span><span class="s0">import </span><span class="s1">Path</span>
+
+
+<span class="s0">def </span><span class="s1">raise_on_not_writable_file</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Raise an exception if attempting to open the file for writing would fail. 
+ 
+    This is done so files that will never be writable can be separated from files that are writable but currently 
+    locked. 
+ 
+    :param filename: file to check 
+    :raises OSError: as if the file was opened for writing. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s0">try</span><span class="s2">:  </span><span class="s4"># use stat to do exists + can write to check without race condition</span>
+        <span class="s1">file_stat </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">stat</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">)  </span><span class="s4"># noqa: PTH116</span>
+    <span class="s0">except </span><span class="s1">OSError</span><span class="s2">:</span>
+        <span class="s0">return  </span><span class="s4"># swallow does not exist or other errors</span>
+
+    <span class="s0">if </span><span class="s1">file_stat</span><span class="s2">.</span><span class="s1">st_mtime </span><span class="s2">!= </span><span class="s5">0</span><span class="s2">:  </span><span class="s4"># if os.stat returns but modification is zero that's an invalid os.stat - ignore it</span>
+        <span class="s0">if not </span><span class="s2">(</span><span class="s1">file_stat</span><span class="s2">.</span><span class="s1">st_mode </span><span class="s2">&amp; </span><span class="s1">stat</span><span class="s2">.</span><span class="s1">S_IWUSR</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">PermissionError</span><span class="s2">(</span><span class="s1">EACCES</span><span class="s2">, </span><span class="s6">&quot;Permission denied&quot;</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">stat</span><span class="s2">.</span><span class="s1">S_ISDIR</span><span class="s2">(</span><span class="s1">file_stat</span><span class="s2">.</span><span class="s1">st_mode</span><span class="s2">):</span>
+            <span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s6">&quot;win32&quot;</span><span class="s2">:  </span><span class="s4"># pragma: win32 cover</span>
+                <span class="s4"># On Windows, this is PermissionError</span>
+                <span class="s0">raise </span><span class="s1">PermissionError</span><span class="s2">(</span><span class="s1">EACCES</span><span class="s2">, </span><span class="s6">&quot;Permission denied&quot;</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:  </span><span class="s4"># pragma: win32 no cover # noqa: RET506</span>
+                <span class="s4"># On linux / macOS, this is IsADirectoryError</span>
+                <span class="s0">raise </span><span class="s1">IsADirectoryError</span><span class="s2">(</span><span class="s1">EISDIR</span><span class="s2">, </span><span class="s6">&quot;Is a directory&quot;</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">ensure_directory_exists</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">: </span><span class="s1">Path </span><span class="s2">| </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Ensure the directory containing the file exists (create it if necessary). 
+ 
+    :param filename: file. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">Path</span><span class="s2">(</span><span class="s1">filename</span><span class="s2">).</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">mkdir</span><span class="s2">(</span><span class="s1">parents</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">exist_ok</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s6">&quot;ensure_directory_exists&quot;</span><span class="s2">,</span>
+    <span class="s6">&quot;raise_on_not_writable_file&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

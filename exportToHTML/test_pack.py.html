@@ -1,0 +1,272 @@
+<html>
+<head>
+<title>test_pack.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_pack.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2010, 2011 Sebastian Thiel (byronimo@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitDB and is released under</span>
+<span class="s0"># the New BSD License: https://opensource.org/license/bsd-3-clause/</span>
+<span class="s2">&quot;&quot;&quot;Test everything about packs reading and writing&quot;&quot;&quot;</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">test</span><span class="s4">.</span><span class="s1">lib </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">TestBase</span><span class="s4">,</span>
+    <span class="s1">with_rw_directory</span><span class="s4">,</span>
+    <span class="s1">fixture_path</span>
+<span class="s4">)</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">stream </span><span class="s3">import </span><span class="s1">DeltaApplyReader</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">pack </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">PackEntity</span><span class="s4">,</span>
+    <span class="s1">PackIndexFile</span><span class="s4">,</span>
+    <span class="s1">PackFile</span>
+<span class="s4">)</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">OInfo</span><span class="s4">,</span>
+    <span class="s1">OStream</span><span class="s4">,</span>
+<span class="s4">)</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">fun </span><span class="s3">import </span><span class="s1">delta_types</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">exc </span><span class="s3">import </span><span class="s1">UnsupportedOperation</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">util </span><span class="s3">import </span><span class="s1">to_bin_sha</span>
+
+<span class="s3">import </span><span class="s1">pytest</span>
+
+<span class="s3">import </span><span class="s1">os</span>
+<span class="s3">import </span><span class="s1">tempfile</span>
+
+
+<span class="s0">#{ Utilities</span>
+<span class="s3">def </span><span class="s1">bin_sha_from_filename</span><span class="s4">(</span><span class="s1">filename</span><span class="s4">):</span>
+    <span class="s3">return </span><span class="s1">to_bin_sha</span><span class="s4">(</span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">splitext</span><span class="s4">(</span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">basename</span><span class="s4">(</span><span class="s1">filename</span><span class="s4">))[</span><span class="s5">0</span><span class="s4">][</span><span class="s5">5</span><span class="s4">:])</span>
+<span class="s0">#} END utilities</span>
+
+
+<span class="s3">class </span><span class="s1">TestPack</span><span class="s4">(</span><span class="s1">TestBase</span><span class="s4">):</span>
+
+    <span class="s1">packindexfile_v1 </span><span class="s4">= (</span><span class="s1">fixture_path</span><span class="s4">(</span><span class="s6">'packs/pack-c0438c19fb16422b6bbcce24387b3264416d485b.idx'</span><span class="s4">), </span><span class="s5">1</span><span class="s4">, </span><span class="s5">67</span><span class="s4">)</span>
+    <span class="s1">packindexfile_v2 </span><span class="s4">= (</span><span class="s1">fixture_path</span><span class="s4">(</span><span class="s6">'packs/pack-11fdfa9e156ab73caae3b6da867192221f2089c2.idx'</span><span class="s4">), </span><span class="s5">2</span><span class="s4">, </span><span class="s5">30</span><span class="s4">)</span>
+    <span class="s1">packindexfile_v2_3_ascii </span><span class="s4">= (</span><span class="s1">fixture_path</span><span class="s4">(</span><span class="s6">'packs/pack-a2bf8e71d8c18879e499335762dd95119d93d9f1.idx'</span><span class="s4">), </span><span class="s5">2</span><span class="s4">, </span><span class="s5">42</span><span class="s4">)</span>
+    <span class="s1">packfile_v2_1 </span><span class="s4">= (</span><span class="s1">fixture_path</span><span class="s4">(</span><span class="s6">'packs/pack-c0438c19fb16422b6bbcce24387b3264416d485b.pack'</span><span class="s4">), </span><span class="s5">2</span><span class="s4">, </span><span class="s1">packindexfile_v1</span><span class="s4">[</span><span class="s5">2</span><span class="s4">])</span>
+    <span class="s1">packfile_v2_2 </span><span class="s4">= (</span><span class="s1">fixture_path</span><span class="s4">(</span><span class="s6">'packs/pack-11fdfa9e156ab73caae3b6da867192221f2089c2.pack'</span><span class="s4">), </span><span class="s5">2</span><span class="s4">, </span><span class="s1">packindexfile_v2</span><span class="s4">[</span><span class="s5">2</span><span class="s4">])</span>
+    <span class="s1">packfile_v2_3_ascii </span><span class="s4">= (</span>
+        <span class="s1">fixture_path</span><span class="s4">(</span><span class="s6">'packs/pack-a2bf8e71d8c18879e499335762dd95119d93d9f1.pack'</span><span class="s4">), </span><span class="s5">2</span><span class="s4">, </span><span class="s1">packindexfile_v2_3_ascii</span><span class="s4">[</span><span class="s5">2</span><span class="s4">])</span>
+
+    <span class="s3">def </span><span class="s1">_assert_index_file</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">size</span><span class="s4">):</span>
+        <span class="s3">assert </span><span class="s1">index</span><span class="s4">.</span><span class="s1">packfile_checksum</span><span class="s4">() != </span><span class="s1">index</span><span class="s4">.</span><span class="s1">indexfile_checksum</span><span class="s4">()</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">index</span><span class="s4">.</span><span class="s1">packfile_checksum</span><span class="s4">()) == </span><span class="s5">20</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">index</span><span class="s4">.</span><span class="s1">indexfile_checksum</span><span class="s4">()) == </span><span class="s5">20</span>
+        <span class="s3">assert </span><span class="s1">index</span><span class="s4">.</span><span class="s1">version</span><span class="s4">() == </span><span class="s1">version</span>
+        <span class="s3">assert </span><span class="s1">index</span><span class="s4">.</span><span class="s1">size</span><span class="s4">() == </span><span class="s1">size</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">index</span><span class="s4">.</span><span class="s1">offsets</span><span class="s4">()) == </span><span class="s1">size</span>
+
+        <span class="s0"># get all data of all objects</span>
+        <span class="s3">for </span><span class="s1">oidx </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">index</span><span class="s4">.</span><span class="s1">size</span><span class="s4">()):</span>
+            <span class="s1">sha </span><span class="s4">= </span><span class="s1">index</span><span class="s4">.</span><span class="s1">sha</span><span class="s4">(</span><span class="s1">oidx</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">oidx </span><span class="s4">== </span><span class="s1">index</span><span class="s4">.</span><span class="s1">sha_to_index</span><span class="s4">(</span><span class="s1">sha</span><span class="s4">)</span>
+
+            <span class="s1">entry </span><span class="s4">= </span><span class="s1">index</span><span class="s4">.</span><span class="s1">entry</span><span class="s4">(</span><span class="s1">oidx</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">entry</span><span class="s4">) == </span><span class="s5">3</span>
+
+            <span class="s3">assert </span><span class="s1">entry</span><span class="s4">[</span><span class="s5">0</span><span class="s4">] == </span><span class="s1">index</span><span class="s4">.</span><span class="s1">offset</span><span class="s4">(</span><span class="s1">oidx</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">entry</span><span class="s4">[</span><span class="s5">1</span><span class="s4">] == </span><span class="s1">sha</span>
+            <span class="s3">assert </span><span class="s1">entry</span><span class="s4">[</span><span class="s5">2</span><span class="s4">] == </span><span class="s1">index</span><span class="s4">.</span><span class="s1">crc</span><span class="s4">(</span><span class="s1">oidx</span><span class="s4">)</span>
+
+            <span class="s0"># verify partial sha</span>
+            <span class="s3">for </span><span class="s1">l </span><span class="s3">in </span><span class="s4">(</span><span class="s5">4</span><span class="s4">, </span><span class="s5">8</span><span class="s4">, </span><span class="s5">11</span><span class="s4">, </span><span class="s5">17</span><span class="s4">, </span><span class="s5">20</span><span class="s4">):</span>
+                <span class="s3">assert </span><span class="s1">index</span><span class="s4">.</span><span class="s1">partial_sha_to_index</span><span class="s4">(</span><span class="s1">sha</span><span class="s4">[:</span><span class="s1">l</span><span class="s4">], </span><span class="s1">l </span><span class="s4">* </span><span class="s5">2</span><span class="s4">) == </span><span class="s1">oidx</span>
+
+        <span class="s0"># END for each object index in indexfile</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertRaises</span><span class="s4">(</span><span class="s1">ValueError</span><span class="s4">, </span><span class="s1">index</span><span class="s4">.</span><span class="s1">partial_sha_to_index</span><span class="s4">, </span><span class="s6">&quot;</span><span class="s3">\0</span><span class="s6">&quot;</span><span class="s4">, </span><span class="s5">2</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_assert_pack_file</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">pack</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">size</span><span class="s4">):</span>
+        <span class="s3">assert </span><span class="s1">pack</span><span class="s4">.</span><span class="s1">version</span><span class="s4">() == </span><span class="s5">2</span>
+        <span class="s3">assert </span><span class="s1">pack</span><span class="s4">.</span><span class="s1">size</span><span class="s4">() == </span><span class="s1">size</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">pack</span><span class="s4">.</span><span class="s1">checksum</span><span class="s4">()) == </span><span class="s5">20</span>
+
+        <span class="s1">num_obj </span><span class="s4">= </span><span class="s5">0</span>
+        <span class="s3">for </span><span class="s1">obj </span><span class="s3">in </span><span class="s1">pack</span><span class="s4">.</span><span class="s1">stream_iter</span><span class="s4">():</span>
+            <span class="s1">num_obj </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s1">info </span><span class="s4">= </span><span class="s1">pack</span><span class="s4">.</span><span class="s1">info</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">.</span><span class="s1">pack_offset</span><span class="s4">)</span>
+            <span class="s1">stream </span><span class="s4">= </span><span class="s1">pack</span><span class="s4">.</span><span class="s1">stream</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">.</span><span class="s1">pack_offset</span><span class="s4">)</span>
+
+            <span class="s3">assert </span><span class="s1">info</span><span class="s4">.</span><span class="s1">pack_offset </span><span class="s4">== </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">pack_offset</span>
+            <span class="s3">assert </span><span class="s1">info</span><span class="s4">.</span><span class="s1">type_id </span><span class="s4">== </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">type_id</span>
+            <span class="s3">assert </span><span class="s1">hasattr</span><span class="s4">(</span><span class="s1">stream</span><span class="s4">, </span><span class="s6">'read'</span><span class="s4">)</span>
+
+            <span class="s0"># it should be possible to read from both streams</span>
+            <span class="s3">assert </span><span class="s1">obj</span><span class="s4">.</span><span class="s1">read</span><span class="s4">() == </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()</span>
+
+            <span class="s1">streams </span><span class="s4">= </span><span class="s1">pack</span><span class="s4">.</span><span class="s1">collect_streams</span><span class="s4">(</span><span class="s1">obj</span><span class="s4">.</span><span class="s1">pack_offset</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">streams</span>
+
+            <span class="s0"># read the stream</span>
+            <span class="s3">try</span><span class="s4">:</span>
+                <span class="s1">dstream </span><span class="s4">= </span><span class="s1">DeltaApplyReader</span><span class="s4">.</span><span class="s1">new</span><span class="s4">(</span><span class="s1">streams</span><span class="s4">)</span>
+            <span class="s3">except </span><span class="s1">ValueError</span><span class="s4">:</span>
+                <span class="s0"># ignore these, old git versions use only ref deltas,</span>
+                <span class="s0"># which we haven't resolved ( as we are without an index )</span>
+                <span class="s0"># Also ignore non-delta streams</span>
+                <span class="s3">continue</span>
+            <span class="s0"># END get deltastream</span>
+
+            <span class="s0"># read all</span>
+            <span class="s1">data </span><span class="s4">= </span><span class="s1">dstream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()</span>
+            <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">data</span><span class="s4">) == </span><span class="s1">dstream</span><span class="s4">.</span><span class="s1">size</span>
+
+            <span class="s0"># test seek</span>
+            <span class="s1">dstream</span><span class="s4">.</span><span class="s1">seek</span><span class="s4">(</span><span class="s5">0</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">dstream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">() == </span><span class="s1">data</span>
+
+            <span class="s0"># read chunks</span>
+            <span class="s0"># NOTE: the current implementation is safe, it basically transfers</span>
+            <span class="s0"># all calls to the underlying memory map</span>
+
+        <span class="s0"># END for each object</span>
+        <span class="s3">assert </span><span class="s1">num_obj </span><span class="s4">== </span><span class="s1">size</span>
+
+    <span class="s3">def </span><span class="s1">test_pack_index</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0"># check version 1 and 2</span>
+        <span class="s3">for </span><span class="s1">indexfile</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">size </span><span class="s3">in </span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">packindexfile_v1</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">packindexfile_v2</span><span class="s4">):</span>
+            <span class="s1">index </span><span class="s4">= </span><span class="s1">PackIndexFile</span><span class="s4">(</span><span class="s1">indexfile</span><span class="s4">)</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_assert_index_file</span><span class="s4">(</span><span class="s1">index</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">size</span><span class="s4">)</span>
+        <span class="s0"># END run tests</span>
+
+    <span class="s3">def </span><span class="s1">test_pack</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0"># there is this special version 3, but apparently its like 2 ...</span>
+        <span class="s3">for </span><span class="s1">packfile</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">size </span><span class="s3">in </span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">packfile_v2_3_ascii</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">packfile_v2_1</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">packfile_v2_2</span><span class="s4">):</span>
+            <span class="s1">pack </span><span class="s4">= </span><span class="s1">PackFile</span><span class="s4">(</span><span class="s1">packfile</span><span class="s4">)</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_assert_pack_file</span><span class="s4">(</span><span class="s1">pack</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">size</span><span class="s4">)</span>
+        <span class="s0"># END for each pack to test</span>
+
+    <span class="s4">@</span><span class="s1">with_rw_directory</span>
+    <span class="s3">def </span><span class="s1">test_pack_entity</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">rw_dir</span><span class="s4">):</span>
+        <span class="s1">pack_objs </span><span class="s4">= </span><span class="s1">list</span><span class="s4">()</span>
+        <span class="s3">for </span><span class="s1">packinfo</span><span class="s4">, </span><span class="s1">indexinfo </span><span class="s3">in </span><span class="s4">((</span><span class="s1">self</span><span class="s4">.</span><span class="s1">packfile_v2_1</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">packindexfile_v1</span><span class="s4">),</span>
+                                    <span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">packfile_v2_2</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">packindexfile_v2</span><span class="s4">),</span>
+                                    <span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">packfile_v2_3_ascii</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">packindexfile_v2_3_ascii</span><span class="s4">)):</span>
+            <span class="s1">packfile</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">size </span><span class="s4">= </span><span class="s1">packinfo</span>
+            <span class="s1">indexfile</span><span class="s4">, </span><span class="s1">version</span><span class="s4">, </span><span class="s1">size </span><span class="s4">= </span><span class="s1">indexinfo</span>
+            <span class="s1">entity </span><span class="s4">= </span><span class="s1">PackEntity</span><span class="s4">(</span><span class="s1">packfile</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">pack</span><span class="s4">().</span><span class="s1">path</span><span class="s4">() == </span><span class="s1">packfile</span>
+            <span class="s3">assert </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">index</span><span class="s4">().</span><span class="s1">path</span><span class="s4">() == </span><span class="s1">indexfile</span>
+            <span class="s1">pack_objs</span><span class="s4">.</span><span class="s1">extend</span><span class="s4">(</span><span class="s1">entity</span><span class="s4">.</span><span class="s1">stream_iter</span><span class="s4">())</span>
+
+            <span class="s1">count </span><span class="s4">= </span><span class="s5">0</span>
+            <span class="s3">for </span><span class="s1">info</span><span class="s4">, </span><span class="s1">stream </span><span class="s3">in </span><span class="s1">zip</span><span class="s4">(</span><span class="s1">entity</span><span class="s4">.</span><span class="s1">info_iter</span><span class="s4">(), </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">stream_iter</span><span class="s4">()):</span>
+                <span class="s1">count </span><span class="s4">+= </span><span class="s5">1</span>
+                <span class="s3">assert </span><span class="s1">info</span><span class="s4">.</span><span class="s1">binsha </span><span class="s4">== </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">binsha</span>
+                <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">info</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">) == </span><span class="s5">20</span>
+                <span class="s3">assert </span><span class="s1">info</span><span class="s4">.</span><span class="s1">type_id </span><span class="s4">== </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">type_id</span>
+                <span class="s3">assert </span><span class="s1">info</span><span class="s4">.</span><span class="s1">size </span><span class="s4">== </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">size</span>
+
+                <span class="s0"># we return fully resolved items, which is implied by the sha centric access</span>
+                <span class="s3">assert not </span><span class="s1">info</span><span class="s4">.</span><span class="s1">type_id </span><span class="s3">in </span><span class="s1">delta_types</span>
+
+                <span class="s0"># try all calls</span>
+                <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">entity</span><span class="s4">.</span><span class="s1">collect_streams</span><span class="s4">(</span><span class="s1">info</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">))</span>
+                <span class="s1">oinfo </span><span class="s4">= </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">info</span><span class="s4">(</span><span class="s1">info</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">)</span>
+                <span class="s3">assert </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">oinfo</span><span class="s4">, </span><span class="s1">OInfo</span><span class="s4">)</span>
+                <span class="s3">assert </span><span class="s1">oinfo</span><span class="s4">.</span><span class="s1">binsha </span><span class="s3">is not None</span>
+                <span class="s1">ostream </span><span class="s4">= </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">stream</span><span class="s4">(</span><span class="s1">info</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">)</span>
+                <span class="s3">assert </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">ostream</span><span class="s4">, </span><span class="s1">OStream</span><span class="s4">)</span>
+                <span class="s3">assert </span><span class="s1">ostream</span><span class="s4">.</span><span class="s1">binsha </span><span class="s3">is not None</span>
+
+                <span class="s0"># verify the stream</span>
+                <span class="s3">try</span><span class="s4">:</span>
+                    <span class="s3">assert </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">is_valid_stream</span><span class="s4">(</span><span class="s1">info</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">, </span><span class="s1">use_crc</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+                <span class="s3">except </span><span class="s1">UnsupportedOperation</span><span class="s4">:</span>
+                    <span class="s3">pass</span>
+                <span class="s0"># END ignore version issues</span>
+                <span class="s3">assert </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">is_valid_stream</span><span class="s4">(</span><span class="s1">info</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">, </span><span class="s1">use_crc</span><span class="s4">=</span><span class="s3">False</span><span class="s4">)</span>
+            <span class="s0"># END for each info, stream tuple</span>
+            <span class="s3">assert </span><span class="s1">count </span><span class="s4">== </span><span class="s1">size</span>
+
+        <span class="s0"># END for each entity</span>
+
+        <span class="s0"># pack writing - write all packs into one</span>
+        <span class="s0"># index path can be None</span>
+        <span class="s1">pack_path1 </span><span class="s4">= </span><span class="s1">tempfile</span><span class="s4">.</span><span class="s1">mktemp</span><span class="s4">(</span><span class="s6">''</span><span class="s4">, </span><span class="s6">&quot;pack1&quot;</span><span class="s4">, </span><span class="s1">rw_dir</span><span class="s4">)</span>
+        <span class="s1">pack_path2 </span><span class="s4">= </span><span class="s1">tempfile</span><span class="s4">.</span><span class="s1">mktemp</span><span class="s4">(</span><span class="s6">''</span><span class="s4">, </span><span class="s6">&quot;pack2&quot;</span><span class="s4">, </span><span class="s1">rw_dir</span><span class="s4">)</span>
+        <span class="s1">index_path </span><span class="s4">= </span><span class="s1">tempfile</span><span class="s4">.</span><span class="s1">mktemp</span><span class="s4">(</span><span class="s6">''</span><span class="s4">, </span><span class="s6">'index'</span><span class="s4">, </span><span class="s1">rw_dir</span><span class="s4">)</span>
+        <span class="s1">iteration </span><span class="s4">= </span><span class="s5">0</span>
+
+        <span class="s3">def </span><span class="s1">rewind_streams</span><span class="s4">():</span>
+            <span class="s3">for </span><span class="s1">obj </span><span class="s3">in </span><span class="s1">pack_objs</span><span class="s4">:</span>
+                <span class="s1">obj</span><span class="s4">.</span><span class="s1">stream</span><span class="s4">.</span><span class="s1">seek</span><span class="s4">(</span><span class="s5">0</span><span class="s4">)</span>
+        <span class="s0"># END utility</span>
+        <span class="s3">for </span><span class="s1">ppath</span><span class="s4">, </span><span class="s1">ipath</span><span class="s4">, </span><span class="s1">num_obj </span><span class="s3">in </span><span class="s1">zip</span><span class="s4">((</span><span class="s1">pack_path1</span><span class="s4">, </span><span class="s1">pack_path2</span><span class="s4">),</span>
+                                         <span class="s4">(</span><span class="s1">index_path</span><span class="s4">, </span><span class="s3">None</span><span class="s4">),</span>
+                                         <span class="s4">(</span><span class="s1">len</span><span class="s4">(</span><span class="s1">pack_objs</span><span class="s4">), </span><span class="s3">None</span><span class="s4">)):</span>
+            <span class="s1">iwrite </span><span class="s4">= </span><span class="s3">None</span>
+            <span class="s3">if </span><span class="s1">ipath</span><span class="s4">:</span>
+                <span class="s1">ifile </span><span class="s4">= </span><span class="s1">open</span><span class="s4">(</span><span class="s1">ipath</span><span class="s4">, </span><span class="s6">'wb'</span><span class="s4">)</span>
+                <span class="s1">iwrite </span><span class="s4">= </span><span class="s1">ifile</span><span class="s4">.</span><span class="s1">write</span>
+            <span class="s0"># END handle ip</span>
+
+            <span class="s0"># make sure we rewind the streams ... we work on the same objects over and over again</span>
+            <span class="s3">if </span><span class="s1">iteration </span><span class="s4">&gt; </span><span class="s5">0</span><span class="s4">:</span>
+                <span class="s1">rewind_streams</span><span class="s4">()</span>
+            <span class="s0"># END rewind streams</span>
+            <span class="s1">iteration </span><span class="s4">+= </span><span class="s5">1</span>
+
+            <span class="s3">with </span><span class="s1">open</span><span class="s4">(</span><span class="s1">ppath</span><span class="s4">, </span><span class="s6">'wb'</span><span class="s4">) </span><span class="s3">as </span><span class="s1">pfile</span><span class="s4">:</span>
+                <span class="s1">pack_sha</span><span class="s4">, </span><span class="s1">index_sha </span><span class="s4">= </span><span class="s1">PackEntity</span><span class="s4">.</span><span class="s1">write_pack</span><span class="s4">(</span><span class="s1">pack_objs</span><span class="s4">, </span><span class="s1">pfile</span><span class="s4">.</span><span class="s1">write</span><span class="s4">, </span><span class="s1">iwrite</span><span class="s4">, </span><span class="s1">object_count</span><span class="s4">=</span><span class="s1">num_obj</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">getsize</span><span class="s4">(</span><span class="s1">ppath</span><span class="s4">) &gt; </span><span class="s5">100</span>
+
+            <span class="s0"># verify pack</span>
+            <span class="s1">pf </span><span class="s4">= </span><span class="s1">PackFile</span><span class="s4">(</span><span class="s1">ppath</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">pf</span><span class="s4">.</span><span class="s1">size</span><span class="s4">() == </span><span class="s1">len</span><span class="s4">(</span><span class="s1">pack_objs</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">pf</span><span class="s4">.</span><span class="s1">version</span><span class="s4">() == </span><span class="s1">PackFile</span><span class="s4">.</span><span class="s1">pack_version_default</span>
+            <span class="s3">assert </span><span class="s1">pf</span><span class="s4">.</span><span class="s1">checksum</span><span class="s4">() == </span><span class="s1">pack_sha</span>
+            <span class="s1">pf</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+
+            <span class="s0"># verify index</span>
+            <span class="s3">if </span><span class="s1">ipath </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s1">ifile</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+                <span class="s3">assert </span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">getsize</span><span class="s4">(</span><span class="s1">ipath</span><span class="s4">) &gt; </span><span class="s5">100</span>
+                <span class="s1">idx </span><span class="s4">= </span><span class="s1">PackIndexFile</span><span class="s4">(</span><span class="s1">ipath</span><span class="s4">)</span>
+                <span class="s3">assert </span><span class="s1">idx</span><span class="s4">.</span><span class="s1">version</span><span class="s4">() == </span><span class="s1">PackIndexFile</span><span class="s4">.</span><span class="s1">index_version_default</span>
+                <span class="s3">assert </span><span class="s1">idx</span><span class="s4">.</span><span class="s1">packfile_checksum</span><span class="s4">() == </span><span class="s1">pack_sha</span>
+                <span class="s3">assert </span><span class="s1">idx</span><span class="s4">.</span><span class="s1">indexfile_checksum</span><span class="s4">() == </span><span class="s1">index_sha</span>
+                <span class="s3">assert </span><span class="s1">idx</span><span class="s4">.</span><span class="s1">size</span><span class="s4">() == </span><span class="s1">len</span><span class="s4">(</span><span class="s1">pack_objs</span><span class="s4">)</span>
+                <span class="s1">idx</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+            <span class="s0"># END verify files exist</span>
+        <span class="s0"># END for each packpath, indexpath pair</span>
+
+        <span class="s0"># verify the packs thoroughly</span>
+        <span class="s1">rewind_streams</span><span class="s4">()</span>
+        <span class="s1">entity </span><span class="s4">= </span><span class="s1">PackEntity</span><span class="s4">.</span><span class="s1">create</span><span class="s4">(</span><span class="s1">pack_objs</span><span class="s4">, </span><span class="s1">rw_dir</span><span class="s4">)</span>
+        <span class="s1">count </span><span class="s4">= </span><span class="s5">0</span>
+        <span class="s3">for </span><span class="s1">info </span><span class="s3">in </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">info_iter</span><span class="s4">():</span>
+            <span class="s1">count </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">for </span><span class="s1">use_crc </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s5">2</span><span class="s4">):</span>
+                <span class="s3">assert </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">is_valid_stream</span><span class="s4">(</span><span class="s1">info</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">, </span><span class="s1">use_crc</span><span class="s4">)</span>
+            <span class="s0"># END for each crc mode</span>
+        <span class="s0"># END for each info</span>
+        <span class="s3">assert </span><span class="s1">count </span><span class="s4">== </span><span class="s1">len</span><span class="s4">(</span><span class="s1">pack_objs</span><span class="s4">)</span>
+        <span class="s1">entity</span><span class="s4">.</span><span class="s1">close</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">test_pack_64</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0"># TODO: hex-edit a pack helping us to verify that we can handle 64 byte offsets</span>
+        <span class="s0"># of course without really needing such a huge pack</span>
+        <span class="s1">pytest</span><span class="s4">.</span><span class="s1">skip</span><span class="s4">(</span><span class="s6">'not implemented'</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

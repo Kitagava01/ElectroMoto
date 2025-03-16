@@ -1,0 +1,236 @@
+<html>
+<head>
+<title>numeric.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+numeric.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">decimal</span>
+
+<span class="s0">from </span><span class="s1">wtforms </span><span class="s0">import </span><span class="s1">widgets</span>
+<span class="s0">from </span><span class="s1">wtforms</span><span class="s2">.</span><span class="s1">fields</span><span class="s2">.</span><span class="s1">core </span><span class="s0">import </span><span class="s1">Field</span>
+<span class="s0">from </span><span class="s1">wtforms</span><span class="s2">.</span><span class="s1">utils </span><span class="s0">import </span><span class="s1">unset_value</span>
+
+<span class="s1">__all__ </span><span class="s2">= (</span>
+    <span class="s3">&quot;IntegerField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;DecimalField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;FloatField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;IntegerRangeField&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;DecimalRangeField&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">LocaleAwareNumberField</span><span class="s2">(</span><span class="s1">Field</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Base class for implementing locale-aware number parsing. 
+ 
+    Locale-aware numbers require the 'babel' package to be present. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">label</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">validators</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">use_locale</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+        <span class="s1">number_format</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">kwargs</span><span class="s2">,</span>
+    <span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">label</span><span class="s2">, </span><span class="s1">validators</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">use_locale </span><span class="s2">= </span><span class="s1">use_locale</span>
+        <span class="s0">if </span><span class="s1">use_locale</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">number_format </span><span class="s2">= </span><span class="s1">number_format</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">locale </span><span class="s2">= </span><span class="s1">kwargs</span><span class="s2">[</span><span class="s3">&quot;_form&quot;</span><span class="s2">].</span><span class="s1">meta</span><span class="s2">.</span><span class="s1">locales</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_init_babel</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">_init_babel</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">from </span><span class="s1">babel </span><span class="s0">import </span><span class="s1">numbers</span>
+
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">babel_numbers </span><span class="s2">= </span><span class="s1">numbers</span>
+        <span class="s0">except </span><span class="s1">ImportError </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ImportError</span><span class="s2">(</span>
+                <span class="s3">&quot;Using locale-aware decimals requires the babel library.&quot;</span>
+            <span class="s2">) </span><span class="s0">from </span><span class="s1">exc</span>
+
+    <span class="s0">def </span><span class="s1">_parse_decimal</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">babel_numbers</span><span class="s2">.</span><span class="s1">parse_decimal</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">locale</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_format_decimal</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">babel_numbers</span><span class="s2">.</span><span class="s1">format_decimal</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">number_format</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">locale</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">IntegerField</span><span class="s2">(</span><span class="s1">Field</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    A text field, except all input is coerced to an integer.  Erroneous input 
+    is ignored and will not be accepted as a value. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">NumberInput</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">label</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">validators</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">label</span><span class="s2">, </span><span class="s1">validators</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_value</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s3">&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">process_data</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">value </span><span class="s0">is None or </span><span class="s1">value </span><span class="s0">is </span><span class="s1">unset_value</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s0">return</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s1">TypeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span><span class="s3">&quot;Not a valid integer value.&quot;</span><span class="s2">)) </span><span class="s0">from </span><span class="s1">exc</span>
+
+    <span class="s0">def </span><span class="s1">process_formdata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">valuelist</span><span class="s2">):</span>
+        <span class="s0">if not </span><span class="s1">valuelist</span><span class="s2">:</span>
+            <span class="s0">return</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">valuelist</span><span class="s2">[</span><span class="s5">0</span><span class="s2">])</span>
+        <span class="s0">except </span><span class="s1">ValueError </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span><span class="s3">&quot;Not a valid integer value.&quot;</span><span class="s2">)) </span><span class="s0">from </span><span class="s1">exc</span>
+
+
+<span class="s0">class </span><span class="s1">DecimalField</span><span class="s2">(</span><span class="s1">LocaleAwareNumberField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    A text field which displays and coerces data of the `decimal.Decimal` type. 
+ 
+    :param places: 
+        How many decimal places to quantize the value to for display on form. 
+        If unset, use 2 decimal places. 
+        If explicitely set to `None`, does not quantize value. 
+    :param rounding: 
+        How to round the value during quantize, for example 
+        `decimal.ROUND_UP`. If unset, uses the rounding value from the 
+        current thread's context. 
+    :param use_locale: 
+        If True, use locale-based number formatting. Locale-based number 
+        formatting requires the 'babel' package. 
+    :param number_format: 
+        Optional number format for locale. If omitted, use the default decimal 
+        format for the locale. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">NumberInput</span><span class="s2">(</span><span class="s1">step</span><span class="s2">=</span><span class="s3">&quot;any&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">label</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">validators</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">places</span><span class="s2">=</span><span class="s1">unset_value</span><span class="s2">, </span><span class="s1">rounding</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, **</span><span class="s1">kwargs</span>
+    <span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">label</span><span class="s2">, </span><span class="s1">validators</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">use_locale </span><span class="s0">and </span><span class="s2">(</span><span class="s1">places </span><span class="s0">is not </span><span class="s1">unset_value </span><span class="s0">or </span><span class="s1">rounding </span><span class="s0">is not None</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">TypeError</span><span class="s2">(</span>
+                <span class="s3">&quot;When using locale-aware numbers, 'places' and 'rounding' are ignored.&quot;</span>
+            <span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">places </span><span class="s0">is </span><span class="s1">unset_value</span><span class="s2">:</span>
+            <span class="s1">places </span><span class="s2">= </span><span class="s5">2</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">places </span><span class="s2">= </span><span class="s1">places</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">rounding </span><span class="s2">= </span><span class="s1">rounding</span>
+
+    <span class="s0">def </span><span class="s1">_value</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s3">&quot;&quot;</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">use_locale</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_format_decimal</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">))</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">places </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">)</span>
+
+        <span class="s0">if not </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">, </span><span class="s3">&quot;quantize&quot;</span><span class="s2">):</span>
+            <span class="s6"># If for some reason, data is a float or int, then format</span>
+            <span class="s6"># as we would for floats using string formatting.</span>
+            <span class="s1">format </span><span class="s2">= </span><span class="s3">&quot;%%0.%df&quot; </span><span class="s2">% </span><span class="s1">self</span><span class="s2">.</span><span class="s1">places</span>
+            <span class="s0">return </span><span class="s1">format </span><span class="s2">% </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span>
+
+        <span class="s1">exp </span><span class="s2">= </span><span class="s1">decimal</span><span class="s2">.</span><span class="s1">Decimal</span><span class="s2">(</span><span class="s3">&quot;.1&quot;</span><span class="s2">) ** </span><span class="s1">self</span><span class="s2">.</span><span class="s1">places</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">rounding </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">quantized </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">.</span><span class="s1">quantize</span><span class="s2">(</span><span class="s1">exp</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">quantized </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">.</span><span class="s1">quantize</span><span class="s2">(</span><span class="s1">exp</span><span class="s2">, </span><span class="s1">rounding</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">rounding</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">quantized</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">process_formdata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">valuelist</span><span class="s2">):</span>
+        <span class="s0">if not </span><span class="s1">valuelist</span><span class="s2">:</span>
+            <span class="s0">return</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">use_locale</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_parse_decimal</span><span class="s2">(</span><span class="s1">valuelist</span><span class="s2">[</span><span class="s5">0</span><span class="s2">])</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">decimal</span><span class="s2">.</span><span class="s1">Decimal</span><span class="s2">(</span><span class="s1">valuelist</span><span class="s2">[</span><span class="s5">0</span><span class="s2">])</span>
+        <span class="s0">except </span><span class="s2">(</span><span class="s1">decimal</span><span class="s2">.</span><span class="s1">InvalidOperation</span><span class="s2">, </span><span class="s1">ValueError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span><span class="s3">&quot;Not a valid decimal value.&quot;</span><span class="s2">)) </span><span class="s0">from </span><span class="s1">exc</span>
+
+
+<span class="s0">class </span><span class="s1">FloatField</span><span class="s2">(</span><span class="s1">Field</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    A text field, except all input is coerced to an float.  Erroneous input 
+    is ignored and will not be accepted as a value. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">TextInput</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">label</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, </span><span class="s1">validators</span><span class="s2">=</span><span class="s0">None</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">label</span><span class="s2">, </span><span class="s1">validators</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_value</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_data</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s3">&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">process_formdata</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">valuelist</span><span class="s2">):</span>
+        <span class="s0">if not </span><span class="s1">valuelist</span><span class="s2">:</span>
+            <span class="s0">return</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s1">float</span><span class="s2">(</span><span class="s1">valuelist</span><span class="s2">[</span><span class="s5">0</span><span class="s2">])</span>
+        <span class="s0">except </span><span class="s1">ValueError </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">data </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span><span class="s3">&quot;Not a valid float value.&quot;</span><span class="s2">)) </span><span class="s0">from </span><span class="s1">exc</span>
+
+
+<span class="s0">class </span><span class="s1">IntegerRangeField</span><span class="s2">(</span><span class="s1">IntegerField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents an ``&lt;input type=&quot;range&quot;&gt;``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">RangeInput</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">DecimalRangeField</span><span class="s2">(</span><span class="s1">DecimalField</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Represents an ``&lt;input type=&quot;range&quot;&gt;``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">widget </span><span class="s2">= </span><span class="s1">widgets</span><span class="s2">.</span><span class="s1">RangeInput</span><span class="s2">(</span><span class="s1">step</span><span class="s2">=</span><span class="s3">&quot;any&quot;</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

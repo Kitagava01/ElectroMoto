@@ -1,0 +1,248 @@
+<html>
+<head>
+<title>_test_extension_cpp.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_test_extension_cpp.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">/* This is a set of functions used to test C++ exceptions are not 
+ * broken during greenlet switches 
+ */</span>
+
+<span class="s2">#include </span><span class="s3">&quot;../greenlet.h&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;../greenlet_compiler_compat.hpp&quot;</span>
+<span class="s2">#include </span><span class="s1">&lt;exception&gt;</span>
+<span class="s2">#include </span><span class="s1">&lt;stdexcept&gt;</span>
+
+<span class="s2">struct </span><span class="s1">exception_t {</span>
+    <span class="s2">int </span><span class="s1">depth;</span>
+    <span class="s1">exception_t(</span><span class="s2">int </span><span class="s1">depth) : depth(depth) {}</span>
+<span class="s1">};</span>
+
+<span class="s0">/* Functions are called via pointers to prevent inlining */</span>
+<span class="s2">static void </span><span class="s1">(*p_test_exception_throw_nonstd)(</span><span class="s2">int </span><span class="s1">depth);</span>
+<span class="s2">static void </span><span class="s1">(*p_test_exception_throw_std)();</span>
+<span class="s2">static </span><span class="s1">PyObject* (*p_test_exception_switch_recurse)(</span><span class="s2">int </span><span class="s1">depth, </span><span class="s2">int </span><span class="s1">left);</span>
+
+<span class="s2">static void</span>
+<span class="s1">test_exception_throw_nonstd(</span><span class="s2">int </span><span class="s1">depth)</span>
+<span class="s1">{</span>
+    <span class="s4">throw </span><span class="s1">exception_t(depth);</span>
+<span class="s1">}</span>
+
+<span class="s2">static void</span>
+<span class="s1">test_exception_throw_std()</span>
+<span class="s1">{</span>
+    <span class="s4">throw </span><span class="s1">std::runtime_error(</span><span class="s3">&quot;Thrown from an extension.&quot;</span><span class="s1">);</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s1">PyObject*</span>
+<span class="s1">test_exception_switch_recurse(</span><span class="s2">int </span><span class="s1">depth, </span><span class="s2">int </span><span class="s1">left)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(left &gt; </span><span class="s5">0</span><span class="s1">) {</span>
+        <span class="s2">return </span><span class="s1">p_test_exception_switch_recurse(depth, left - </span><span class="s5">1</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s1">PyObject* result = NULL;</span>
+    <span class="s1">PyGreenlet* self = PyGreenlet_GetCurrent();</span>
+    <span class="s2">if </span><span class="s1">(self == NULL)</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+
+    <span class="s4">try </span><span class="s1">{</span>
+        <span class="s2">if </span><span class="s1">(PyGreenlet_Switch(PyGreenlet_GET_PARENT(self), NULL, NULL) == NULL) {</span>
+            <span class="s1">Py_DECREF(self);</span>
+            <span class="s2">return </span><span class="s1">NULL;</span>
+        <span class="s1">}</span>
+        <span class="s1">p_test_exception_throw_nonstd(depth);</span>
+        <span class="s1">PyErr_SetString(PyExc_RuntimeError,</span>
+                        <span class="s3">&quot;throwing C++ exception didn't work&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">exception_t&amp; e) {</span>
+        <span class="s2">if </span><span class="s1">(e.depth != depth)</span>
+            <span class="s1">PyErr_SetString(PyExc_AssertionError, </span><span class="s3">&quot;depth mismatch&quot;</span><span class="s1">);</span>
+        <span class="s2">else</span>
+            <span class="s1">result = PyLong_FromLong(depth);</span>
+    <span class="s1">}</span>
+    <span class="s4">catch </span><span class="s1">(...) {</span>
+        <span class="s1">PyErr_SetString(PyExc_RuntimeError, </span><span class="s3">&quot;unexpected C++ exception&quot;</span><span class="s1">);</span>
+    <span class="s1">}</span>
+
+    <span class="s1">Py_DECREF(self);</span>
+    <span class="s2">return </span><span class="s1">result;</span>
+<span class="s1">}</span>
+
+<span class="s0">/* test_exception_switch(int depth) 
+ * - recurses depth times 
+ * - switches to parent inside try/catch block 
+ * - throws an exception that (expected to be caught in the same function) 
+ * - verifies depth matches (exceptions shouldn't be caught in other greenlets) 
+ */</span>
+<span class="s2">static </span><span class="s1">PyObject*</span>
+<span class="s1">test_exception_switch(PyObject* UNUSED(self), PyObject* args)</span>
+<span class="s1">{</span>
+    <span class="s2">int </span><span class="s1">depth;</span>
+    <span class="s2">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s3">&quot;i&quot;</span><span class="s1">, &amp;depth))</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s2">return </span><span class="s1">p_test_exception_switch_recurse(depth, depth);</span>
+<span class="s1">}</span>
+
+
+<span class="s2">static </span><span class="s1">PyObject*</span>
+<span class="s1">py_test_exception_throw_nonstd(PyObject* self, PyObject* args)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s3">&quot;&quot;</span><span class="s1">))</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">p_test_exception_throw_nonstd(</span><span class="s5">0</span><span class="s1">);</span>
+    <span class="s1">PyErr_SetString(PyExc_AssertionError, </span><span class="s3">&quot;unreachable code running after throw&quot;</span><span class="s1">);</span>
+    <span class="s2">return </span><span class="s1">NULL;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s1">PyObject*</span>
+<span class="s1">py_test_exception_throw_std(PyObject* self, PyObject* args)</span>
+<span class="s1">{</span>
+    <span class="s2">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s3">&quot;&quot;</span><span class="s1">))</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">p_test_exception_throw_std();</span>
+    <span class="s1">PyErr_SetString(PyExc_AssertionError, </span><span class="s3">&quot;unreachable code running after throw&quot;</span><span class="s1">);</span>
+    <span class="s2">return </span><span class="s1">NULL;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s1">PyObject*</span>
+<span class="s1">py_test_call(PyObject* self, PyObject* arg)</span>
+<span class="s1">{</span>
+    <span class="s1">PyObject* noargs = PyTuple_New(</span><span class="s5">0</span><span class="s1">);</span>
+    <span class="s1">PyObject* ret = PyObject_Call(arg, noargs, nullptr);</span>
+    <span class="s1">Py_DECREF(noargs);</span>
+    <span class="s2">return </span><span class="s1">ret;</span>
+<span class="s1">}</span>
+
+
+
+<span class="s0">/* test_exception_switch_and_do_in_g2(g2func) 
+ * - creates new greenlet g2 to run g2func 
+ * - switches to g2 inside try/catch block 
+ * - verifies that no exception has been caught 
+ * 
+ * it is used together with test_exception_throw to verify that unhandled 
+ * exceptions thrown in one greenlet do not propagate to other greenlet nor 
+ * segfault the process. 
+ */</span>
+<span class="s2">static </span><span class="s1">PyObject*</span>
+<span class="s1">test_exception_switch_and_do_in_g2(PyObject* self, PyObject* args)</span>
+<span class="s1">{</span>
+    <span class="s1">PyObject* g2func = NULL;</span>
+    <span class="s1">PyObject* result = NULL;</span>
+
+    <span class="s2">if </span><span class="s1">(!PyArg_ParseTuple(args, </span><span class="s3">&quot;O&quot;</span><span class="s1">, &amp;g2func))</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">PyGreenlet* g2 = PyGreenlet_New(g2func, NULL);</span>
+    <span class="s2">if </span><span class="s1">(!g2) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+
+    <span class="s4">try </span><span class="s1">{</span>
+        <span class="s1">result = PyGreenlet_Switch(g2, NULL, NULL);</span>
+        <span class="s2">if </span><span class="s1">(!result) {</span>
+            <span class="s2">return </span><span class="s1">NULL;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+    <span class="s4">catch </span><span class="s1">(</span><span class="s2">const </span><span class="s1">exception_t&amp; e) {</span>
+        <span class="s0">/* if we are here the memory can be already corrupted and the program 
+         * might crash before below py-level exception might become printed. 
+         * -&gt; print something to stderr to make it clear that we had entered 
+         *    this catch block. 
+         * See comments in inner_bootstrap() 
+         */</span>
+<span class="s2">#if </span><span class="s1">defined(WIN32) || defined(_WIN32)</span>
+        <span class="s1">fprintf(stderr, </span><span class="s3">&quot;C++ exception unexpectedly caught in g1</span><span class="s2">\n</span><span class="s3">&quot;</span><span class="s1">);</span>
+        <span class="s1">PyErr_SetString(PyExc_AssertionError, </span><span class="s3">&quot;C++ exception unexpectedly caught in g1&quot;</span><span class="s1">);</span>
+        <span class="s1">Py_XDECREF(result);</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+<span class="s2">#else</span>
+        <span class="s4">throw</span><span class="s1">;</span>
+<span class="s2">#endif</span>
+    <span class="s1">}</span>
+
+    <span class="s1">Py_XDECREF(result);</span>
+    <span class="s1">Py_RETURN_NONE;</span>
+<span class="s1">}</span>
+
+<span class="s2">static </span><span class="s1">PyMethodDef test_methods[] = {</span>
+    <span class="s1">{</span><span class="s3">&quot;test_exception_switch&quot;</span><span class="s1">,</span>
+     <span class="s1">(PyCFunction)&amp;test_exception_switch,</span>
+     <span class="s1">METH_VARARGS,</span>
+     <span class="s3">&quot;Switches to parent twice, to test exception handling and greenlet &quot;</span>
+     <span class="s3">&quot;switching.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s3">&quot;test_exception_switch_and_do_in_g2&quot;</span><span class="s1">,</span>
+     <span class="s1">(PyCFunction)&amp;test_exception_switch_and_do_in_g2,</span>
+     <span class="s1">METH_VARARGS,</span>
+     <span class="s3">&quot;Creates new greenlet g2 to run g2func and switches to it inside try/catch &quot;</span>
+     <span class="s3">&quot;block. Used together with test_exception_throw to verify that unhandled &quot;</span>
+     <span class="s3">&quot;C++ exceptions thrown in a greenlet doe not corrupt memory.&quot;</span><span class="s1">},</span>
+    <span class="s1">{</span><span class="s3">&quot;test_exception_throw_nonstd&quot;</span><span class="s1">,</span>
+     <span class="s1">(PyCFunction)&amp;py_test_exception_throw_nonstd,</span>
+     <span class="s1">METH_VARARGS,</span>
+     <span class="s3">&quot;Throws non-standard C++ exception. Calling this function directly should abort the process.&quot;</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span><span class="s3">&quot;test_exception_throw_std&quot;</span><span class="s1">,</span>
+     <span class="s1">(PyCFunction)&amp;py_test_exception_throw_std,</span>
+     <span class="s1">METH_VARARGS,</span>
+     <span class="s3">&quot;Throws standard C++ exception. Calling this function directly should abort the process.&quot;</span>
+    <span class="s1">},</span>
+    <span class="s1">{</span><span class="s3">&quot;test_call&quot;</span><span class="s1">,</span>
+     <span class="s1">(PyCFunction)&amp;py_test_call,</span>
+     <span class="s1">METH_O,</span>
+     <span class="s3">&quot;Call the given callable. Unlike calling it directly, this creates a &quot;</span>
+     <span class="s3">&quot;new C-level stack frame, which may be helpful in testing.&quot;</span>
+    <span class="s1">},</span>
+    <span class="s1">{NULL, NULL, </span><span class="s5">0</span><span class="s1">, NULL}</span>
+<span class="s1">};</span>
+
+
+<span class="s2">static struct </span><span class="s1">PyModuleDef moduledef = {PyModuleDef_HEAD_INIT,</span>
+                                       <span class="s3">&quot;greenlet.tests._test_extension_cpp&quot;</span><span class="s1">,</span>
+                                       <span class="s1">NULL,</span>
+                                       <span class="s5">0</span><span class="s1">,</span>
+                                       <span class="s1">test_methods,</span>
+                                       <span class="s1">NULL,</span>
+                                       <span class="s1">NULL,</span>
+                                       <span class="s1">NULL,</span>
+                                       <span class="s1">NULL};</span>
+
+<span class="s1">PyMODINIT_FUNC</span>
+<span class="s1">PyInit__test_extension_cpp(</span><span class="s2">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s1">PyObject* module = NULL;</span>
+
+    <span class="s1">module = PyModule_Create(&amp;moduledef);</span>
+
+    <span class="s2">if </span><span class="s1">(module == NULL) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">PyGreenlet_Import();</span>
+    <span class="s2">if </span><span class="s1">(_PyGreenlet_API == NULL) {</span>
+        <span class="s2">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">p_test_exception_throw_nonstd = test_exception_throw_nonstd;</span>
+    <span class="s1">p_test_exception_throw_std = test_exception_throw_std;</span>
+    <span class="s1">p_test_exception_switch_recurse = test_exception_switch_recurse;</span>
+
+    <span class="s2">return </span><span class="s1">module;</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

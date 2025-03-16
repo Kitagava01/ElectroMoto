@@ -1,0 +1,1132 @@
+<html>
+<head>
+<title>cli.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cli.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">ast</span>
+<span class="s0">import </span><span class="s1">collections</span><span class="s2">.</span><span class="s1">abc </span><span class="s0">as </span><span class="s1">cabc</span>
+<span class="s0">import </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">metadata</span>
+<span class="s0">import </span><span class="s1">inspect</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">platform</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">traceback</span>
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+<span class="s0">from </span><span class="s1">functools </span><span class="s0">import </span><span class="s1">update_wrapper</span>
+<span class="s0">from </span><span class="s1">operator </span><span class="s0">import </span><span class="s1">itemgetter</span>
+<span class="s0">from </span><span class="s1">types </span><span class="s0">import </span><span class="s1">ModuleType</span>
+
+<span class="s0">import </span><span class="s1">click</span>
+<span class="s0">from </span><span class="s1">click</span><span class="s2">.</span><span class="s1">core </span><span class="s0">import </span><span class="s1">ParameterSource</span>
+<span class="s0">from </span><span class="s1">werkzeug </span><span class="s0">import </span><span class="s1">run_simple</span>
+<span class="s0">from </span><span class="s1">werkzeug</span><span class="s2">.</span><span class="s1">serving </span><span class="s0">import </span><span class="s1">is_running_from_reloader</span>
+<span class="s0">from </span><span class="s1">werkzeug</span><span class="s2">.</span><span class="s1">utils </span><span class="s0">import </span><span class="s1">import_string</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">globals </span><span class="s0">import </span><span class="s1">current_app</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">helpers </span><span class="s0">import </span><span class="s1">get_debug_flag</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">helpers </span><span class="s0">import </span><span class="s1">get_load_dotenv</span>
+
+<span class="s0">if </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">import </span><span class="s1">ssl</span>
+
+    <span class="s0">from </span><span class="s1">_typeshed</span><span class="s2">.</span><span class="s1">wsgi </span><span class="s0">import </span><span class="s1">StartResponse</span>
+    <span class="s0">from </span><span class="s1">_typeshed</span><span class="s2">.</span><span class="s1">wsgi </span><span class="s0">import </span><span class="s1">WSGIApplication</span>
+    <span class="s0">from </span><span class="s1">_typeshed</span><span class="s2">.</span><span class="s1">wsgi </span><span class="s0">import </span><span class="s1">WSGIEnvironment</span>
+
+    <span class="s0">from </span><span class="s2">.</span><span class="s1">app </span><span class="s0">import </span><span class="s1">Flask</span>
+
+
+<span class="s0">class </span><span class="s1">NoAppException</span><span class="s2">(</span><span class="s1">click</span><span class="s2">.</span><span class="s1">UsageError</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Raised if an application cannot be found or loaded.&quot;&quot;&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">find_best_app</span><span class="s2">(</span><span class="s1">module</span><span class="s2">: </span><span class="s1">ModuleType</span><span class="s2">) </span><span class="s1">-&gt; Flask</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Given a module instance this tries to find the best possible 
+    application in the module or raises an exception. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">Flask</span>
+
+    <span class="s4"># Search for the most common names first.</span>
+    <span class="s0">for </span><span class="s1">attr_name </span><span class="s0">in </span><span class="s2">(</span><span class="s5">&quot;app&quot;</span><span class="s2">, </span><span class="s5">&quot;application&quot;</span><span class="s2">):</span>
+        <span class="s1">app </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">module</span><span class="s2">, </span><span class="s1">attr_name</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">app</span><span class="s2">, </span><span class="s1">Flask</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">app</span>
+
+    <span class="s4"># Otherwise find the only object that is a Flask instance.</span>
+    <span class="s1">matches </span><span class="s2">= [</span><span class="s1">v </span><span class="s0">for </span><span class="s1">v </span><span class="s0">in </span><span class="s1">module</span><span class="s2">.</span><span class="s1">__dict__</span><span class="s2">.</span><span class="s1">values</span><span class="s2">() </span><span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">v</span><span class="s2">, </span><span class="s1">Flask</span><span class="s2">)]</span>
+
+    <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">matches</span><span class="s2">) == </span><span class="s6">1</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">matches</span><span class="s2">[</span><span class="s6">0</span><span class="s2">]</span>
+    <span class="s0">elif </span><span class="s1">len</span><span class="s2">(</span><span class="s1">matches</span><span class="s2">) &gt; </span><span class="s6">1</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+            <span class="s5">&quot;Detected multiple Flask applications in module&quot;</span>
+            <span class="s5">f&quot; '</span><span class="s0">{</span><span class="s1">module</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s5">'. Use '</span><span class="s0">{</span><span class="s1">module</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s5">:name'&quot;</span>
+            <span class="s5">&quot; to specify the correct one.&quot;</span>
+        <span class="s2">)</span>
+
+    <span class="s4"># Search for app factory functions.</span>
+    <span class="s0">for </span><span class="s1">attr_name </span><span class="s0">in </span><span class="s2">(</span><span class="s5">&quot;create_app&quot;</span><span class="s2">, </span><span class="s5">&quot;make_app&quot;</span><span class="s2">):</span>
+        <span class="s1">app_factory </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">module</span><span class="s2">, </span><span class="s1">attr_name</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">isfunction</span><span class="s2">(</span><span class="s1">app_factory</span><span class="s2">):</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">app </span><span class="s2">= </span><span class="s1">app_factory</span><span class="s2">()</span>
+
+                <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">app</span><span class="s2">, </span><span class="s1">Flask</span><span class="s2">):</span>
+                    <span class="s0">return </span><span class="s1">app</span>
+            <span class="s0">except </span><span class="s1">TypeError </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+                <span class="s0">if not </span><span class="s1">_called_with_wrong_args</span><span class="s2">(</span><span class="s1">app_factory</span><span class="s2">):</span>
+                    <span class="s0">raise</span>
+
+                <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+                    <span class="s5">f&quot;Detected factory '</span><span class="s0">{</span><span class="s1">attr_name</span><span class="s0">}</span><span class="s5">' in module '</span><span class="s0">{</span><span class="s1">module</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s5">',&quot;</span>
+                    <span class="s5">&quot; but could not call it without arguments. Use&quot;</span>
+                    <span class="s5">f&quot; '</span><span class="s0">{</span><span class="s1">module</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s5">:</span><span class="s0">{</span><span class="s1">attr_name</span><span class="s0">}</span><span class="s5">(args)'&quot;</span>
+                    <span class="s5">&quot; to specify arguments.&quot;</span>
+                <span class="s2">) </span><span class="s0">from </span><span class="s1">e</span>
+
+    <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+        <span class="s5">&quot;Failed to find Flask application or factory in module&quot;</span>
+        <span class="s5">f&quot; '</span><span class="s0">{</span><span class="s1">module</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s5">'. Use '</span><span class="s0">{</span><span class="s1">module</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s5">:name'&quot;</span>
+        <span class="s5">&quot; to specify one.&quot;</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_called_with_wrong_args</span><span class="s2">(</span><span class="s1">f</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[..., </span><span class="s1">Flask</span><span class="s2">]) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Check whether calling a function raised a ``TypeError`` because 
+    the call failed or because something in the factory raised the 
+    error. 
+ 
+    :param f: The function that was called. 
+    :return: ``True`` if the call failed. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">tb </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">exc_info</span><span class="s2">()[</span><span class="s6">2</span><span class="s2">]</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">while </span><span class="s1">tb </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">tb</span><span class="s2">.</span><span class="s1">tb_frame</span><span class="s2">.</span><span class="s1">f_code </span><span class="s0">is </span><span class="s1">f</span><span class="s2">.</span><span class="s1">__code__</span><span class="s2">:</span>
+                <span class="s4"># In the function, it was called successfully.</span>
+                <span class="s0">return False</span>
+
+            <span class="s1">tb </span><span class="s2">= </span><span class="s1">tb</span><span class="s2">.</span><span class="s1">tb_next</span>
+
+        <span class="s4"># Didn't reach the function.</span>
+        <span class="s0">return True</span>
+    <span class="s0">finally</span><span class="s2">:</span>
+        <span class="s4"># Delete tb to break a circular reference.</span>
+        <span class="s4"># https://docs.python.org/2/library/sys.html#sys.exc_info</span>
+        <span class="s0">del </span><span class="s1">tb</span>
+
+
+<span class="s0">def </span><span class="s1">find_app_by_string</span><span class="s2">(</span><span class="s1">module</span><span class="s2">: </span><span class="s1">ModuleType</span><span class="s2">, </span><span class="s1">app_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; Flask</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Check if the given string is a variable name or a function. Call 
+    a function to get the app instance, or return the variable directly. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">Flask</span>
+
+    <span class="s4"># Parse app_name as a single expression to determine if it's a valid</span>
+    <span class="s4"># attribute name or function call.</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">expr </span><span class="s2">= </span><span class="s1">ast</span><span class="s2">.</span><span class="s1">parse</span><span class="s2">(</span><span class="s1">app_name</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(), </span><span class="s1">mode</span><span class="s2">=</span><span class="s5">&quot;eval&quot;</span><span class="s2">).</span><span class="s1">body</span>
+    <span class="s0">except </span><span class="s1">SyntaxError</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+            <span class="s5">f&quot;Failed to parse </span><span class="s0">{</span><span class="s1">app_name</span><span class="s0">!r} </span><span class="s5">as an attribute name or function call.&quot;</span>
+        <span class="s2">) </span><span class="s0">from None</span>
+
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">expr</span><span class="s2">, </span><span class="s1">ast</span><span class="s2">.</span><span class="s1">Name</span><span class="s2">):</span>
+        <span class="s1">name </span><span class="s2">= </span><span class="s1">expr</span><span class="s2">.</span><span class="s1">id</span>
+        <span class="s1">args </span><span class="s2">= []</span>
+        <span class="s1">kwargs </span><span class="s2">= {}</span>
+    <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">expr</span><span class="s2">, </span><span class="s1">ast</span><span class="s2">.</span><span class="s1">Call</span><span class="s2">):</span>
+        <span class="s4"># Ensure the function name is an attribute name only.</span>
+        <span class="s0">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">expr</span><span class="s2">.</span><span class="s1">func</span><span class="s2">, </span><span class="s1">ast</span><span class="s2">.</span><span class="s1">Name</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+                <span class="s5">f&quot;Function reference must be a simple name: </span><span class="s0">{</span><span class="s1">app_name</span><span class="s0">!r}</span><span class="s5">.&quot;</span>
+            <span class="s2">)</span>
+
+        <span class="s1">name </span><span class="s2">= </span><span class="s1">expr</span><span class="s2">.</span><span class="s1">func</span><span class="s2">.</span><span class="s1">id</span>
+
+        <span class="s4"># Parse the positional and keyword arguments as literals.</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">args </span><span class="s2">= [</span><span class="s1">ast</span><span class="s2">.</span><span class="s1">literal_eval</span><span class="s2">(</span><span class="s1">arg</span><span class="s2">) </span><span class="s0">for </span><span class="s1">arg </span><span class="s0">in </span><span class="s1">expr</span><span class="s2">.</span><span class="s1">args</span><span class="s2">]</span>
+            <span class="s1">kwargs </span><span class="s2">= {</span>
+                <span class="s1">kw</span><span class="s2">.</span><span class="s1">arg</span><span class="s2">: </span><span class="s1">ast</span><span class="s2">.</span><span class="s1">literal_eval</span><span class="s2">(</span><span class="s1">kw</span><span class="s2">.</span><span class="s1">value</span><span class="s2">)</span>
+                <span class="s0">for </span><span class="s1">kw </span><span class="s0">in </span><span class="s1">expr</span><span class="s2">.</span><span class="s1">keywords</span>
+                <span class="s0">if </span><span class="s1">kw</span><span class="s2">.</span><span class="s1">arg </span><span class="s0">is not None</span>
+            <span class="s2">}</span>
+        <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+            <span class="s4"># literal_eval gives cryptic error messages, show a generic</span>
+            <span class="s4"># message with the full expression instead.</span>
+            <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+                <span class="s5">f&quot;Failed to parse arguments as literal values: </span><span class="s0">{</span><span class="s1">app_name</span><span class="s0">!r}</span><span class="s5">.&quot;</span>
+            <span class="s2">) </span><span class="s0">from None</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+            <span class="s5">f&quot;Failed to parse </span><span class="s0">{</span><span class="s1">app_name</span><span class="s0">!r} </span><span class="s5">as an attribute name or function call.&quot;</span>
+        <span class="s2">)</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">attr </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">module</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+    <span class="s0">except </span><span class="s1">AttributeError </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+            <span class="s5">f&quot;Failed to find attribute </span><span class="s0">{</span><span class="s1">name</span><span class="s0">!r} </span><span class="s5">in </span><span class="s0">{</span><span class="s1">module</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">!r}</span><span class="s5">.&quot;</span>
+        <span class="s2">) </span><span class="s0">from </span><span class="s1">e</span>
+
+    <span class="s4"># If the attribute is a function, call it with any args and kwargs</span>
+    <span class="s4"># to get the real application.</span>
+    <span class="s0">if </span><span class="s1">inspect</span><span class="s2">.</span><span class="s1">isfunction</span><span class="s2">(</span><span class="s1">attr</span><span class="s2">):</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">app </span><span class="s2">= </span><span class="s1">attr</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">TypeError </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+            <span class="s0">if not </span><span class="s1">_called_with_wrong_args</span><span class="s2">(</span><span class="s1">attr</span><span class="s2">):</span>
+                <span class="s0">raise</span>
+
+            <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+                <span class="s5">f&quot;The factory </span><span class="s0">{</span><span class="s1">app_name</span><span class="s0">!r} </span><span class="s5">in module&quot;</span>
+                <span class="s5">f&quot; </span><span class="s0">{</span><span class="s1">module</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">!r} </span><span class="s5">could not be called with the&quot;</span>
+                <span class="s5">&quot; specified arguments.&quot;</span>
+            <span class="s2">) </span><span class="s0">from </span><span class="s1">e</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">app </span><span class="s2">= </span><span class="s1">attr</span>
+
+    <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">app</span><span class="s2">, </span><span class="s1">Flask</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">app</span>
+
+    <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+        <span class="s5">&quot;A valid Flask application was not obtained from&quot;</span>
+        <span class="s5">f&quot; '</span><span class="s0">{</span><span class="s1">module</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s5">:</span><span class="s0">{</span><span class="s1">app_name</span><span class="s0">}</span><span class="s5">'.&quot;</span>
+    <span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">prepare_import</span><span class="s2">(</span><span class="s1">path</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Given a filename this will try to calculate the python path, add it 
+    to the search path and return the actual module name that is expected. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">realpath</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s1">fname</span><span class="s2">, </span><span class="s1">ext </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">splitext</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">ext </span><span class="s2">== </span><span class="s5">&quot;.py&quot;</span><span class="s2">:</span>
+        <span class="s1">path </span><span class="s2">= </span><span class="s1">fname</span>
+
+    <span class="s0">if </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">basename</span><span class="s2">(</span><span class="s1">path</span><span class="s2">) == </span><span class="s5">&quot;__init__&quot;</span><span class="s2">:</span>
+        <span class="s1">path </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">dirname</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s1">module_name </span><span class="s2">= []</span>
+
+    <span class="s4"># move up until outside package structure (no __init__.py)</span>
+    <span class="s0">while True</span><span class="s2">:</span>
+        <span class="s1">path</span><span class="s2">, </span><span class="s1">name </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s1">module_name</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">name</span><span class="s2">)</span>
+
+        <span class="s0">if not </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s5">&quot;__init__.py&quot;</span><span class="s2">)):</span>
+            <span class="s0">break</span>
+
+    <span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">path</span><span class="s2">[</span><span class="s6">0</span><span class="s2">] != </span><span class="s1">path</span><span class="s2">:</span>
+        <span class="s1">sys</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s6">0</span><span class="s2">, </span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s5">&quot;.&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">module_name</span><span class="s2">[::-</span><span class="s6">1</span><span class="s2">])</span>
+
+
+<span class="s2">@</span><span class="s1">t</span><span class="s2">.</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">locate_app</span><span class="s2">(</span>
+    <span class="s1">module_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">app_name</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">raise_if_not_found</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Literal</span><span class="s2">[</span><span class="s0">True</span><span class="s2">] = </span><span class="s0">True</span>
+<span class="s2">) </span><span class="s1">-&gt; Flask</span><span class="s2">: ...</span>
+
+
+<span class="s2">@</span><span class="s1">t</span><span class="s2">.</span><span class="s1">overload</span>
+<span class="s0">def </span><span class="s1">locate_app</span><span class="s2">(</span>
+    <span class="s1">module_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">app_name</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">raise_if_not_found</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Literal</span><span class="s2">[</span><span class="s0">False</span><span class="s2">] = ...</span>
+<span class="s2">) </span><span class="s1">-&gt; Flask </span><span class="s2">| </span><span class="s0">None</span><span class="s2">: ...</span>
+
+
+<span class="s0">def </span><span class="s1">locate_app</span><span class="s2">(</span>
+    <span class="s1">module_name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">app_name</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">raise_if_not_found</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span>
+<span class="s2">) </span><span class="s1">-&gt; Flask </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">__import__</span><span class="s2">(</span><span class="s1">module_name</span><span class="s2">)</span>
+    <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+        <span class="s4"># Reraise the ImportError if it occurred within the imported module.</span>
+        <span class="s4"># Determine this by checking whether the trace has a depth &gt; 1.</span>
+        <span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">exc_info</span><span class="s2">()[</span><span class="s6">2</span><span class="s2">].</span><span class="s1">tb_next</span><span class="s2">:  </span><span class="s4"># type: ignore[union-attr]</span>
+            <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+                <span class="s5">f&quot;While importing </span><span class="s0">{</span><span class="s1">module_name</span><span class="s0">!r}</span><span class="s5">, an ImportError was&quot;</span>
+                <span class="s5">f&quot; raised:</span><span class="s0">\n\n{</span><span class="s1">traceback</span><span class="s2">.</span><span class="s1">format_exc</span><span class="s2">()</span><span class="s0">}</span><span class="s5">&quot;</span>
+            <span class="s2">) </span><span class="s0">from None</span>
+        <span class="s0">elif </span><span class="s1">raise_if_not_found</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span><span class="s5">f&quot;Could not import </span><span class="s0">{</span><span class="s1">module_name</span><span class="s0">!r}</span><span class="s5">.&quot;</span><span class="s2">) </span><span class="s0">from None</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">return None</span>
+
+    <span class="s1">module </span><span class="s2">= </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">modules</span><span class="s2">[</span><span class="s1">module_name</span><span class="s2">]</span>
+
+    <span class="s0">if </span><span class="s1">app_name </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">find_best_app</span><span class="s2">(</span><span class="s1">module</span><span class="s2">)</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">find_app_by_string</span><span class="s2">(</span><span class="s1">module</span><span class="s2">, </span><span class="s1">app_name</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_version</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">, </span><span class="s1">param</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Parameter</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">if not </span><span class="s1">value </span><span class="s0">or </span><span class="s1">ctx</span><span class="s2">.</span><span class="s1">resilient_parsing</span><span class="s2">:</span>
+        <span class="s0">return</span>
+
+    <span class="s1">flask_version </span><span class="s2">= </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">metadata</span><span class="s2">.</span><span class="s1">version</span><span class="s2">(</span><span class="s5">&quot;flask&quot;</span><span class="s2">)</span>
+    <span class="s1">werkzeug_version </span><span class="s2">= </span><span class="s1">importlib</span><span class="s2">.</span><span class="s1">metadata</span><span class="s2">.</span><span class="s1">version</span><span class="s2">(</span><span class="s5">&quot;werkzeug&quot;</span><span class="s2">)</span>
+
+    <span class="s1">click</span><span class="s2">.</span><span class="s1">echo</span><span class="s2">(</span>
+        <span class="s5">f&quot;Python </span><span class="s0">{</span><span class="s1">platform</span><span class="s2">.</span><span class="s1">python_version</span><span class="s2">()</span><span class="s0">}\n</span><span class="s5">&quot;</span>
+        <span class="s5">f&quot;Flask </span><span class="s0">{</span><span class="s1">flask_version</span><span class="s0">}\n</span><span class="s5">&quot;</span>
+        <span class="s5">f&quot;Werkzeug </span><span class="s0">{</span><span class="s1">werkzeug_version</span><span class="s0">}</span><span class="s5">&quot;</span><span class="s2">,</span>
+        <span class="s1">color</span><span class="s2">=</span><span class="s1">ctx</span><span class="s2">.</span><span class="s1">color</span><span class="s2">,</span>
+    <span class="s2">)</span>
+    <span class="s1">ctx</span><span class="s2">.</span><span class="s1">exit</span><span class="s2">()</span>
+
+
+<span class="s1">version_option </span><span class="s2">= </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Option</span><span class="s2">(</span>
+    <span class="s2">[</span><span class="s5">&quot;--version&quot;</span><span class="s2">],</span>
+    <span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;Show the Flask version.&quot;</span><span class="s2">,</span>
+    <span class="s1">expose_value</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">callback</span><span class="s2">=</span><span class="s1">get_version</span><span class="s2">,</span>
+    <span class="s1">is_flag</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+    <span class="s1">is_eager</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">ScriptInfo</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Helper object to deal with Flask applications.  This is usually not 
+    necessary to interface with as it's used internally in the dispatching 
+    to click.  In future versions of Flask this object will most likely play 
+    a bigger role.  Typically it's created automatically by the 
+    :class:`FlaskGroup` but you can also manually create it and pass it 
+    onwards as click object. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">app_import_path</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">create_app</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[..., </span><span class="s1">Flask</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">set_debug_flag</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s4">#: Optionally the import path for the Flask application.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">app_import_path </span><span class="s2">= </span><span class="s1">app_import_path</span>
+        <span class="s4">#: Optionally a function that is passed the script info to create</span>
+        <span class="s4">#: the instance of the application.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">create_app </span><span class="s2">= </span><span class="s1">create_app</span>
+        <span class="s4">#: A dictionary with arbitrary data that can be associated with</span>
+        <span class="s4">#: this script info.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">data</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">] = {}</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">set_debug_flag </span><span class="s2">= </span><span class="s1">set_debug_flag</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_loaded_app</span><span class="s2">: </span><span class="s1">Flask </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">load_app</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Flask</span><span class="s2">:</span>
+        <span class="s3">&quot;&quot;&quot;Loads the Flask app (if not yet loaded) and returns it.  Calling 
+        this multiple times will just result in the already loaded app to 
+        be returned. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_loaded_app </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_loaded_app</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">create_app </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">app</span><span class="s2">: </span><span class="s1">Flask </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">create_app</span><span class="s2">()</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">app_import_path</span><span class="s2">:</span>
+                <span class="s1">path</span><span class="s2">, </span><span class="s1">name </span><span class="s2">= (</span>
+                    <span class="s1">re</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s5">r&quot;:(?![\\/])&quot;</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">app_import_path</span><span class="s2">, </span><span class="s1">maxsplit</span><span class="s2">=</span><span class="s6">1</span><span class="s2">) + [</span><span class="s0">None</span><span class="s2">]</span>
+                <span class="s2">)[:</span><span class="s6">2</span><span class="s2">]</span>
+                <span class="s1">import_name </span><span class="s2">= </span><span class="s1">prepare_import</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+                <span class="s1">app </span><span class="s2">= </span><span class="s1">locate_app</span><span class="s2">(</span><span class="s1">import_name</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">for </span><span class="s1">path </span><span class="s0">in </span><span class="s2">(</span><span class="s5">&quot;wsgi.py&quot;</span><span class="s2">, </span><span class="s5">&quot;app.py&quot;</span><span class="s2">):</span>
+                    <span class="s1">import_name </span><span class="s2">= </span><span class="s1">prepare_import</span><span class="s2">(</span><span class="s1">path</span><span class="s2">)</span>
+                    <span class="s1">app </span><span class="s2">= </span><span class="s1">locate_app</span><span class="s2">(</span><span class="s1">import_name</span><span class="s2">, </span><span class="s0">None</span><span class="s2">, </span><span class="s1">raise_if_not_found</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+
+                    <span class="s0">if </span><span class="s1">app </span><span class="s0">is not None</span><span class="s2">:</span>
+                        <span class="s0">break</span>
+
+        <span class="s0">if </span><span class="s1">app </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">NoAppException</span><span class="s2">(</span>
+                <span class="s5">&quot;Could not locate a Flask application. Use the&quot;</span>
+                <span class="s5">&quot; 'flask --app' option, 'FLASK_APP' environment&quot;</span>
+                <span class="s5">&quot; variable, or a 'wsgi.py' or 'app.py' file in the&quot;</span>
+                <span class="s5">&quot; current directory.&quot;</span>
+            <span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">set_debug_flag</span><span class="s2">:</span>
+            <span class="s4"># Update the app's debug flag through the descriptor so that</span>
+            <span class="s4"># other values repopulate as well.</span>
+            <span class="s1">app</span><span class="s2">.</span><span class="s1">debug </span><span class="s2">= </span><span class="s1">get_debug_flag</span><span class="s2">()</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_loaded_app </span><span class="s2">= </span><span class="s1">app</span>
+        <span class="s0">return </span><span class="s1">app</span>
+
+
+<span class="s1">pass_script_info </span><span class="s2">= </span><span class="s1">click</span><span class="s2">.</span><span class="s1">make_pass_decorator</span><span class="s2">(</span><span class="s1">ScriptInfo</span><span class="s2">, </span><span class="s1">ensure</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+<span class="s1">F </span><span class="s2">= </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TypeVar</span><span class="s2">(</span><span class="s5">&quot;F&quot;</span><span class="s2">, </span><span class="s1">bound</span><span class="s2">=</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[..., </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">])</span>
+
+
+<span class="s0">def </span><span class="s1">with_appcontext</span><span class="s2">(</span><span class="s1">f</span><span class="s2">: </span><span class="s1">F</span><span class="s2">) </span><span class="s1">-&gt; F</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Wraps a callback so that it's guaranteed to be executed with the 
+    script's application context. 
+ 
+    Custom commands (and their options) registered under ``app.cli`` or 
+    ``blueprint.cli`` will always have an app context available, this 
+    decorator is not required in that case. 
+ 
+    .. versionchanged:: 2.2 
+        The app context is active for subcommands as well as the 
+        decorated callback. The app context is always available to 
+        ``app.cli`` command and parameter callbacks. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">pass_context</span>
+    <span class="s0">def </span><span class="s1">decorator</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">, /, *</span><span class="s1">args</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">:</span>
+        <span class="s0">if not </span><span class="s1">current_app</span><span class="s2">:</span>
+            <span class="s1">app </span><span class="s2">= </span><span class="s1">ctx</span><span class="s2">.</span><span class="s1">ensure_object</span><span class="s2">(</span><span class="s1">ScriptInfo</span><span class="s2">).</span><span class="s1">load_app</span><span class="s2">()</span>
+            <span class="s1">ctx</span><span class="s2">.</span><span class="s1">with_resource</span><span class="s2">(</span><span class="s1">app</span><span class="s2">.</span><span class="s1">app_context</span><span class="s2">())</span>
+
+        <span class="s0">return </span><span class="s1">ctx</span><span class="s2">.</span><span class="s1">invoke</span><span class="s2">(</span><span class="s1">f</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">update_wrapper</span><span class="s2">(</span><span class="s1">decorator</span><span class="s2">, </span><span class="s1">f</span><span class="s2">)  </span><span class="s4"># type: ignore[return-value]</span>
+
+
+<span class="s0">class </span><span class="s1">AppGroup</span><span class="s2">(</span><span class="s1">click</span><span class="s2">.</span><span class="s1">Group</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;This works similar to a regular click :class:`~click.Group` but it 
+    changes the behavior of the :meth:`command` decorator so that it 
+    automatically wraps the functions in :func:`with_appcontext`. 
+ 
+    Not to be confused with :class:`FlaskGroup`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">command</span><span class="s2">(  </span><span class="s4"># type: ignore[override]</span>
+        <span class="s1">self</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span>
+    <span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[..., </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]], </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Command</span><span class="s2">]:</span>
+        <span class="s3">&quot;&quot;&quot;This works exactly like the method of the same name on a regular 
+        :class:`click.Group` but it wraps callbacks in :func:`with_appcontext` 
+        unless it's disabled by passing ``with_appcontext=False``. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">wrap_for_ctx </span><span class="s2">= </span><span class="s1">kwargs</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s5">&quot;with_appcontext&quot;</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">decorator</span><span class="s2">(</span><span class="s1">f</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[..., </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]) </span><span class="s1">-&gt; click</span><span class="s2">.</span><span class="s1">Command</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">wrap_for_ctx</span><span class="s2">:</span>
+                <span class="s1">f </span><span class="s2">= </span><span class="s1">with_appcontext</span><span class="s2">(</span><span class="s1">f</span><span class="s2">)</span>
+            <span class="s0">return </span><span class="s1">super</span><span class="s2">(</span><span class="s1">AppGroup</span><span class="s2">, </span><span class="s1">self</span><span class="s2">).</span><span class="s1">command</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)(</span><span class="s1">f</span><span class="s2">)  </span><span class="s4"># type: ignore[no-any-return]</span>
+
+        <span class="s0">return </span><span class="s1">decorator</span>
+
+    <span class="s0">def </span><span class="s1">group</span><span class="s2">(  </span><span class="s4"># type: ignore[override]</span>
+        <span class="s1">self</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span>
+    <span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[..., </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]], </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Group</span><span class="s2">]:</span>
+        <span class="s3">&quot;&quot;&quot;This works exactly like the method of the same name on a regular 
+        :class:`click.Group` but it defaults the group class to 
+        :class:`AppGroup`. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">kwargs</span><span class="s2">.</span><span class="s1">setdefault</span><span class="s2">(</span><span class="s5">&quot;cls&quot;</span><span class="s2">, </span><span class="s1">AppGroup</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">super</span><span class="s2">().</span><span class="s1">group</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)  </span><span class="s4"># type: ignore[no-any-return]</span>
+
+
+<span class="s0">def </span><span class="s1">_set_app</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">, </span><span class="s1">param</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Option</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">if </span><span class="s1">value </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">return None</span>
+
+    <span class="s1">info </span><span class="s2">= </span><span class="s1">ctx</span><span class="s2">.</span><span class="s1">ensure_object</span><span class="s2">(</span><span class="s1">ScriptInfo</span><span class="s2">)</span>
+    <span class="s1">info</span><span class="s2">.</span><span class="s1">app_import_path </span><span class="s2">= </span><span class="s1">value</span>
+    <span class="s0">return </span><span class="s1">value</span>
+
+
+<span class="s4"># This option is eager so the app will be available if --help is given.</span>
+<span class="s4"># --help is also eager, so --app must be before it in the param list.</span>
+<span class="s4"># no_args_is_help bypasses eager processing, so this option must be</span>
+<span class="s4"># processed manually in that case to ensure FLASK_APP gets picked up.</span>
+<span class="s1">_app_option </span><span class="s2">= </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Option</span><span class="s2">(</span>
+    <span class="s2">[</span><span class="s5">&quot;-A&quot;</span><span class="s2">, </span><span class="s5">&quot;--app&quot;</span><span class="s2">],</span>
+    <span class="s1">metavar</span><span class="s2">=</span><span class="s5">&quot;IMPORT&quot;</span><span class="s2">,</span>
+    <span class="s1">help</span><span class="s2">=(</span>
+        <span class="s5">&quot;The Flask application or factory function to load, in the form 'module:name'.&quot;</span>
+        <span class="s5">&quot; Module can be a dotted import or file path. Name is not required if it is&quot;</span>
+        <span class="s5">&quot; 'app', 'application', 'create_app', or 'make_app', and can be 'name(args)' to&quot;</span>
+        <span class="s5">&quot; pass arguments.&quot;</span>
+    <span class="s2">),</span>
+    <span class="s1">is_eager</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+    <span class="s1">expose_value</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">callback</span><span class="s2">=</span><span class="s1">_set_app</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_set_debug</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">, </span><span class="s1">param</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Option</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">) </span><span class="s1">-&gt; bool </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s4"># If the flag isn't provided, it will default to False. Don't use</span>
+    <span class="s4"># that, let debug be set by env in that case.</span>
+    <span class="s1">source </span><span class="s2">= </span><span class="s1">ctx</span><span class="s2">.</span><span class="s1">get_parameter_source</span><span class="s2">(</span><span class="s1">param</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)  </span><span class="s4"># type: ignore[arg-type]</span>
+
+    <span class="s0">if </span><span class="s1">source </span><span class="s0">is not None and </span><span class="s1">source </span><span class="s0">in </span><span class="s2">(</span>
+        <span class="s1">ParameterSource</span><span class="s2">.</span><span class="s1">DEFAULT</span><span class="s2">,</span>
+        <span class="s1">ParameterSource</span><span class="s2">.</span><span class="s1">DEFAULT_MAP</span><span class="s2">,</span>
+    <span class="s2">):</span>
+        <span class="s0">return None</span>
+
+    <span class="s4"># Set with env var instead of ScriptInfo.load so that it can be</span>
+    <span class="s4"># accessed early during a factory function.</span>
+    <span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span><span class="s2">[</span><span class="s5">&quot;FLASK_DEBUG&quot;</span><span class="s2">] = </span><span class="s5">&quot;1&quot; </span><span class="s0">if </span><span class="s1">value </span><span class="s0">else </span><span class="s5">&quot;0&quot;</span>
+    <span class="s0">return </span><span class="s1">value</span>
+
+
+<span class="s1">_debug_option </span><span class="s2">= </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Option</span><span class="s2">(</span>
+    <span class="s2">[</span><span class="s5">&quot;--debug/--no-debug&quot;</span><span class="s2">],</span>
+    <span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;Set debug mode.&quot;</span><span class="s2">,</span>
+    <span class="s1">expose_value</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">callback</span><span class="s2">=</span><span class="s1">_set_debug</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_env_file_callback</span><span class="s2">(</span>
+    <span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">, </span><span class="s1">param</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Option</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span>
+<span class="s2">) </span><span class="s1">-&gt; str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">if </span><span class="s1">value </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">import </span><span class="s1">importlib</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">importlib</span><span class="s2">.</span><span class="s1">import_module</span><span class="s2">(</span><span class="s5">&quot;dotenv&quot;</span><span class="s2">)</span>
+    <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+        <span class="s0">raise </span><span class="s1">click</span><span class="s2">.</span><span class="s1">BadParameter</span><span class="s2">(</span>
+            <span class="s5">&quot;python-dotenv must be installed to load an env file.&quot;</span><span class="s2">,</span>
+            <span class="s1">ctx</span><span class="s2">=</span><span class="s1">ctx</span><span class="s2">,</span>
+            <span class="s1">param</span><span class="s2">=</span><span class="s1">param</span><span class="s2">,</span>
+        <span class="s2">) </span><span class="s0">from None</span>
+
+    <span class="s4"># Don't check FLASK_SKIP_DOTENV, that only disables automatically</span>
+    <span class="s4"># loading .env and .flaskenv files.</span>
+    <span class="s1">load_dotenv</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">value</span>
+
+
+<span class="s4"># This option is eager so env vars are loaded as early as possible to be</span>
+<span class="s4"># used by other options.</span>
+<span class="s1">_env_file_option </span><span class="s2">= </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Option</span><span class="s2">(</span>
+    <span class="s2">[</span><span class="s5">&quot;-e&quot;</span><span class="s2">, </span><span class="s5">&quot;--env-file&quot;</span><span class="s2">],</span>
+    <span class="s1">type</span><span class="s2">=</span><span class="s1">click</span><span class="s2">.</span><span class="s1">Path</span><span class="s2">(</span><span class="s1">exists</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">dir_okay</span><span class="s2">=</span><span class="s0">False</span><span class="s2">),</span>
+    <span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;Load environment variables from this file. python-dotenv must be installed.&quot;</span><span class="s2">,</span>
+    <span class="s1">is_eager</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+    <span class="s1">expose_value</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">callback</span><span class="s2">=</span><span class="s1">_env_file_callback</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">FlaskGroup</span><span class="s2">(</span><span class="s1">AppGroup</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Special subclass of the :class:`AppGroup` group that supports 
+    loading more commands from the configured Flask app.  Normally a 
+    developer does not have to interface with this class but there are 
+    some very advanced use cases for which it makes sense to create an 
+    instance of this. see :ref:`custom-scripts`. 
+ 
+    :param add_default_commands: if this is True then the default run and 
+        shell commands will be added. 
+    :param add_version_option: adds the ``--version`` option. 
+    :param create_app: an optional callback that is passed the script info and 
+        returns the loaded app. 
+    :param load_dotenv: Load the nearest :file:`.env` and :file:`.flaskenv` 
+        files to set environment variables. Will also change the working 
+        directory to the directory containing the first file found. 
+    :param set_debug_flag: Set the app's debug flag. 
+ 
+    .. versionchanged:: 2.2 
+        Added the ``-A/--app``, ``--debug/--no-debug``, ``-e/--env-file`` options. 
+ 
+    .. versionchanged:: 2.2 
+        An app context is pushed when running ``app.cli`` commands, so 
+        ``@with_appcontext`` is no longer required for those commands. 
+ 
+    .. versionchanged:: 1.0 
+        If installed, python-dotenv will be used to load environment variables 
+        from :file:`.env` and :file:`.flaskenv` files. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">add_default_commands</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s1">create_app</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[..., </span><span class="s1">Flask</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">add_version_option</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s1">load_dotenv</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s1">set_debug_flag</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s0">True</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">extra</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">params </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">extra</span><span class="s2">.</span><span class="s1">pop</span><span class="s2">(</span><span class="s5">&quot;params&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">) </span><span class="s0">or </span><span class="s2">())</span>
+        <span class="s4"># Processing is done with option callbacks instead of a group</span>
+        <span class="s4"># callback. This allows users to make a custom group callback</span>
+        <span class="s4"># without losing the behavior. --env-file must come first so</span>
+        <span class="s4"># that it is eagerly evaluated before --app.</span>
+        <span class="s1">params</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">((</span><span class="s1">_env_file_option</span><span class="s2">, </span><span class="s1">_app_option</span><span class="s2">, </span><span class="s1">_debug_option</span><span class="s2">))</span>
+
+        <span class="s0">if </span><span class="s1">add_version_option</span><span class="s2">:</span>
+            <span class="s1">params</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">version_option</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s5">&quot;context_settings&quot; </span><span class="s0">not in </span><span class="s1">extra</span><span class="s2">:</span>
+            <span class="s1">extra</span><span class="s2">[</span><span class="s5">&quot;context_settings&quot;</span><span class="s2">] = {}</span>
+
+        <span class="s1">extra</span><span class="s2">[</span><span class="s5">&quot;context_settings&quot;</span><span class="s2">].</span><span class="s1">setdefault</span><span class="s2">(</span><span class="s5">&quot;auto_envvar_prefix&quot;</span><span class="s2">, </span><span class="s5">&quot;FLASK&quot;</span><span class="s2">)</span>
+
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">params</span><span class="s2">=</span><span class="s1">params</span><span class="s2">, **</span><span class="s1">extra</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">create_app </span><span class="s2">= </span><span class="s1">create_app</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">load_dotenv </span><span class="s2">= </span><span class="s1">load_dotenv</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">set_debug_flag </span><span class="s2">= </span><span class="s1">set_debug_flag</span>
+
+        <span class="s0">if </span><span class="s1">add_default_commands</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">add_command</span><span class="s2">(</span><span class="s1">run_command</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">add_command</span><span class="s2">(</span><span class="s1">shell_command</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">add_command</span><span class="s2">(</span><span class="s1">routes_command</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_loaded_plugin_commands </span><span class="s2">= </span><span class="s0">False</span>
+
+    <span class="s0">def </span><span class="s1">_load_plugin_commands</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_loaded_plugin_commands</span><span class="s2">:</span>
+            <span class="s0">return</span>
+
+        <span class="s0">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&gt;= (</span><span class="s6">3</span><span class="s2">, </span><span class="s6">10</span><span class="s2">):</span>
+            <span class="s0">from </span><span class="s1">importlib </span><span class="s0">import </span><span class="s1">metadata</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s4"># Use a backport on Python &lt; 3.10. We technically have</span>
+            <span class="s4"># importlib.metadata on 3.8+, but the API changed in 3.10,</span>
+            <span class="s4"># so use the backport for consistency.</span>
+            <span class="s0">import </span><span class="s1">importlib_metadata </span><span class="s0">as </span><span class="s1">metadata</span>
+
+        <span class="s0">for </span><span class="s1">ep </span><span class="s0">in </span><span class="s1">metadata</span><span class="s2">.</span><span class="s1">entry_points</span><span class="s2">(</span><span class="s1">group</span><span class="s2">=</span><span class="s5">&quot;flask.commands&quot;</span><span class="s2">):</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">add_command</span><span class="s2">(</span><span class="s1">ep</span><span class="s2">.</span><span class="s1">load</span><span class="s2">(), </span><span class="s1">ep</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_loaded_plugin_commands </span><span class="s2">= </span><span class="s0">True</span>
+
+    <span class="s0">def </span><span class="s1">get_command</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">, </span><span class="s1">name</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; click</span><span class="s2">.</span><span class="s1">Command </span><span class="s2">| </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_load_plugin_commands</span><span class="s2">()</span>
+        <span class="s4"># Look up built-in and plugin commands, which should be</span>
+        <span class="s4"># available even if the app fails to load.</span>
+        <span class="s1">rv </span><span class="s2">= </span><span class="s1">super</span><span class="s2">().</span><span class="s1">get_command</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">rv</span>
+
+        <span class="s1">info </span><span class="s2">= </span><span class="s1">ctx</span><span class="s2">.</span><span class="s1">ensure_object</span><span class="s2">(</span><span class="s1">ScriptInfo</span><span class="s2">)</span>
+
+        <span class="s4"># Look up commands provided by the app, showing an error and</span>
+        <span class="s4"># continuing if the app couldn't be loaded.</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">app </span><span class="s2">= </span><span class="s1">info</span><span class="s2">.</span><span class="s1">load_app</span><span class="s2">()</span>
+        <span class="s0">except </span><span class="s1">NoAppException </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+            <span class="s1">click</span><span class="s2">.</span><span class="s1">secho</span><span class="s2">(</span><span class="s5">f&quot;Error: </span><span class="s0">{</span><span class="s1">e</span><span class="s2">.</span><span class="s1">format_message</span><span class="s2">()</span><span class="s0">}\n</span><span class="s5">&quot;</span><span class="s2">, </span><span class="s1">err</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">fg</span><span class="s2">=</span><span class="s5">&quot;red&quot;</span><span class="s2">)</span>
+            <span class="s0">return None</span>
+
+        <span class="s4"># Push an app context for the loaded app unless it is already</span>
+        <span class="s4"># active somehow. This makes the context available to parameter</span>
+        <span class="s4"># and command callbacks without needing @with_appcontext.</span>
+        <span class="s0">if not </span><span class="s1">current_app </span><span class="s0">or </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">_get_current_object</span><span class="s2">() </span><span class="s0">is not </span><span class="s1">app</span><span class="s2">:  </span><span class="s4"># type: ignore[attr-defined]</span>
+            <span class="s1">ctx</span><span class="s2">.</span><span class="s1">with_resource</span><span class="s2">(</span><span class="s1">app</span><span class="s2">.</span><span class="s1">app_context</span><span class="s2">())</span>
+
+        <span class="s0">return </span><span class="s1">app</span><span class="s2">.</span><span class="s1">cli</span><span class="s2">.</span><span class="s1">get_command</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">, </span><span class="s1">name</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">list_commands</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">) </span><span class="s1">-&gt; list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_load_plugin_commands</span><span class="s2">()</span>
+        <span class="s4"># Start with the built-in and plugin commands.</span>
+        <span class="s1">rv </span><span class="s2">= </span><span class="s1">set</span><span class="s2">(</span><span class="s1">super</span><span class="s2">().</span><span class="s1">list_commands</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">))</span>
+        <span class="s1">info </span><span class="s2">= </span><span class="s1">ctx</span><span class="s2">.</span><span class="s1">ensure_object</span><span class="s2">(</span><span class="s1">ScriptInfo</span><span class="s2">)</span>
+
+        <span class="s4"># Add commands provided by the app, showing an error and</span>
+        <span class="s4"># continuing if the app couldn't be loaded.</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">rv</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">info</span><span class="s2">.</span><span class="s1">load_app</span><span class="s2">().</span><span class="s1">cli</span><span class="s2">.</span><span class="s1">list_commands</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">))</span>
+        <span class="s0">except </span><span class="s1">NoAppException </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+            <span class="s4"># When an app couldn't be loaded, show the error message</span>
+            <span class="s4"># without the traceback.</span>
+            <span class="s1">click</span><span class="s2">.</span><span class="s1">secho</span><span class="s2">(</span><span class="s5">f&quot;Error: </span><span class="s0">{</span><span class="s1">e</span><span class="s2">.</span><span class="s1">format_message</span><span class="s2">()</span><span class="s0">}\n</span><span class="s5">&quot;</span><span class="s2">, </span><span class="s1">err</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">fg</span><span class="s2">=</span><span class="s5">&quot;red&quot;</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">Exception</span><span class="s2">:</span>
+            <span class="s4"># When any other errors occurred during loading, show the</span>
+            <span class="s4"># full traceback.</span>
+            <span class="s1">click</span><span class="s2">.</span><span class="s1">secho</span><span class="s2">(</span><span class="s5">f&quot;</span><span class="s0">{</span><span class="s1">traceback</span><span class="s2">.</span><span class="s1">format_exc</span><span class="s2">()</span><span class="s0">}\n</span><span class="s5">&quot;</span><span class="s2">, </span><span class="s1">err</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">fg</span><span class="s2">=</span><span class="s5">&quot;red&quot;</span><span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">sorted</span><span class="s2">(</span><span class="s1">rv</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">make_context</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">info_name</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s1">args</span><span class="s2">: </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">],</span>
+        <span class="s1">parent</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">extra</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">:</span>
+        <span class="s4"># Set a flag to tell app.run to become a no-op. If app.run was</span>
+        <span class="s4"># not in a __name__ == __main__ guard, it would start the server</span>
+        <span class="s4"># when importing, blocking whatever command is being called.</span>
+        <span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span><span class="s2">[</span><span class="s5">&quot;FLASK_RUN_FROM_CLI&quot;</span><span class="s2">] = </span><span class="s5">&quot;true&quot;</span>
+
+        <span class="s4"># Attempt to load .env and .flask env files. The --env-file</span>
+        <span class="s4"># option can cause another file to be loaded.</span>
+        <span class="s0">if </span><span class="s1">get_load_dotenv</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">load_dotenv</span><span class="s2">):</span>
+            <span class="s1">load_dotenv</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s5">&quot;obj&quot; </span><span class="s0">not in </span><span class="s1">extra </span><span class="s0">and </span><span class="s5">&quot;obj&quot; </span><span class="s0">not in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">context_settings</span><span class="s2">:</span>
+            <span class="s1">extra</span><span class="s2">[</span><span class="s5">&quot;obj&quot;</span><span class="s2">] = </span><span class="s1">ScriptInfo</span><span class="s2">(</span>
+                <span class="s1">create_app</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">create_app</span><span class="s2">, </span><span class="s1">set_debug_flag</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">set_debug_flag</span>
+            <span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">super</span><span class="s2">().</span><span class="s1">make_context</span><span class="s2">(</span><span class="s1">info_name</span><span class="s2">, </span><span class="s1">args</span><span class="s2">, </span><span class="s1">parent</span><span class="s2">=</span><span class="s1">parent</span><span class="s2">, **</span><span class="s1">extra</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">parse_args</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">, </span><span class="s1">args</span><span class="s2">: </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]) </span><span class="s1">-&gt; list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s0">if not </span><span class="s1">args </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">no_args_is_help</span><span class="s2">:</span>
+            <span class="s4"># Attempt to load --env-file and --app early in case they</span>
+            <span class="s4"># were given as env vars. Otherwise no_args_is_help will not</span>
+            <span class="s4"># see commands from app.cli.</span>
+            <span class="s1">_env_file_option</span><span class="s2">.</span><span class="s1">handle_parse_result</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">, {}, [])</span>
+            <span class="s1">_app_option</span><span class="s2">.</span><span class="s1">handle_parse_result</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">, {}, [])</span>
+
+        <span class="s0">return </span><span class="s1">super</span><span class="s2">().</span><span class="s1">parse_args</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">, </span><span class="s1">args</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_path_is_ancestor</span><span class="s2">(</span><span class="s1">path</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Take ``other`` and remove the length of ``path`` from it. Then join it 
+    to ``path``. If it is the original value, ``path`` is an ancestor of 
+    ``other``.&quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">other</span><span class="s2">[</span><span class="s1">len</span><span class="s2">(</span><span class="s1">path</span><span class="s2">) :].</span><span class="s1">lstrip</span><span class="s2">(</span><span class="s1">os</span><span class="s2">.</span><span class="s1">sep</span><span class="s2">)) == </span><span class="s1">other</span>
+
+
+<span class="s0">def </span><span class="s1">load_dotenv</span><span class="s2">(</span><span class="s1">path</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s1">os</span><span class="s2">.</span><span class="s1">PathLike</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Load &quot;dotenv&quot; files in order of precedence to set environment variables. 
+ 
+    If an env var is already set it is not overwritten, so earlier files in the 
+    list are preferred over later files. 
+ 
+    This is a no-op if `python-dotenv`_ is not installed. 
+ 
+    .. _python-dotenv: https://github.com/theskumar/python-dotenv#readme 
+ 
+    :param path: Load the file at this location instead of searching. 
+    :return: ``True`` if a file was loaded. 
+ 
+    .. versionchanged:: 2.0 
+        The current directory is not changed to the location of the 
+        loaded file. 
+ 
+    .. versionchanged:: 2.0 
+        When loading the env files, set the default encoding to UTF-8. 
+ 
+    .. versionchanged:: 1.1.0 
+        Returns ``False`` when python-dotenv is not installed, or when 
+        the given path isn't a file. 
+ 
+    .. versionadded:: 1.0 
+    &quot;&quot;&quot;</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">import </span><span class="s1">dotenv</span>
+    <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">path </span><span class="s0">or </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isfile</span><span class="s2">(</span><span class="s5">&quot;.env&quot;</span><span class="s2">) </span><span class="s0">or </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isfile</span><span class="s2">(</span><span class="s5">&quot;.flaskenv&quot;</span><span class="s2">):</span>
+            <span class="s1">click</span><span class="s2">.</span><span class="s1">secho</span><span class="s2">(</span>
+                <span class="s5">&quot; * Tip: There are .env or .flaskenv files present.&quot;</span>
+                <span class="s5">' Do &quot;pip install python-dotenv&quot; to use them.'</span><span class="s2">,</span>
+                <span class="s1">fg</span><span class="s2">=</span><span class="s5">&quot;yellow&quot;</span><span class="s2">,</span>
+                <span class="s1">err</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+        <span class="s0">return False</span>
+
+    <span class="s4"># Always return after attempting to load a given path, don't load</span>
+    <span class="s4"># the default files.</span>
+    <span class="s0">if </span><span class="s1">path </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isfile</span><span class="s2">(</span><span class="s1">path</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">dotenv</span><span class="s2">.</span><span class="s1">load_dotenv</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s5">&quot;utf-8&quot;</span><span class="s2">)</span>
+
+        <span class="s0">return False</span>
+
+    <span class="s1">loaded </span><span class="s2">= </span><span class="s0">False</span>
+
+    <span class="s0">for </span><span class="s1">name </span><span class="s0">in </span><span class="s2">(</span><span class="s5">&quot;.env&quot;</span><span class="s2">, </span><span class="s5">&quot;.flaskenv&quot;</span><span class="s2">):</span>
+        <span class="s1">path </span><span class="s2">= </span><span class="s1">dotenv</span><span class="s2">.</span><span class="s1">find_dotenv</span><span class="s2">(</span><span class="s1">name</span><span class="s2">, </span><span class="s1">usecwd</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+        <span class="s0">if not </span><span class="s1">path</span><span class="s2">:</span>
+            <span class="s0">continue</span>
+
+        <span class="s1">dotenv</span><span class="s2">.</span><span class="s1">load_dotenv</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s5">&quot;utf-8&quot;</span><span class="s2">)</span>
+        <span class="s1">loaded </span><span class="s2">= </span><span class="s0">True</span>
+
+    <span class="s0">return </span><span class="s1">loaded  </span><span class="s4"># True if at least one file was located and loaded.</span>
+
+
+<span class="s0">def </span><span class="s1">show_server_banner</span><span class="s2">(</span><span class="s1">debug</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">, </span><span class="s1">app_import_path</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Show extra startup messages the first time the server is run, 
+    ignoring the reloader. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">is_running_from_reloader</span><span class="s2">():</span>
+        <span class="s0">return</span>
+
+    <span class="s0">if </span><span class="s1">app_import_path </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s1">click</span><span class="s2">.</span><span class="s1">echo</span><span class="s2">(</span><span class="s5">f&quot; * Serving Flask app '</span><span class="s0">{</span><span class="s1">app_import_path</span><span class="s0">}</span><span class="s5">'&quot;</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">debug </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s1">click</span><span class="s2">.</span><span class="s1">echo</span><span class="s2">(</span><span class="s5">f&quot; * Debug mode: </span><span class="s0">{</span><span class="s5">'on' </span><span class="s0">if </span><span class="s1">debug </span><span class="s0">else </span><span class="s5">'off'</span><span class="s0">}</span><span class="s5">&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">class </span><span class="s1">CertParamType</span><span class="s2">(</span><span class="s1">click</span><span class="s2">.</span><span class="s1">ParamType</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Click option type for the ``--cert`` option. Allows either an 
+    existing file, the string ``'adhoc'``, or an import for a 
+    :class:`~ssl.SSLContext` object. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">name </span><span class="s2">= </span><span class="s5">&quot;path&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">path_type </span><span class="s2">= </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Path</span><span class="s2">(</span><span class="s1">exists</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">dir_okay</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">resolve_path</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">convert</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">, </span><span class="s1">param</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Parameter </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context </span><span class="s2">| </span><span class="s0">None</span>
+    <span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">:</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">import </span><span class="s1">ssl</span>
+        <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">click</span><span class="s2">.</span><span class="s1">BadParameter</span><span class="s2">(</span>
+                <span class="s5">'Using &quot;--cert&quot; requires Python to be compiled with SSL support.'</span><span class="s2">,</span>
+                <span class="s1">ctx</span><span class="s2">,</span>
+                <span class="s1">param</span><span class="s2">,</span>
+            <span class="s2">) </span><span class="s0">from None</span>
+
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path_type</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, </span><span class="s1">param</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">click</span><span class="s2">.</span><span class="s1">BadParameter</span><span class="s2">:</span>
+            <span class="s1">value </span><span class="s2">= </span><span class="s1">click</span><span class="s2">.</span><span class="s1">STRING</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, </span><span class="s1">param</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">).</span><span class="s1">lower</span><span class="s2">()</span>
+
+            <span class="s0">if </span><span class="s1">value </span><span class="s2">== </span><span class="s5">&quot;adhoc&quot;</span><span class="s2">:</span>
+                <span class="s0">try</span><span class="s2">:</span>
+                    <span class="s0">import </span><span class="s1">cryptography  </span><span class="s4"># noqa: F401</span>
+                <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">click</span><span class="s2">.</span><span class="s1">BadParameter</span><span class="s2">(</span>
+                        <span class="s5">&quot;Using ad-hoc certificates requires the cryptography library.&quot;</span><span class="s2">,</span>
+                        <span class="s1">ctx</span><span class="s2">,</span>
+                        <span class="s1">param</span><span class="s2">,</span>
+                    <span class="s2">) </span><span class="s0">from None</span>
+
+                <span class="s0">return </span><span class="s1">value</span>
+
+            <span class="s1">obj </span><span class="s2">= </span><span class="s1">import_string</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, </span><span class="s1">silent</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">obj</span><span class="s2">, </span><span class="s1">ssl</span><span class="s2">.</span><span class="s1">SSLContext</span><span class="s2">):</span>
+                <span class="s0">return </span><span class="s1">obj</span>
+
+            <span class="s0">raise</span>
+
+
+<span class="s0">def </span><span class="s1">_validate_key</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context</span><span class="s2">, </span><span class="s1">param</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Parameter</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;The ``--key`` option must be specified when ``--cert`` is a file. 
+    Modifies the ``cert`` param to be a ``(cert, key)`` pair if needed. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">cert </span><span class="s2">= </span><span class="s1">ctx</span><span class="s2">.</span><span class="s1">params</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s5">&quot;cert&quot;</span><span class="s2">)</span>
+    <span class="s1">is_adhoc </span><span class="s2">= </span><span class="s1">cert </span><span class="s2">== </span><span class="s5">&quot;adhoc&quot;</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s0">import </span><span class="s1">ssl</span>
+    <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+        <span class="s1">is_context </span><span class="s2">= </span><span class="s0">False</span>
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s1">is_context </span><span class="s2">= </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">cert</span><span class="s2">, </span><span class="s1">ssl</span><span class="s2">.</span><span class="s1">SSLContext</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">value </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">is_adhoc</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">click</span><span class="s2">.</span><span class="s1">BadParameter</span><span class="s2">(</span>
+                <span class="s5">'When &quot;--cert&quot; is &quot;adhoc&quot;, &quot;--key&quot; is not used.'</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">, </span><span class="s1">param</span>
+            <span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">is_context</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">click</span><span class="s2">.</span><span class="s1">BadParameter</span><span class="s2">(</span>
+                <span class="s5">'When &quot;--cert&quot; is an SSLContext object, &quot;--key&quot; is not used.'</span><span class="s2">,</span>
+                <span class="s1">ctx</span><span class="s2">,</span>
+                <span class="s1">param</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+        <span class="s0">if not </span><span class="s1">cert</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">click</span><span class="s2">.</span><span class="s1">BadParameter</span><span class="s2">(</span><span class="s5">'&quot;--cert&quot; must also be specified.'</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">, </span><span class="s1">param</span><span class="s2">)</span>
+
+        <span class="s1">ctx</span><span class="s2">.</span><span class="s1">params</span><span class="s2">[</span><span class="s5">&quot;cert&quot;</span><span class="s2">] = </span><span class="s1">cert</span><span class="s2">, </span><span class="s1">value</span>
+
+    <span class="s0">else</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">cert </span><span class="s0">and not </span><span class="s2">(</span><span class="s1">is_adhoc </span><span class="s0">or </span><span class="s1">is_context</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">click</span><span class="s2">.</span><span class="s1">BadParameter</span><span class="s2">(</span><span class="s5">'Required when using &quot;--cert&quot;.'</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">, </span><span class="s1">param</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">value</span>
+
+
+<span class="s0">class </span><span class="s1">SeparatedPathType</span><span class="s2">(</span><span class="s1">click</span><span class="s2">.</span><span class="s1">Path</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;Click option type that accepts a list of values separated by the 
+    OS's path separator (``:``, ``;`` on Windows). Each value is 
+    validated as a :class:`click.Path` type. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">convert</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">, </span><span class="s1">param</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Parameter </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">: </span><span class="s1">click</span><span class="s2">.</span><span class="s1">Context </span><span class="s2">| </span><span class="s0">None</span>
+    <span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">:</span>
+        <span class="s1">items </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">split_envvar_value</span><span class="s2">(</span><span class="s1">value</span><span class="s2">)</span>
+        <span class="s4"># can't call no-arg super() inside list comprehension until Python 3.12</span>
+        <span class="s1">super_convert </span><span class="s2">= </span><span class="s1">super</span><span class="s2">().</span><span class="s1">convert</span>
+        <span class="s0">return </span><span class="s2">[</span><span class="s1">super_convert</span><span class="s2">(</span><span class="s1">item</span><span class="s2">, </span><span class="s1">param</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">) </span><span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s1">items</span><span class="s2">]</span>
+
+
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">command</span><span class="s2">(</span><span class="s5">&quot;run&quot;</span><span class="s2">, </span><span class="s1">short_help</span><span class="s2">=</span><span class="s5">&quot;Run a development server.&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span><span class="s5">&quot;--host&quot;</span><span class="s2">, </span><span class="s5">&quot;-h&quot;</span><span class="s2">, </span><span class="s1">default</span><span class="s2">=</span><span class="s5">&quot;127.0.0.1&quot;</span><span class="s2">, </span><span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;The interface to bind to.&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span><span class="s5">&quot;--port&quot;</span><span class="s2">, </span><span class="s5">&quot;-p&quot;</span><span class="s2">, </span><span class="s1">default</span><span class="s2">=</span><span class="s6">5000</span><span class="s2">, </span><span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;The port to bind to.&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span>
+    <span class="s5">&quot;--cert&quot;</span><span class="s2">,</span>
+    <span class="s1">type</span><span class="s2">=</span><span class="s1">CertParamType</span><span class="s2">(),</span>
+    <span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;Specify a certificate file to use HTTPS.&quot;</span><span class="s2">,</span>
+    <span class="s1">is_eager</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span>
+    <span class="s5">&quot;--key&quot;</span><span class="s2">,</span>
+    <span class="s1">type</span><span class="s2">=</span><span class="s1">click</span><span class="s2">.</span><span class="s1">Path</span><span class="s2">(</span><span class="s1">exists</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">dir_okay</span><span class="s2">=</span><span class="s0">False</span><span class="s2">, </span><span class="s1">resolve_path</span><span class="s2">=</span><span class="s0">True</span><span class="s2">),</span>
+    <span class="s1">callback</span><span class="s2">=</span><span class="s1">_validate_key</span><span class="s2">,</span>
+    <span class="s1">expose_value</span><span class="s2">=</span><span class="s0">False</span><span class="s2">,</span>
+    <span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;The key file to use when specifying a certificate.&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span>
+    <span class="s5">&quot;--reload/--no-reload&quot;</span><span class="s2">,</span>
+    <span class="s1">default</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;Enable or disable the reloader. By default the reloader &quot;</span>
+    <span class="s5">&quot;is active if debug is enabled.&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span>
+    <span class="s5">&quot;--debugger/--no-debugger&quot;</span><span class="s2">,</span>
+    <span class="s1">default</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;Enable or disable the debugger. By default the debugger &quot;</span>
+    <span class="s5">&quot;is active if debug is enabled.&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span>
+    <span class="s5">&quot;--with-threads/--without-threads&quot;</span><span class="s2">,</span>
+    <span class="s1">default</span><span class="s2">=</span><span class="s0">True</span><span class="s2">,</span>
+    <span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;Enable or disable multithreading.&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span>
+    <span class="s5">&quot;--extra-files&quot;</span><span class="s2">,</span>
+    <span class="s1">default</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">type</span><span class="s2">=</span><span class="s1">SeparatedPathType</span><span class="s2">(),</span>
+    <span class="s1">help</span><span class="s2">=(</span>
+        <span class="s5">&quot;Extra files that trigger a reload on change. Multiple paths&quot;</span>
+        <span class="s5">f&quot; are separated by </span><span class="s0">{</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">pathsep</span><span class="s0">!r}</span><span class="s5">.&quot;</span>
+    <span class="s2">),</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span>
+    <span class="s5">&quot;--exclude-patterns&quot;</span><span class="s2">,</span>
+    <span class="s1">default</span><span class="s2">=</span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">type</span><span class="s2">=</span><span class="s1">SeparatedPathType</span><span class="s2">(),</span>
+    <span class="s1">help</span><span class="s2">=(</span>
+        <span class="s5">&quot;Files matching these fnmatch patterns will not trigger a reload&quot;</span>
+        <span class="s5">&quot; on change. Multiple patterns are separated by&quot;</span>
+        <span class="s5">f&quot; </span><span class="s0">{</span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">pathsep</span><span class="s0">!r}</span><span class="s5">.&quot;</span>
+    <span class="s2">),</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">pass_script_info</span>
+<span class="s0">def </span><span class="s1">run_command</span><span class="s2">(</span>
+    <span class="s1">info</span><span class="s2">: </span><span class="s1">ScriptInfo</span><span class="s2">,</span>
+    <span class="s1">host</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+    <span class="s1">port</span><span class="s2">: </span><span class="s1">int</span><span class="s2">,</span>
+    <span class="s1">reload</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+    <span class="s1">debugger</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+    <span class="s1">with_threads</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+    <span class="s1">cert</span><span class="s2">: </span><span class="s1">ssl</span><span class="s2">.</span><span class="s1">SSLContext </span><span class="s2">| </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">] | </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Literal</span><span class="s2">[</span><span class="s5">&quot;adhoc&quot;</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">extra_files</span><span class="s2">: </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s1">exclude_patterns</span><span class="s2">: </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Run a local development server. 
+ 
+    This server is for development purposes only. It does not provide 
+    the stability, security, or performance of production WSGI servers. 
+ 
+    The reloader and debugger are enabled by default with the '--debug' 
+    option. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">app</span><span class="s2">: </span><span class="s1">WSGIApplication </span><span class="s2">= </span><span class="s1">info</span><span class="s2">.</span><span class="s1">load_app</span><span class="s2">()</span>
+    <span class="s0">except </span><span class="s1">Exception </span><span class="s0">as </span><span class="s1">e</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">is_running_from_reloader</span><span class="s2">():</span>
+            <span class="s4"># When reloading, print out the error immediately, but raise</span>
+            <span class="s4"># it later so the debugger or server can handle it.</span>
+            <span class="s1">traceback</span><span class="s2">.</span><span class="s1">print_exc</span><span class="s2">()</span>
+            <span class="s1">err </span><span class="s2">= </span><span class="s1">e</span>
+
+            <span class="s0">def </span><span class="s1">app</span><span class="s2">(</span>
+                <span class="s1">environ</span><span class="s2">: </span><span class="s1">WSGIEnvironment</span><span class="s2">, </span><span class="s1">start_response</span><span class="s2">: </span><span class="s1">StartResponse</span>
+            <span class="s2">) </span><span class="s1">-&gt; cabc</span><span class="s2">.</span><span class="s1">Iterable</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">]:</span>
+                <span class="s0">raise </span><span class="s1">err </span><span class="s0">from None</span>
+
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s4"># When not reloading, raise the error immediately so the</span>
+            <span class="s4"># command fails.</span>
+            <span class="s0">raise </span><span class="s1">e </span><span class="s0">from None</span>
+
+    <span class="s1">debug </span><span class="s2">= </span><span class="s1">get_debug_flag</span><span class="s2">()</span>
+
+    <span class="s0">if </span><span class="s1">reload </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">reload </span><span class="s2">= </span><span class="s1">debug</span>
+
+    <span class="s0">if </span><span class="s1">debugger </span><span class="s0">is None</span><span class="s2">:</span>
+        <span class="s1">debugger </span><span class="s2">= </span><span class="s1">debug</span>
+
+    <span class="s1">show_server_banner</span><span class="s2">(</span><span class="s1">debug</span><span class="s2">, </span><span class="s1">info</span><span class="s2">.</span><span class="s1">app_import_path</span><span class="s2">)</span>
+
+    <span class="s1">run_simple</span><span class="s2">(</span>
+        <span class="s1">host</span><span class="s2">,</span>
+        <span class="s1">port</span><span class="s2">,</span>
+        <span class="s1">app</span><span class="s2">,</span>
+        <span class="s1">use_reloader</span><span class="s2">=</span><span class="s1">reload</span><span class="s2">,</span>
+        <span class="s1">use_debugger</span><span class="s2">=</span><span class="s1">debugger</span><span class="s2">,</span>
+        <span class="s1">threaded</span><span class="s2">=</span><span class="s1">with_threads</span><span class="s2">,</span>
+        <span class="s1">ssl_context</span><span class="s2">=</span><span class="s1">cert</span><span class="s2">,</span>
+        <span class="s1">extra_files</span><span class="s2">=</span><span class="s1">extra_files</span><span class="s2">,</span>
+        <span class="s1">exclude_patterns</span><span class="s2">=</span><span class="s1">exclude_patterns</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+
+<span class="s1">run_command</span><span class="s2">.</span><span class="s1">params</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s6">0</span><span class="s2">, </span><span class="s1">_debug_option</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">command</span><span class="s2">(</span><span class="s5">&quot;shell&quot;</span><span class="s2">, </span><span class="s1">short_help</span><span class="s2">=</span><span class="s5">&quot;Run a shell in the app context.&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">with_appcontext</span>
+<span class="s0">def </span><span class="s1">shell_command</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Run an interactive Python shell in the context of a given 
+    Flask application.  The application will populate the default 
+    namespace of this shell according to its configuration. 
+ 
+    This is useful for executing small snippets of management code 
+    without having to manually configure the application. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">import </span><span class="s1">code</span>
+
+    <span class="s1">banner </span><span class="s2">= (</span>
+        <span class="s5">f&quot;Python </span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version</span><span class="s0">} </span><span class="s5">on </span><span class="s0">{</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">platform</span><span class="s0">}\n</span><span class="s5">&quot;</span>
+        <span class="s5">f&quot;App: </span><span class="s0">{</span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">import_name</span><span class="s0">}\n</span><span class="s5">&quot;</span>
+        <span class="s5">f&quot;Instance: </span><span class="s0">{</span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">instance_path</span><span class="s0">}</span><span class="s5">&quot;</span>
+    <span class="s2">)</span>
+    <span class="s1">ctx</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">] = {}</span>
+
+    <span class="s4"># Support the regular Python interpreter startup script if someone</span>
+    <span class="s4"># is using it.</span>
+    <span class="s1">startup </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s5">&quot;PYTHONSTARTUP&quot;</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">startup </span><span class="s0">and </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">isfile</span><span class="s2">(</span><span class="s1">startup</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">open</span><span class="s2">(</span><span class="s1">startup</span><span class="s2">) </span><span class="s0">as </span><span class="s1">f</span><span class="s2">:</span>
+            <span class="s1">eval</span><span class="s2">(</span><span class="s1">compile</span><span class="s2">(</span><span class="s1">f</span><span class="s2">.</span><span class="s1">read</span><span class="s2">(), </span><span class="s1">startup</span><span class="s2">, </span><span class="s5">&quot;exec&quot;</span><span class="s2">), </span><span class="s1">ctx</span><span class="s2">)</span>
+
+    <span class="s1">ctx</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">make_shell_context</span><span class="s2">())</span>
+
+    <span class="s4"># Site, customize, or startup script can set a hook to call when</span>
+    <span class="s4"># entering interactive mode. The default one sets up readline with</span>
+    <span class="s4"># tab and history completion.</span>
+    <span class="s1">interactive_hook </span><span class="s2">= </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">, </span><span class="s5">&quot;__interactivehook__&quot;</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">interactive_hook </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s0">import </span><span class="s1">readline</span>
+            <span class="s0">from </span><span class="s1">rlcompleter </span><span class="s0">import </span><span class="s1">Completer</span>
+        <span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+            <span class="s0">pass</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s4"># rlcompleter uses __main__.__dict__ by default, which is</span>
+            <span class="s4"># flask.__main__. Use the shell context instead.</span>
+            <span class="s1">readline</span><span class="s2">.</span><span class="s1">set_completer</span><span class="s2">(</span><span class="s1">Completer</span><span class="s2">(</span><span class="s1">ctx</span><span class="s2">).</span><span class="s1">complete</span><span class="s2">)</span>
+
+        <span class="s1">interactive_hook</span><span class="s2">()</span>
+
+    <span class="s1">code</span><span class="s2">.</span><span class="s1">interact</span><span class="s2">(</span><span class="s1">banner</span><span class="s2">=</span><span class="s1">banner</span><span class="s2">, </span><span class="s1">local</span><span class="s2">=</span><span class="s1">ctx</span><span class="s2">)</span>
+
+
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">command</span><span class="s2">(</span><span class="s5">&quot;routes&quot;</span><span class="s2">, </span><span class="s1">short_help</span><span class="s2">=</span><span class="s5">&quot;Show the routes for the app.&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span>
+    <span class="s5">&quot;--sort&quot;</span><span class="s2">,</span>
+    <span class="s5">&quot;-s&quot;</span><span class="s2">,</span>
+    <span class="s1">type</span><span class="s2">=</span><span class="s1">click</span><span class="s2">.</span><span class="s1">Choice</span><span class="s2">((</span><span class="s5">&quot;endpoint&quot;</span><span class="s2">, </span><span class="s5">&quot;methods&quot;</span><span class="s2">, </span><span class="s5">&quot;domain&quot;</span><span class="s2">, </span><span class="s5">&quot;rule&quot;</span><span class="s2">, </span><span class="s5">&quot;match&quot;</span><span class="s2">)),</span>
+    <span class="s1">default</span><span class="s2">=</span><span class="s5">&quot;endpoint&quot;</span><span class="s2">,</span>
+    <span class="s1">help</span><span class="s2">=(</span>
+        <span class="s5">&quot;Method to sort routes by. 'match' is the order that Flask will match routes&quot;</span>
+        <span class="s5">&quot; when dispatching a request.&quot;</span>
+    <span class="s2">),</span>
+<span class="s2">)</span>
+<span class="s2">@</span><span class="s1">click</span><span class="s2">.</span><span class="s1">option</span><span class="s2">(</span><span class="s5">&quot;--all-methods&quot;</span><span class="s2">, </span><span class="s1">is_flag</span><span class="s2">=</span><span class="s0">True</span><span class="s2">, </span><span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;Show HEAD and OPTIONS methods.&quot;</span><span class="s2">)</span>
+<span class="s2">@</span><span class="s1">with_appcontext</span>
+<span class="s0">def </span><span class="s1">routes_command</span><span class="s2">(</span><span class="s1">sort</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, </span><span class="s1">all_methods</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s3">&quot;&quot;&quot;Show all registered routes with endpoints and methods.&quot;&quot;&quot;</span>
+    <span class="s1">rules </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">url_map</span><span class="s2">.</span><span class="s1">iter_rules</span><span class="s2">())</span>
+
+    <span class="s0">if not </span><span class="s1">rules</span><span class="s2">:</span>
+        <span class="s1">click</span><span class="s2">.</span><span class="s1">echo</span><span class="s2">(</span><span class="s5">&quot;No routes were registered.&quot;</span><span class="s2">)</span>
+        <span class="s0">return</span>
+
+    <span class="s1">ignored_methods </span><span class="s2">= </span><span class="s1">set</span><span class="s2">() </span><span class="s0">if </span><span class="s1">all_methods </span><span class="s0">else </span><span class="s2">{</span><span class="s5">&quot;HEAD&quot;</span><span class="s2">, </span><span class="s5">&quot;OPTIONS&quot;</span><span class="s2">}</span>
+    <span class="s1">host_matching </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">url_map</span><span class="s2">.</span><span class="s1">host_matching</span>
+    <span class="s1">has_domain </span><span class="s2">= </span><span class="s1">any</span><span class="s2">(</span><span class="s1">rule</span><span class="s2">.</span><span class="s1">host </span><span class="s0">if </span><span class="s1">host_matching </span><span class="s0">else </span><span class="s1">rule</span><span class="s2">.</span><span class="s1">subdomain </span><span class="s0">for </span><span class="s1">rule </span><span class="s0">in </span><span class="s1">rules</span><span class="s2">)</span>
+    <span class="s1">rows </span><span class="s2">= []</span>
+
+    <span class="s0">for </span><span class="s1">rule </span><span class="s0">in </span><span class="s1">rules</span><span class="s2">:</span>
+        <span class="s1">row </span><span class="s2">= [</span>
+            <span class="s1">rule</span><span class="s2">.</span><span class="s1">endpoint</span><span class="s2">,</span>
+            <span class="s5">&quot;, &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">sorted</span><span class="s2">((</span><span class="s1">rule</span><span class="s2">.</span><span class="s1">methods </span><span class="s0">or </span><span class="s1">set</span><span class="s2">()) - </span><span class="s1">ignored_methods</span><span class="s2">)),</span>
+        <span class="s2">]</span>
+
+        <span class="s0">if </span><span class="s1">has_domain</span><span class="s2">:</span>
+            <span class="s1">row</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s1">rule</span><span class="s2">.</span><span class="s1">host </span><span class="s0">if </span><span class="s1">host_matching </span><span class="s0">else </span><span class="s1">rule</span><span class="s2">.</span><span class="s1">subdomain</span><span class="s2">) </span><span class="s0">or </span><span class="s5">&quot;&quot;</span><span class="s2">)</span>
+
+        <span class="s1">row</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">rule</span><span class="s2">.</span><span class="s1">rule</span><span class="s2">)</span>
+        <span class="s1">rows</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">row</span><span class="s2">)</span>
+
+    <span class="s1">headers </span><span class="s2">= [</span><span class="s5">&quot;Endpoint&quot;</span><span class="s2">, </span><span class="s5">&quot;Methods&quot;</span><span class="s2">]</span>
+    <span class="s1">sorts </span><span class="s2">= [</span><span class="s5">&quot;endpoint&quot;</span><span class="s2">, </span><span class="s5">&quot;methods&quot;</span><span class="s2">]</span>
+
+    <span class="s0">if </span><span class="s1">has_domain</span><span class="s2">:</span>
+        <span class="s1">headers</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s5">&quot;Host&quot; </span><span class="s0">if </span><span class="s1">host_matching </span><span class="s0">else </span><span class="s5">&quot;Subdomain&quot;</span><span class="s2">)</span>
+        <span class="s1">sorts</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s5">&quot;domain&quot;</span><span class="s2">)</span>
+
+    <span class="s1">headers</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s5">&quot;Rule&quot;</span><span class="s2">)</span>
+    <span class="s1">sorts</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s5">&quot;rule&quot;</span><span class="s2">)</span>
+
+    <span class="s0">try</span><span class="s2">:</span>
+        <span class="s1">rows</span><span class="s2">.</span><span class="s1">sort</span><span class="s2">(</span><span class="s1">key</span><span class="s2">=</span><span class="s1">itemgetter</span><span class="s2">(</span><span class="s1">sorts</span><span class="s2">.</span><span class="s1">index</span><span class="s2">(</span><span class="s1">sort</span><span class="s2">)))</span>
+    <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+        <span class="s0">pass</span>
+
+    <span class="s1">rows</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s6">0</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">)</span>
+    <span class="s1">widths </span><span class="s2">= [</span><span class="s1">max</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">row</span><span class="s2">[</span><span class="s1">i</span><span class="s2">]) </span><span class="s0">for </span><span class="s1">row </span><span class="s0">in </span><span class="s1">rows</span><span class="s2">) </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">))]</span>
+    <span class="s1">rows</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s6">1</span><span class="s2">, [</span><span class="s5">&quot;-&quot; </span><span class="s2">* </span><span class="s1">w </span><span class="s0">for </span><span class="s1">w </span><span class="s0">in </span><span class="s1">widths</span><span class="s2">])</span>
+    <span class="s1">template </span><span class="s2">= </span><span class="s5">&quot;  &quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s5">f&quot;</span><span class="s0">{{{</span><span class="s1">i</span><span class="s0">}</span><span class="s5">:&lt;</span><span class="s0">{</span><span class="s1">w</span><span class="s0">}}}</span><span class="s5">&quot; </span><span class="s0">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">w </span><span class="s0">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">widths</span><span class="s2">))</span>
+
+    <span class="s0">for </span><span class="s1">row </span><span class="s0">in </span><span class="s1">rows</span><span class="s2">:</span>
+        <span class="s1">click</span><span class="s2">.</span><span class="s1">echo</span><span class="s2">(</span><span class="s1">template</span><span class="s2">.</span><span class="s1">format</span><span class="s2">(*</span><span class="s1">row</span><span class="s2">))</span>
+
+
+<span class="s1">cli </span><span class="s2">= </span><span class="s1">FlaskGroup</span><span class="s2">(</span>
+    <span class="s1">name</span><span class="s2">=</span><span class="s5">&quot;flask&quot;</span><span class="s2">,</span>
+    <span class="s1">help</span><span class="s2">=</span><span class="s5">&quot;&quot;&quot;</span><span class="s0">\ 
+</span><span class="s5">A general utility script for Flask applications. 
+ 
+An application to load must be given with the '--app' option, 
+'FLASK_APP' environment variable, or with a 'wsgi.py' or 'app.py' file 
+in the current directory. 
+&quot;&quot;&quot;</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">main</span><span class="s2">() </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">cli</span><span class="s2">.</span><span class="s1">main</span><span class="s2">()</span>
+
+
+<span class="s0">if </span><span class="s1">__name__ </span><span class="s2">== </span><span class="s5">&quot;__main__&quot;</span><span class="s2">:</span>
+    <span class="s1">main</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

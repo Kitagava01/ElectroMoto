@@ -1,0 +1,57 @@
+<html>
+<head>
+<title>switch_sh_gcc.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #2aacb8;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_sh_gcc.h</font>
+</center></td></tr></table>
+<pre><span class="s0">#define </span><span class="s1">STACK_REFPLUS </span><span class="s2">1</span>
+
+<span class="s0">#ifdef </span><span class="s1">SLP_EVAL</span>
+<span class="s0">#define </span><span class="s1">STACK_MAGIC </span><span class="s2">0</span>
+<span class="s0">#define </span><span class="s1">REGS_TO_SAVE </span><span class="s3">&quot;r8&quot;</span><span class="s1">, </span><span class="s3">&quot;r9&quot;</span><span class="s1">, </span><span class="s3">&quot;r10&quot;</span><span class="s1">, </span><span class="s3">&quot;r11&quot;</span><span class="s1">, </span><span class="s3">&quot;r13&quot;</span><span class="s1">, \</span>
+                     <span class="s3">&quot;fr12&quot;</span><span class="s1">, </span><span class="s3">&quot;fr13&quot;</span><span class="s1">, </span><span class="s3">&quot;fr14&quot;</span><span class="s1">, </span><span class="s3">&quot;fr15&quot;</span>
+
+<span class="s4">// r12 Global context pointer, GP</span>
+<span class="s4">// r14 Frame pointer, FP</span>
+<span class="s4">// r15 Stack pointer, SP</span>
+
+<span class="s0">static int</span>
+<span class="s1">slp_switch(</span><span class="s0">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s0">int </span><span class="s1">err;</span>
+    <span class="s0">void</span><span class="s1">* fp;</span>
+    <span class="s0">int </span><span class="s1">*stackref, stsizediff;</span>
+    <span class="s1">__asm__ </span><span class="s0">volatile</span><span class="s1">(</span><span class="s3">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s1">__asm__ </span><span class="s0">volatile</span><span class="s1">(</span><span class="s3">&quot;mov.l r14, %0&quot; </span><span class="s1">: </span><span class="s3">&quot;=m&quot;</span><span class="s1">(fp) : :);</span>
+    <span class="s1">__asm__(</span><span class="s3">&quot;mov r15, %0&quot; </span><span class="s1">: </span><span class="s3">&quot;=r&quot;</span><span class="s1">(stackref));</span>
+    <span class="s1">{</span>
+        <span class="s1">SLP_SAVE_STATE(stackref, stsizediff);</span>
+        <span class="s1">__asm__ </span><span class="s0">volatile</span><span class="s1">(</span>
+            <span class="s3">&quot;add %0, r15</span><span class="s0">\n</span><span class="s3">&quot;</span>
+            <span class="s3">&quot;add %0, r14</span><span class="s0">\n</span><span class="s3">&quot;</span>
+            <span class="s1">: </span><span class="s4">/* no outputs */</span>
+            <span class="s1">: </span><span class="s3">&quot;r&quot;</span><span class="s1">(stsizediff));</span>
+        <span class="s1">SLP_RESTORE_STATE();</span>
+        <span class="s1">__asm__ </span><span class="s0">volatile</span><span class="s1">(</span><span class="s3">&quot;mov r0, %0&quot; </span><span class="s1">: </span><span class="s3">&quot;=r&quot;</span><span class="s1">(err) : :);</span>
+    <span class="s1">}</span>
+    <span class="s1">__asm__ </span><span class="s0">volatile</span><span class="s1">(</span><span class="s3">&quot;mov.l %0, r14&quot; </span><span class="s1">: : </span><span class="s3">&quot;m&quot;</span><span class="s1">(fp) :);</span>
+    <span class="s1">__asm__ </span><span class="s0">volatile</span><span class="s1">(</span><span class="s3">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s0">return </span><span class="s1">err;</span>
+<span class="s1">}</span>
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

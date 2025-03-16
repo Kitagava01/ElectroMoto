@@ -1,0 +1,490 @@
+<html>
+<head>
+<title>root.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #cf8e6d;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+root.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># This module is part of GitPython and is released under the</span>
+<span class="s0"># 3-Clause BSD License: https://opensource.org/license/bsd-3-clause/</span>
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s3">&quot;RootModule&quot;</span><span class="s2">, </span><span class="s3">&quot;RootUpdateProgress&quot;</span><span class="s2">]</span>
+
+<span class="s4">import </span><span class="s1">logging</span>
+
+<span class="s4">import </span><span class="s1">git</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">exc </span><span class="s4">import </span><span class="s1">InvalidGitRepositoryError</span>
+
+<span class="s4">from </span><span class="s2">.</span><span class="s1">base </span><span class="s4">import </span><span class="s1">Submodule</span><span class="s2">, </span><span class="s1">UpdateProgress</span>
+<span class="s4">from </span><span class="s2">.</span><span class="s1">util </span><span class="s4">import </span><span class="s1">find_first_remote_branch</span>
+
+<span class="s0"># typing -------------------------------------------------------------------</span>
+
+<span class="s4">from </span><span class="s1">typing </span><span class="s4">import </span><span class="s1">TYPE_CHECKING</span><span class="s2">, </span><span class="s1">Union</span>
+
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">types </span><span class="s4">import </span><span class="s1">Commit_ish</span>
+
+<span class="s4">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">repo </span><span class="s4">import </span><span class="s1">Repo</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">util </span><span class="s4">import </span><span class="s1">IterableList</span>
+
+<span class="s0"># ----------------------------------------------------------------------------</span>
+
+<span class="s1">_logger </span><span class="s2">= </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">getLogger</span><span class="s2">(</span><span class="s1">__name__</span><span class="s2">)</span>
+
+
+<span class="s4">class </span><span class="s1">RootUpdateProgress</span><span class="s2">(</span><span class="s1">UpdateProgress</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Utility class which adds more opcodes to 
+    :class:`~git.objects.submodule.base.UpdateProgress`.&quot;&quot;&quot;</span>
+
+    <span class="s1">REMOVE</span><span class="s2">, </span><span class="s1">PATHCHANGE</span><span class="s2">, </span><span class="s1">BRANCHCHANGE</span><span class="s2">, </span><span class="s1">URLCHANGE </span><span class="s2">= [</span>
+        <span class="s6">1 </span><span class="s2">&lt;&lt; </span><span class="s1">x </span><span class="s4">for </span><span class="s1">x </span><span class="s4">in </span><span class="s1">range</span><span class="s2">(</span><span class="s1">UpdateProgress</span><span class="s2">.</span><span class="s1">_num_op_codes</span><span class="s2">, </span><span class="s1">UpdateProgress</span><span class="s2">.</span><span class="s1">_num_op_codes </span><span class="s2">+ </span><span class="s6">4</span><span class="s2">)</span>
+    <span class="s2">]</span>
+    <span class="s1">_num_op_codes </span><span class="s2">= </span><span class="s1">UpdateProgress</span><span class="s2">.</span><span class="s1">_num_op_codes </span><span class="s2">+ </span><span class="s6">4</span>
+
+    <span class="s1">__slots__ </span><span class="s2">= ()</span>
+
+
+<span class="s1">BEGIN </span><span class="s2">= </span><span class="s1">RootUpdateProgress</span><span class="s2">.</span><span class="s1">BEGIN</span>
+<span class="s1">END </span><span class="s2">= </span><span class="s1">RootUpdateProgress</span><span class="s2">.</span><span class="s1">END</span>
+<span class="s1">REMOVE </span><span class="s2">= </span><span class="s1">RootUpdateProgress</span><span class="s2">.</span><span class="s1">REMOVE</span>
+<span class="s1">BRANCHCHANGE </span><span class="s2">= </span><span class="s1">RootUpdateProgress</span><span class="s2">.</span><span class="s1">BRANCHCHANGE</span>
+<span class="s1">URLCHANGE </span><span class="s2">= </span><span class="s1">RootUpdateProgress</span><span class="s2">.</span><span class="s1">URLCHANGE</span>
+<span class="s1">PATHCHANGE </span><span class="s2">= </span><span class="s1">RootUpdateProgress</span><span class="s2">.</span><span class="s1">PATHCHANGE</span>
+
+
+<span class="s4">class </span><span class="s1">RootModule</span><span class="s2">(</span><span class="s1">Submodule</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;A (virtual) root of all submodules in the given repository. 
+ 
+    This can be used to more easily traverse all submodules of the 
+    superproject (master repository). 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s2">= ()</span>
+
+    <span class="s1">k_root_name </span><span class="s2">= </span><span class="s3">&quot;__ROOT__&quot;</span>
+
+    <span class="s4">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s4">None</span><span class="s2">:</span>
+        <span class="s0"># repo, binsha, mode=None, path=None, name = None, parent_commit=None, url=None, ref=None)</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span>
+            <span class="s1">repo</span><span class="s2">,</span>
+            <span class="s1">binsha</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">NULL_BIN_SHA</span><span class="s2">,</span>
+            <span class="s1">mode</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">k_default_mode</span><span class="s2">,</span>
+            <span class="s1">path</span><span class="s2">=</span><span class="s3">&quot;&quot;</span><span class="s2">,</span>
+            <span class="s1">name</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">k_root_name</span><span class="s2">,</span>
+            <span class="s1">parent_commit</span><span class="s2">=</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">head</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">,</span>
+            <span class="s1">url</span><span class="s2">=</span><span class="s3">&quot;&quot;</span><span class="s2">,</span>
+            <span class="s1">branch_path</span><span class="s2">=</span><span class="s1">git</span><span class="s2">.</span><span class="s1">Head</span><span class="s2">.</span><span class="s1">to_full_path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">k_head_default</span><span class="s2">),</span>
+        <span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">_clear_cache</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s4">None</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;May not do anything.&quot;&quot;&quot;</span>
+        <span class="s4">pass</span>
+
+    <span class="s0"># { Interface</span>
+
+    <span class="s4">def </span><span class="s1">update</span><span class="s2">(  </span><span class="s0"># type: ignore[override]</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">previous_commit</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Commit_ish</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">recursive</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">True</span><span class="s2">,</span>
+        <span class="s1">force_remove</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">,</span>
+        <span class="s1">init</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">True</span><span class="s2">,</span>
+        <span class="s1">to_latest_revision</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">,</span>
+        <span class="s1">progress</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s3">&quot;RootUpdateProgress&quot;</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">dry_run</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">,</span>
+        <span class="s1">force_reset</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">,</span>
+        <span class="s1">keep_going</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;RootModule&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Update the submodules of this repository to the current HEAD commit. 
+ 
+        This method behaves smartly by determining changes of the path of a submodule's 
+        repository, next to changes to the to-be-checked-out commit or the branch to be 
+        checked out. This works if the submodule's ID does not change. 
+ 
+        Additionally it will detect addition and removal of submodules, which will be 
+        handled gracefully. 
+ 
+        :param previous_commit: 
+            If set to a commit-ish, the commit we should use as the previous commit the 
+            HEAD pointed to before it was set to the commit it points to now. 
+            If ``None``, it defaults to ``HEAD@{1}`` otherwise. 
+ 
+        :param recursive: 
+            If ``True``, the children of submodules will be updated as well using the 
+            same technique. 
+ 
+        :param force_remove: 
+            If submodules have been deleted, they will be forcibly removed. Otherwise 
+            the update may fail if a submodule's repository cannot be deleted as changes 
+            have been made to it. 
+            (See :meth:`Submodule.update &lt;git.objects.submodule.base.Submodule.update&gt;` 
+            for more information.) 
+ 
+        :param init: 
+            If we encounter a new module which would need to be initialized, then do it. 
+ 
+        :param to_latest_revision: 
+            If ``True``, instead of checking out the revision pointed to by this 
+            submodule's sha, the checked out tracking branch will be merged with the 
+            latest remote branch fetched from the repository's origin. 
+ 
+            Unless `force_reset` is specified, a local tracking branch will never be 
+            reset into its past, therefore the remote branch must be in the future for 
+            this to have an effect. 
+ 
+        :param force_reset: 
+            If ``True``, submodules may checkout or reset their branch even if the 
+            repository has pending changes that would be overwritten, or if the local 
+            tracking branch is in the future of the remote tracking branch and would be 
+            reset into its past. 
+ 
+        :param progress: 
+            :class:`RootUpdateProgress` instance, or ``None`` if no progress should be 
+            sent. 
+ 
+        :param dry_run: 
+            If ``True``, operations will not actually be performed. Progress messages 
+            will change accordingly to indicate the WOULD DO state of the operation. 
+ 
+        :param keep_going: 
+            If ``True``, we will ignore but log all errors, and keep going recursively. 
+            Unless `dry_run` is set as well, `keep_going` could cause 
+            subsequent/inherited errors you wouldn't see otherwise. 
+            In conjunction with `dry_run`, this can be useful to anticipate all errors 
+            when updating submodules. 
+ 
+        :return: 
+            self 
+        &quot;&quot;&quot;</span>
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">bare</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">InvalidGitRepositoryError</span><span class="s2">(</span><span class="s3">&quot;Cannot update submodules in bare repositories&quot;</span><span class="s2">)</span>
+        <span class="s0"># END handle bare</span>
+
+        <span class="s4">if </span><span class="s1">progress </span><span class="s4">is None</span><span class="s2">:</span>
+            <span class="s1">progress </span><span class="s2">= </span><span class="s1">RootUpdateProgress</span><span class="s2">()</span>
+        <span class="s0"># END ensure progress is set</span>
+
+        <span class="s1">prefix </span><span class="s2">= </span><span class="s3">&quot;&quot;</span>
+        <span class="s4">if </span><span class="s1">dry_run</span><span class="s2">:</span>
+            <span class="s1">prefix </span><span class="s2">= </span><span class="s3">&quot;DRY-RUN: &quot;</span>
+
+        <span class="s1">repo </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span>
+
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s0"># SETUP BASE COMMIT</span>
+            <span class="s0">###################</span>
+            <span class="s1">cur_commit </span><span class="s2">= </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">head</span><span class="s2">.</span><span class="s1">commit</span>
+            <span class="s4">if </span><span class="s1">previous_commit </span><span class="s4">is None</span><span class="s2">:</span>
+                <span class="s4">try</span><span class="s2">:</span>
+                    <span class="s1">previous_commit </span><span class="s2">= </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">head</span><span class="s2">.</span><span class="s1">log_entry</span><span class="s2">(-</span><span class="s6">1</span><span class="s2">).</span><span class="s1">oldhexsha</span><span class="s2">)</span>
+                    <span class="s4">if </span><span class="s1">previous_commit</span><span class="s2">.</span><span class="s1">binsha </span><span class="s2">== </span><span class="s1">previous_commit</span><span class="s2">.</span><span class="s1">NULL_BIN_SHA</span><span class="s2">:</span>
+                        <span class="s4">raise </span><span class="s1">IndexError</span>
+                    <span class="s0"># END handle initial commit</span>
+                <span class="s4">except </span><span class="s1">IndexError</span><span class="s2">:</span>
+                    <span class="s0"># In new repositories, there is no previous commit.</span>
+                    <span class="s1">previous_commit </span><span class="s2">= </span><span class="s1">cur_commit</span>
+                <span class="s0"># END exception handling</span>
+            <span class="s4">else</span><span class="s2">:</span>
+                <span class="s1">previous_commit </span><span class="s2">= </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">(</span><span class="s1">previous_commit</span><span class="s2">)  </span><span class="s0"># Obtain commit object.</span>
+            <span class="s0"># END handle previous commit</span>
+
+            <span class="s1">psms</span><span class="s2">: </span><span class="s3">&quot;IterableList[Submodule]&quot; </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">list_items</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">parent_commit</span><span class="s2">=</span><span class="s1">previous_commit</span><span class="s2">)</span>
+            <span class="s1">sms</span><span class="s2">: </span><span class="s3">&quot;IterableList[Submodule]&quot; </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">list_items</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">)</span>
+            <span class="s1">spsms </span><span class="s2">= </span><span class="s1">set</span><span class="s2">(</span><span class="s1">psms</span><span class="s2">)</span>
+            <span class="s1">ssms </span><span class="s2">= </span><span class="s1">set</span><span class="s2">(</span><span class="s1">sms</span><span class="s2">)</span>
+
+            <span class="s0"># HANDLE REMOVALS</span>
+            <span class="s0">###################</span>
+            <span class="s1">rrsm </span><span class="s2">= </span><span class="s1">spsms </span><span class="s2">- </span><span class="s1">ssms</span>
+            <span class="s1">len_rrsm </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">rrsm</span><span class="s2">)</span>
+
+            <span class="s4">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">rsm </span><span class="s4">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">rrsm</span><span class="s2">):</span>
+                <span class="s1">op </span><span class="s2">= </span><span class="s1">REMOVE</span>
+                <span class="s4">if </span><span class="s1">i </span><span class="s2">== </span><span class="s6">0</span><span class="s2">:</span>
+                    <span class="s1">op </span><span class="s2">|= </span><span class="s1">BEGIN</span>
+                <span class="s0"># END handle begin</span>
+
+                <span class="s0"># Fake it into thinking its at the current commit to allow deletion</span>
+                <span class="s0"># of previous module. Trigger the cache to be updated before that.</span>
+                <span class="s1">progress</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span>
+                    <span class="s1">op</span><span class="s2">,</span>
+                    <span class="s1">i</span><span class="s2">,</span>
+                    <span class="s1">len_rrsm</span><span class="s2">,</span>
+                    <span class="s1">prefix </span><span class="s2">+ </span><span class="s3">&quot;Removing submodule %r at %s&quot; </span><span class="s2">% (</span><span class="s1">rsm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">, </span><span class="s1">rsm</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">),</span>
+                <span class="s2">)</span>
+                <span class="s1">rsm</span><span class="s2">.</span><span class="s1">_parent_commit </span><span class="s2">= </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">head</span><span class="s2">.</span><span class="s1">commit</span>
+                <span class="s1">rsm</span><span class="s2">.</span><span class="s1">remove</span><span class="s2">(</span>
+                    <span class="s1">configuration</span><span class="s2">=</span><span class="s4">False</span><span class="s2">,</span>
+                    <span class="s1">module</span><span class="s2">=</span><span class="s4">True</span><span class="s2">,</span>
+                    <span class="s1">force</span><span class="s2">=</span><span class="s1">force_remove</span><span class="s2">,</span>
+                    <span class="s1">dry_run</span><span class="s2">=</span><span class="s1">dry_run</span><span class="s2">,</span>
+                <span class="s2">)</span>
+
+                <span class="s4">if </span><span class="s1">i </span><span class="s2">== </span><span class="s1">len_rrsm </span><span class="s2">- </span><span class="s6">1</span><span class="s2">:</span>
+                    <span class="s1">op </span><span class="s2">|= </span><span class="s1">END</span>
+                <span class="s0"># END handle end</span>
+                <span class="s1">progress</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">op</span><span class="s2">, </span><span class="s1">i</span><span class="s2">, </span><span class="s1">len_rrsm</span><span class="s2">, </span><span class="s1">prefix </span><span class="s2">+ </span><span class="s3">&quot;Done removing submodule %r&quot; </span><span class="s2">% </span><span class="s1">rsm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">)</span>
+            <span class="s0"># END for each removed submodule</span>
+
+            <span class="s0"># HANDLE PATH RENAMES</span>
+            <span class="s0">#####################</span>
+            <span class="s0"># URL changes + branch changes.</span>
+            <span class="s1">csms </span><span class="s2">= </span><span class="s1">spsms </span><span class="s2">&amp; </span><span class="s1">ssms</span>
+            <span class="s1">len_csms </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">csms</span><span class="s2">)</span>
+            <span class="s4">for </span><span class="s1">i</span><span class="s2">, </span><span class="s1">csm </span><span class="s4">in </span><span class="s1">enumerate</span><span class="s2">(</span><span class="s1">csms</span><span class="s2">):</span>
+                <span class="s1">psm</span><span class="s2">: </span><span class="s3">&quot;Submodule&quot; </span><span class="s2">= </span><span class="s1">psms</span><span class="s2">[</span><span class="s1">csm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">]</span>
+                <span class="s1">sm</span><span class="s2">: </span><span class="s3">&quot;Submodule&quot; </span><span class="s2">= </span><span class="s1">sms</span><span class="s2">[</span><span class="s1">csm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">]</span>
+
+                <span class="s0"># PATH CHANGES</span>
+                <span class="s0">##############</span>
+                <span class="s4">if </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">path </span><span class="s2">!= </span><span class="s1">psm</span><span class="s2">.</span><span class="s1">path </span><span class="s4">and </span><span class="s1">psm</span><span class="s2">.</span><span class="s1">module_exists</span><span class="s2">():</span>
+                    <span class="s1">progress</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span>
+                        <span class="s1">BEGIN </span><span class="s2">| </span><span class="s1">PATHCHANGE</span><span class="s2">,</span>
+                        <span class="s1">i</span><span class="s2">,</span>
+                        <span class="s1">len_csms</span><span class="s2">,</span>
+                        <span class="s1">prefix </span><span class="s2">+ </span><span class="s3">&quot;Moving repository of submodule %r from %s to %s&quot; </span><span class="s2">% (</span><span class="s1">sm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">, </span><span class="s1">psm</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">, </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">abspath</span><span class="s2">),</span>
+                    <span class="s2">)</span>
+                    <span class="s0"># Move the module to the new path.</span>
+                    <span class="s4">if not </span><span class="s1">dry_run</span><span class="s2">:</span>
+                        <span class="s1">psm</span><span class="s2">.</span><span class="s1">move</span><span class="s2">(</span><span class="s1">sm</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">module</span><span class="s2">=</span><span class="s4">True</span><span class="s2">, </span><span class="s1">configuration</span><span class="s2">=</span><span class="s4">False</span><span class="s2">)</span>
+                    <span class="s0"># END handle dry_run</span>
+                    <span class="s1">progress</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span>
+                        <span class="s1">END </span><span class="s2">| </span><span class="s1">PATHCHANGE</span><span class="s2">,</span>
+                        <span class="s1">i</span><span class="s2">,</span>
+                        <span class="s1">len_csms</span><span class="s2">,</span>
+                        <span class="s1">prefix </span><span class="s2">+ </span><span class="s3">&quot;Done moving repository of submodule %r&quot; </span><span class="s2">% </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">,</span>
+                    <span class="s2">)</span>
+                <span class="s0"># END handle path changes</span>
+
+                <span class="s4">if </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">module_exists</span><span class="s2">():</span>
+                    <span class="s0"># HANDLE URL CHANGE</span>
+                    <span class="s0">###################</span>
+                    <span class="s4">if </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">url </span><span class="s2">!= </span><span class="s1">psm</span><span class="s2">.</span><span class="s1">url</span><span class="s2">:</span>
+                        <span class="s0"># Add the new remote, remove the old one.</span>
+                        <span class="s0"># This way, if the url just changes, the commits will not have</span>
+                        <span class="s0"># to be re-retrieved.</span>
+                        <span class="s1">nn </span><span class="s2">= </span><span class="s3">&quot;__new_origin__&quot;</span>
+                        <span class="s1">smm </span><span class="s2">= </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">module</span><span class="s2">()</span>
+                        <span class="s1">rmts </span><span class="s2">= </span><span class="s1">smm</span><span class="s2">.</span><span class="s1">remotes</span>
+
+                        <span class="s0"># Don't do anything if we already have the url we search in</span>
+                        <span class="s0"># place.</span>
+                        <span class="s4">if </span><span class="s1">len</span><span class="s2">([</span><span class="s1">r </span><span class="s4">for </span><span class="s1">r </span><span class="s4">in </span><span class="s1">rmts </span><span class="s4">if </span><span class="s1">r</span><span class="s2">.</span><span class="s1">url </span><span class="s2">== </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">url</span><span class="s2">]) == </span><span class="s6">0</span><span class="s2">:</span>
+                            <span class="s1">progress</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span>
+                                <span class="s1">BEGIN </span><span class="s2">| </span><span class="s1">URLCHANGE</span><span class="s2">,</span>
+                                <span class="s1">i</span><span class="s2">,</span>
+                                <span class="s1">len_csms</span><span class="s2">,</span>
+                                <span class="s1">prefix </span><span class="s2">+ </span><span class="s3">&quot;Changing url of submodule %r from %s to %s&quot; </span><span class="s2">% (</span><span class="s1">sm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">, </span><span class="s1">psm</span><span class="s2">.</span><span class="s1">url</span><span class="s2">, </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">url</span><span class="s2">),</span>
+                            <span class="s2">)</span>
+
+                            <span class="s4">if not </span><span class="s1">dry_run</span><span class="s2">:</span>
+                                <span class="s4">assert </span><span class="s1">nn </span><span class="s4">not in </span><span class="s2">[</span><span class="s1">r</span><span class="s2">.</span><span class="s1">name </span><span class="s4">for </span><span class="s1">r </span><span class="s4">in </span><span class="s1">rmts</span><span class="s2">]</span>
+                                <span class="s1">smr </span><span class="s2">= </span><span class="s1">smm</span><span class="s2">.</span><span class="s1">create_remote</span><span class="s2">(</span><span class="s1">nn</span><span class="s2">, </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">url</span><span class="s2">)</span>
+                                <span class="s1">smr</span><span class="s2">.</span><span class="s1">fetch</span><span class="s2">(</span><span class="s1">progress</span><span class="s2">=</span><span class="s1">progress</span><span class="s2">)</span>
+
+                                <span class="s0"># If we have a tracking branch, it should be available</span>
+                                <span class="s0"># in the new remote as well.</span>
+                                <span class="s4">if </span><span class="s1">len</span><span class="s2">([</span><span class="s1">r </span><span class="s4">for </span><span class="s1">r </span><span class="s4">in </span><span class="s1">smr</span><span class="s2">.</span><span class="s1">refs </span><span class="s4">if </span><span class="s1">r</span><span class="s2">.</span><span class="s1">remote_head </span><span class="s2">== </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">branch_name</span><span class="s2">]) == </span><span class="s6">0</span><span class="s2">:</span>
+                                    <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span>
+                                        <span class="s3">&quot;Submodule branch named %r was not available in new submodule remote at %r&quot;</span>
+                                        <span class="s2">% (</span><span class="s1">sm</span><span class="s2">.</span><span class="s1">branch_name</span><span class="s2">, </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">url</span><span class="s2">)</span>
+                                    <span class="s2">)</span>
+                                <span class="s0"># END head is not detached</span>
+
+                                <span class="s0"># Now delete the changed one.</span>
+                                <span class="s1">rmt_for_deletion </span><span class="s2">= </span><span class="s4">None</span>
+                                <span class="s4">for </span><span class="s1">remote </span><span class="s4">in </span><span class="s1">rmts</span><span class="s2">:</span>
+                                    <span class="s4">if </span><span class="s1">remote</span><span class="s2">.</span><span class="s1">url </span><span class="s2">== </span><span class="s1">psm</span><span class="s2">.</span><span class="s1">url</span><span class="s2">:</span>
+                                        <span class="s1">rmt_for_deletion </span><span class="s2">= </span><span class="s1">remote</span>
+                                        <span class="s4">break</span>
+                                    <span class="s0"># END if urls match</span>
+                                <span class="s0"># END for each remote</span>
+
+                                <span class="s0"># If we didn't find a matching remote, but have exactly</span>
+                                <span class="s0"># one, we can safely use this one.</span>
+                                <span class="s4">if </span><span class="s1">rmt_for_deletion </span><span class="s4">is None</span><span class="s2">:</span>
+                                    <span class="s4">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">rmts</span><span class="s2">) == </span><span class="s6">1</span><span class="s2">:</span>
+                                        <span class="s1">rmt_for_deletion </span><span class="s2">= </span><span class="s1">rmts</span><span class="s2">[</span><span class="s6">0</span><span class="s2">]</span>
+                                    <span class="s4">else</span><span class="s2">:</span>
+                                        <span class="s0"># If we have not found any remote with the</span>
+                                        <span class="s0"># original URL we may not have a name. This is a</span>
+                                        <span class="s0"># special case, and its okay to fail here.</span>
+                                        <span class="s0"># Alternatively we could just generate a unique</span>
+                                        <span class="s0"># name and leave all existing ones in place.</span>
+                                        <span class="s4">raise </span><span class="s1">InvalidGitRepositoryError</span><span class="s2">(</span>
+                                            <span class="s3">&quot;Couldn't find original remote-repo at url %r&quot; </span><span class="s2">% </span><span class="s1">psm</span><span class="s2">.</span><span class="s1">url</span>
+                                        <span class="s2">)</span>
+                                    <span class="s0"># END handle one single remote</span>
+                                <span class="s0"># END handle check we found a remote</span>
+
+                                <span class="s1">orig_name </span><span class="s2">= </span><span class="s1">rmt_for_deletion</span><span class="s2">.</span><span class="s1">name</span>
+                                <span class="s1">smm</span><span class="s2">.</span><span class="s1">delete_remote</span><span class="s2">(</span><span class="s1">rmt_for_deletion</span><span class="s2">)</span>
+                                <span class="s0"># NOTE: Currently we leave tags from the deleted remotes</span>
+                                <span class="s0"># as well as separate tracking branches in the possibly</span>
+                                <span class="s0"># totally changed repository (someone could have changed</span>
+                                <span class="s0"># the url to another project). At some point, one might</span>
+                                <span class="s0"># want to clean it up, but the danger is high to remove</span>
+                                <span class="s0"># stuff the user has added explicitly.</span>
+
+                                <span class="s0"># Rename the new remote back to what it was.</span>
+                                <span class="s1">smr</span><span class="s2">.</span><span class="s1">rename</span><span class="s2">(</span><span class="s1">orig_name</span><span class="s2">)</span>
+
+                                <span class="s0"># Early on, we verified that the our current tracking</span>
+                                <span class="s0"># branch exists in the remote. Now we have to ensure</span>
+                                <span class="s0"># that the sha we point to is still contained in the new</span>
+                                <span class="s0"># remote tracking branch.</span>
+                                <span class="s1">smsha </span><span class="s2">= </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">binsha</span>
+                                <span class="s1">found </span><span class="s2">= </span><span class="s4">False</span>
+                                <span class="s1">rref </span><span class="s2">= </span><span class="s1">smr</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">[</span><span class="s1">self</span><span class="s2">.</span><span class="s1">branch_name</span><span class="s2">]</span>
+                                <span class="s4">for </span><span class="s1">c </span><span class="s4">in </span><span class="s1">rref</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">.</span><span class="s1">traverse</span><span class="s2">():</span>
+                                    <span class="s4">if </span><span class="s1">c</span><span class="s2">.</span><span class="s1">binsha </span><span class="s2">== </span><span class="s1">smsha</span><span class="s2">:</span>
+                                        <span class="s1">found </span><span class="s2">= </span><span class="s4">True</span>
+                                        <span class="s4">break</span>
+                                    <span class="s0"># END traverse all commits in search for sha</span>
+                                <span class="s0"># END for each commit</span>
+
+                                <span class="s4">if not </span><span class="s1">found</span><span class="s2">:</span>
+                                    <span class="s0"># Adjust our internal binsha to use the one of the</span>
+                                    <span class="s0"># remote this way, it will be checked out in the</span>
+                                    <span class="s0"># next step. This will change the submodule relative</span>
+                                    <span class="s0"># to us, so the user will be able to commit the</span>
+                                    <span class="s0"># change easily.</span>
+                                    <span class="s1">_logger</span><span class="s2">.</span><span class="s1">warning</span><span class="s2">(</span>
+                                        <span class="s3">&quot;Current sha %s was not contained in the tracking</span><span class="s4">\ 
+             </span><span class="s3">branch at the new remote, setting it the the remote's tracking branch&quot;</span><span class="s2">,</span>
+                                        <span class="s1">sm</span><span class="s2">.</span><span class="s1">hexsha</span><span class="s2">,</span>
+                                    <span class="s2">)</span>
+                                    <span class="s1">sm</span><span class="s2">.</span><span class="s1">binsha </span><span class="s2">= </span><span class="s1">rref</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">.</span><span class="s1">binsha</span>
+                                <span class="s0"># END reset binsha</span>
+
+                                <span class="s0"># NOTE: All checkout is performed by the base</span>
+                                <span class="s0"># implementation of update.</span>
+                            <span class="s0"># END handle dry_run</span>
+                            <span class="s1">progress</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span>
+                                <span class="s1">END </span><span class="s2">| </span><span class="s1">URLCHANGE</span><span class="s2">,</span>
+                                <span class="s1">i</span><span class="s2">,</span>
+                                <span class="s1">len_csms</span><span class="s2">,</span>
+                                <span class="s1">prefix </span><span class="s2">+ </span><span class="s3">&quot;Done adjusting url of submodule %r&quot; </span><span class="s2">% (</span><span class="s1">sm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">),</span>
+                            <span class="s2">)</span>
+                        <span class="s0"># END skip remote handling if new url already exists in module</span>
+                    <span class="s0"># END handle url</span>
+
+                    <span class="s0"># HANDLE PATH CHANGES</span>
+                    <span class="s0">#####################</span>
+                    <span class="s4">if </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">branch_path </span><span class="s2">!= </span><span class="s1">psm</span><span class="s2">.</span><span class="s1">branch_path</span><span class="s2">:</span>
+                        <span class="s0"># Finally, create a new tracking branch which tracks the new</span>
+                        <span class="s0"># remote branch.</span>
+                        <span class="s1">progress</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span>
+                            <span class="s1">BEGIN </span><span class="s2">| </span><span class="s1">BRANCHCHANGE</span><span class="s2">,</span>
+                            <span class="s1">i</span><span class="s2">,</span>
+                            <span class="s1">len_csms</span><span class="s2">,</span>
+                            <span class="s1">prefix</span>
+                            <span class="s2">+ </span><span class="s3">&quot;Changing branch of submodule %r from %s to %s&quot;</span>
+                            <span class="s2">% (</span><span class="s1">sm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">, </span><span class="s1">psm</span><span class="s2">.</span><span class="s1">branch_path</span><span class="s2">, </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">branch_path</span><span class="s2">),</span>
+                        <span class="s2">)</span>
+                        <span class="s4">if not </span><span class="s1">dry_run</span><span class="s2">:</span>
+                            <span class="s1">smm </span><span class="s2">= </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">module</span><span class="s2">()</span>
+                            <span class="s1">smmr </span><span class="s2">= </span><span class="s1">smm</span><span class="s2">.</span><span class="s1">remotes</span>
+                            <span class="s0"># As the branch might not exist yet, we will have to fetch</span>
+                            <span class="s0"># all remotes to be sure...</span>
+                            <span class="s4">for </span><span class="s1">remote </span><span class="s4">in </span><span class="s1">smmr</span><span class="s2">:</span>
+                                <span class="s1">remote</span><span class="s2">.</span><span class="s1">fetch</span><span class="s2">(</span><span class="s1">progress</span><span class="s2">=</span><span class="s1">progress</span><span class="s2">)</span>
+                            <span class="s0"># END for each remote</span>
+
+                            <span class="s4">try</span><span class="s2">:</span>
+                                <span class="s1">tbr </span><span class="s2">= </span><span class="s1">git</span><span class="s2">.</span><span class="s1">Head</span><span class="s2">.</span><span class="s1">create</span><span class="s2">(</span>
+                                    <span class="s1">smm</span><span class="s2">,</span>
+                                    <span class="s1">sm</span><span class="s2">.</span><span class="s1">branch_name</span><span class="s2">,</span>
+                                    <span class="s1">logmsg</span><span class="s2">=</span><span class="s3">&quot;branch: Created from HEAD&quot;</span><span class="s2">,</span>
+                                <span class="s2">)</span>
+                            <span class="s4">except </span><span class="s1">OSError</span><span class="s2">:</span>
+                                <span class="s0"># ...or reuse the existing one.</span>
+                                <span class="s1">tbr </span><span class="s2">= </span><span class="s1">git</span><span class="s2">.</span><span class="s1">Head</span><span class="s2">(</span><span class="s1">smm</span><span class="s2">, </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">branch_path</span><span class="s2">)</span>
+                            <span class="s0"># END ensure tracking branch exists</span>
+
+                            <span class="s1">tbr</span><span class="s2">.</span><span class="s1">set_tracking_branch</span><span class="s2">(</span><span class="s1">find_first_remote_branch</span><span class="s2">(</span><span class="s1">smmr</span><span class="s2">, </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">branch_name</span><span class="s2">))</span>
+                            <span class="s0"># NOTE: All head-resetting is done in the base</span>
+                            <span class="s0"># implementation of update but we will have to checkout the</span>
+                            <span class="s0"># new branch here. As it still points to the currently</span>
+                            <span class="s0"># checked out commit, we don't do any harm.</span>
+                            <span class="s0"># As we don't want to update working-tree or index, changing</span>
+                            <span class="s0"># the ref is all there is to do.</span>
+                            <span class="s1">smm</span><span class="s2">.</span><span class="s1">head</span><span class="s2">.</span><span class="s1">reference </span><span class="s2">= </span><span class="s1">tbr</span>
+                        <span class="s0"># END handle dry_run</span>
+
+                        <span class="s1">progress</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span>
+                            <span class="s1">END </span><span class="s2">| </span><span class="s1">BRANCHCHANGE</span><span class="s2">,</span>
+                            <span class="s1">i</span><span class="s2">,</span>
+                            <span class="s1">len_csms</span><span class="s2">,</span>
+                            <span class="s1">prefix </span><span class="s2">+ </span><span class="s3">&quot;Done changing branch of submodule %r&quot; </span><span class="s2">% </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">name</span><span class="s2">,</span>
+                        <span class="s2">)</span>
+                    <span class="s0"># END handle branch</span>
+                <span class="s0"># END handle</span>
+            <span class="s0"># END for each common submodule</span>
+        <span class="s4">except </span><span class="s1">Exception </span><span class="s4">as </span><span class="s1">err</span><span class="s2">:</span>
+            <span class="s4">if not </span><span class="s1">keep_going</span><span class="s2">:</span>
+                <span class="s4">raise</span>
+            <span class="s1">_logger</span><span class="s2">.</span><span class="s1">error</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">err</span><span class="s2">))</span>
+        <span class="s0"># END handle keep_going</span>
+
+        <span class="s0"># FINALLY UPDATE ALL ACTUAL SUBMODULES</span>
+        <span class="s0">######################################</span>
+        <span class="s4">for </span><span class="s1">sm </span><span class="s4">in </span><span class="s1">sms</span><span class="s2">:</span>
+            <span class="s0"># Update the submodule using the default method.</span>
+            <span class="s1">sm</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span>
+                <span class="s1">recursive</span><span class="s2">=</span><span class="s4">False</span><span class="s2">,</span>
+                <span class="s1">init</span><span class="s2">=</span><span class="s1">init</span><span class="s2">,</span>
+                <span class="s1">to_latest_revision</span><span class="s2">=</span><span class="s1">to_latest_revision</span><span class="s2">,</span>
+                <span class="s1">progress</span><span class="s2">=</span><span class="s1">progress</span><span class="s2">,</span>
+                <span class="s1">dry_run</span><span class="s2">=</span><span class="s1">dry_run</span><span class="s2">,</span>
+                <span class="s1">force</span><span class="s2">=</span><span class="s1">force_reset</span><span class="s2">,</span>
+                <span class="s1">keep_going</span><span class="s2">=</span><span class="s1">keep_going</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+            <span class="s0"># Update recursively depth first - question is which inconsistent state will</span>
+            <span class="s0"># be better in case it fails somewhere. Defective branch or defective depth.</span>
+            <span class="s0"># The RootSubmodule type will never process itself, which was done in the</span>
+            <span class="s0"># previous expression.</span>
+            <span class="s4">if </span><span class="s1">recursive</span><span class="s2">:</span>
+                <span class="s0"># The module would exist by now if we are not in dry_run mode.</span>
+                <span class="s4">if </span><span class="s1">sm</span><span class="s2">.</span><span class="s1">module_exists</span><span class="s2">():</span>
+                    <span class="s1">type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)(</span><span class="s1">sm</span><span class="s2">.</span><span class="s1">module</span><span class="s2">()).</span><span class="s1">update</span><span class="s2">(</span>
+                        <span class="s1">recursive</span><span class="s2">=</span><span class="s4">True</span><span class="s2">,</span>
+                        <span class="s1">force_remove</span><span class="s2">=</span><span class="s1">force_remove</span><span class="s2">,</span>
+                        <span class="s1">init</span><span class="s2">=</span><span class="s1">init</span><span class="s2">,</span>
+                        <span class="s1">to_latest_revision</span><span class="s2">=</span><span class="s1">to_latest_revision</span><span class="s2">,</span>
+                        <span class="s1">progress</span><span class="s2">=</span><span class="s1">progress</span><span class="s2">,</span>
+                        <span class="s1">dry_run</span><span class="s2">=</span><span class="s1">dry_run</span><span class="s2">,</span>
+                        <span class="s1">force_reset</span><span class="s2">=</span><span class="s1">force_reset</span><span class="s2">,</span>
+                        <span class="s1">keep_going</span><span class="s2">=</span><span class="s1">keep_going</span><span class="s2">,</span>
+                    <span class="s2">)</span>
+                <span class="s0"># END handle dry_run</span>
+            <span class="s0"># END handle recursive</span>
+        <span class="s0"># END for each submodule to update</span>
+
+        <span class="s4">return </span><span class="s1">self</span>
+
+    <span class="s4">def </span><span class="s1">module</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;Repo&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;:return: The actual repository containing the submodules&quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span>
+
+    <span class="s0"># } END interface</span>
+
+
+<span class="s0"># } END classes</span>
+</pre>
+</body>
+</html>

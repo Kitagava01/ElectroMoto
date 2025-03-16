@@ -1,0 +1,281 @@
+<html>
+<head>
+<title>TThreadStateDestroy.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #0da19e;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TThreadStateDestroy.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">/* -*- indent-tabs-mode: nil; tab-width: 4; -*- */</span>
+<span class="s0">/** 
+ * Implementation of the ThreadState destructors. 
+ * 
+ * Format with: 
+ *  clang-format -i --style=file src/greenlet/greenlet.c 
+ * 
+ * 
+ * Fix missing braces with: 
+ *   clang-tidy src/greenlet/greenlet.c -fix -checks=&quot;readability-braces-around-statements&quot; 
+*/</span>
+<span class="s2">#ifndef </span><span class="s1">T_THREADSTATE_DESTROY</span>
+<span class="s2">#define </span><span class="s1">T_THREADSTATE_DESTROY</span>
+
+<span class="s2">#include </span><span class="s3">&quot;TGreenlet.hpp&quot;</span>
+
+<span class="s2">#include </span><span class="s3">&quot;greenlet_thread_support.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_cpython_add_pending.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;greenlet_compiler_compat.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TGreenletGlobals.cpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TThreadState.hpp&quot;</span>
+<span class="s2">#include </span><span class="s3">&quot;TThreadStateCreator.hpp&quot;</span>
+
+<span class="s4">namespace </span><span class="s1">greenlet {</span>
+
+<span class="s2">extern </span><span class="s3">&quot;C&quot; </span><span class="s1">{</span>
+
+<span class="s2">struct </span><span class="s1">ThreadState_DestroyNoGIL</span>
+<span class="s1">{</span>
+    <span class="s0">/** 
+       This function uses the same lock that the PendingCallback does 
+     */</span>
+    <span class="s2">static void</span>
+    <span class="s1">MarkGreenletDeadAndQueueCleanup(ThreadState* </span><span class="s2">const </span><span class="s1">state)</span>
+    <span class="s1">{</span>
+<span class="s2">#if </span><span class="s1">GREENLET_BROKEN_THREAD_LOCAL_CLEANUP_JUST_LEAK</span>
+        <span class="s2">return</span><span class="s1">;</span>
+<span class="s2">#endif</span>
+        <span class="s0">// We are *NOT* holding the GIL. Our thread is in the middle</span>
+        <span class="s0">// of its death throes and the Python thread state is already</span>
+        <span class="s0">// gone so we can't use most Python APIs. One that is safe is</span>
+        <span class="s0">// ``Py_AddPendingCall``, unless the interpreter itself has</span>
+        <span class="s0">// been torn down. There is a limited number of calls that can</span>
+        <span class="s0">// be queued: 32 (NPENDINGCALLS) in CPython 3.10, so we</span>
+        <span class="s0">// coalesce these calls using our own queue.</span>
+
+        <span class="s2">if </span><span class="s1">(!MarkGreenletDeadIfNeeded(state)) {</span>
+            <span class="s0">// No state, or no greenlet</span>
+            <span class="s2">return</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s0">// XXX: Because we don't have the GIL, this is a race condition.</span>
+        <span class="s2">if </span><span class="s1">(!PyInterpreterState_Head()) {</span>
+            <span class="s0">// We have to leak the thread state, if the</span>
+            <span class="s0">// interpreter has shut down when we're getting</span>
+            <span class="s0">// deallocated, we can't run the cleanup code that</span>
+            <span class="s0">// deleting it would imply.</span>
+            <span class="s2">return</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">AddToCleanupQueue(state);</span>
+
+    <span class="s1">}</span>
+
+<span class="s4">private</span><span class="s1">:</span>
+
+    <span class="s0">// If the state has an allocated main greenlet:</span>
+    <span class="s0">// - mark the greenlet as dead by disassociating it from the state;</span>
+    <span class="s0">// - return 1</span>
+    <span class="s0">// Otherwise, return 0.</span>
+    <span class="s2">static bool</span>
+    <span class="s1">MarkGreenletDeadIfNeeded(ThreadState* </span><span class="s2">const </span><span class="s1">state)</span>
+    <span class="s1">{</span>
+        <span class="s2">if </span><span class="s1">(state &amp;&amp; state</span><span class="s5">-&gt;</span><span class="s1">has_main_greenlet()) {</span>
+            <span class="s0">// mark the thread as dead ASAP.</span>
+            <span class="s0">// this is racy! If we try to throw or switch to a</span>
+            <span class="s0">// greenlet from this thread from some other thread before</span>
+            <span class="s0">// we clear the state pointer, it won't realize the state</span>
+            <span class="s0">// is dead which can crash the process.</span>
+            <span class="s1">PyGreenlet* p(state</span><span class="s5">-&gt;</span><span class="s1">borrow_main_greenlet().borrow());</span>
+            <span class="s1">assert(p</span><span class="s5">-&gt;</span><span class="s1">pimpl</span><span class="s5">-&gt;</span><span class="s1">thread_state() == state || p</span><span class="s5">-&gt;</span><span class="s1">pimpl</span><span class="s5">-&gt;</span><span class="s1">thread_state() == nullptr);</span>
+            <span class="s4">dynamic_cast</span><span class="s1">&lt;MainGreenlet*&gt;(p</span><span class="s5">-&gt;</span><span class="s1">pimpl)</span><span class="s5">-&gt;</span><span class="s1">thread_state(nullptr);</span>
+           <span class="s2">return </span><span class="s4">true</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s2">return false</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">static void</span>
+    <span class="s1">AddToCleanupQueue(ThreadState* </span><span class="s2">const </span><span class="s1">state)</span>
+    <span class="s1">{</span>
+        <span class="s1">assert(state &amp;&amp; state</span><span class="s5">-&gt;</span><span class="s1">has_main_greenlet());</span>
+
+        <span class="s0">// NOTE: Because we're not holding the GIL here, some other</span>
+        <span class="s0">// Python thread could run and call ``os.fork()``, which would</span>
+        <span class="s0">// be bad if that happened while we are holding the cleanup</span>
+        <span class="s0">// lock (it wouldn't function in the child process).</span>
+        <span class="s0">// Make a best effort to try to keep the duration we hold the</span>
+        <span class="s0">// lock short.</span>
+        <span class="s0">// TODO: On platforms that support it, use ``pthread_atfork`` to</span>
+        <span class="s0">// drop this lock.</span>
+        <span class="s1">LockGuard cleanup_lock(*mod_globs</span><span class="s5">-&gt;</span><span class="s1">thread_states_to_destroy_lock);</span>
+
+        <span class="s1">mod_globs</span><span class="s5">-&gt;</span><span class="s1">queue_to_destroy(state);</span>
+        <span class="s2">if </span><span class="s1">(mod_globs</span><span class="s5">-&gt;</span><span class="s1">thread_states_to_destroy.size() == </span><span class="s6">1</span><span class="s1">) {</span>
+            <span class="s0">// We added the first item to the queue. We need to schedule</span>
+            <span class="s0">// the cleanup.</span>
+
+            <span class="s0">// A size greater than 1 means that we have already added the pending call,</span>
+            <span class="s0">// and in fact, it may be executing now.</span>
+            <span class="s0">// If it is executing, our lock makes sure that it will see the item we just added</span>
+            <span class="s0">// to the queue on its next iteration (after we release the lock)</span>
+            <span class="s0">//</span>
+            <span class="s0">// A size of 1 means there is no pending call, OR the pending call is</span>
+            <span class="s0">// currently executing, has dropped the lock, and is deleting the last item</span>
+            <span class="s0">// from the queue; its next iteration will go ahead and delete the item we just added.</span>
+            <span class="s0">// And the pending call we schedule here will have no work to do.</span>
+            <span class="s2">int </span><span class="s1">result = AddPendingCall(</span>
+                           <span class="s1">PendingCallback_DestroyQueueWithGIL,</span>
+                            <span class="s1">nullptr);</span>
+            <span class="s2">if </span><span class="s1">(result &lt; </span><span class="s6">0</span><span class="s1">) {</span>
+                <span class="s0">// Hmm, what can we do here?</span>
+                <span class="s1">fprintf(stderr,</span>
+                        <span class="s3">&quot;greenlet: WARNING: failed in call to Py_AddPendingCall; &quot;</span>
+                        <span class="s3">&quot;expect a memory leak.</span><span class="s2">\n</span><span class="s3">&quot;</span><span class="s1">);</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s2">static int</span>
+    <span class="s1">PendingCallback_DestroyQueueWithGIL(</span><span class="s2">void</span><span class="s1">* UNUSED(arg))</span>
+    <span class="s1">{</span>
+        <span class="s0">// We're holding the GIL here, so no Python code should be able to</span>
+        <span class="s0">// run to call ``os.fork()``.</span>
+        <span class="s2">while </span><span class="s1">(</span><span class="s6">1</span><span class="s1">) {</span>
+            <span class="s1">ThreadState* to_destroy;</span>
+            <span class="s1">{</span>
+                <span class="s1">LockGuard cleanup_lock(*mod_globs</span><span class="s5">-&gt;</span><span class="s1">thread_states_to_destroy_lock);</span>
+                <span class="s2">if </span><span class="s1">(mod_globs</span><span class="s5">-&gt;</span><span class="s1">thread_states_to_destroy.empty()) {</span>
+                    <span class="s2">break</span><span class="s1">;</span>
+                <span class="s1">}</span>
+                <span class="s1">to_destroy = mod_globs</span><span class="s5">-&gt;</span><span class="s1">take_next_to_destroy();</span>
+            <span class="s1">}</span>
+            <span class="s1">assert(to_destroy);</span>
+            <span class="s1">assert(to_destroy</span><span class="s5">-&gt;</span><span class="s1">has_main_greenlet());</span>
+            <span class="s0">// Drop the lock while we do the actual deletion.</span>
+            <span class="s0">// This allows other calls to MarkGreenletDeadAndQueueCleanup</span>
+            <span class="s0">// to enter and add to our queue.</span>
+            <span class="s1">DestroyOneWithGIL(to_destroy);</span>
+        <span class="s1">}</span>
+        <span class="s2">return </span><span class="s6">0</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">static void</span>
+    <span class="s1">DestroyOneWithGIL(</span><span class="s2">const </span><span class="s1">ThreadState* </span><span class="s2">const </span><span class="s1">state)</span>
+    <span class="s1">{</span>
+        <span class="s0">// Holding the GIL.</span>
+        <span class="s0">// Passed a non-shared pointer to the actual thread state.</span>
+        <span class="s0">// state -&gt; main greenlet</span>
+        <span class="s1">assert(state</span><span class="s5">-&gt;</span><span class="s1">has_main_greenlet());</span>
+        <span class="s1">PyGreenlet* main(state</span><span class="s5">-&gt;</span><span class="s1">borrow_main_greenlet());</span>
+        <span class="s0">// When we need to do cross-thread operations, we check this.</span>
+        <span class="s0">// A NULL value means the thread died some time ago.</span>
+        <span class="s0">// We do this here, rather than in a Python dealloc function</span>
+        <span class="s0">// for the greenlet, in case there's still a reference out</span>
+        <span class="s0">// there.</span>
+        <span class="s4">dynamic_cast</span><span class="s1">&lt;MainGreenlet*&gt;(main</span><span class="s5">-&gt;</span><span class="s1">pimpl)</span><span class="s5">-&gt;</span><span class="s1">thread_state(nullptr);</span>
+
+        <span class="s2">delete </span><span class="s1">state; </span><span class="s0">// Deleting this runs the destructor, DECREFs the main greenlet.</span>
+    <span class="s1">}</span>
+
+    <span class="s0">// ensure this is actually defined.</span>
+    <span class="s1">static_assert(GREENLET_BROKEN_PY_ADD_PENDING == </span><span class="s6">1 </span><span class="s1">|| GREENLET_BROKEN_PY_ADD_PENDING == </span><span class="s6">0</span><span class="s1">,</span>
+                  <span class="s3">&quot;GREENLET_BROKEN_PY_ADD_PENDING not defined correctly.&quot;</span><span class="s1">);</span>
+
+<span class="s2">#if </span><span class="s1">GREENLET_BROKEN_PY_ADD_PENDING</span>
+    <span class="s2">static int </span><span class="s1">_push_pending_call(</span><span class="s2">struct </span><span class="s1">_pending_calls *pending,</span>
+                                  <span class="s2">int </span><span class="s1">(*func)(</span><span class="s2">void </span><span class="s1">*), </span><span class="s2">void </span><span class="s1">*arg)</span>
+    <span class="s1">{</span>
+        <span class="s2">int </span><span class="s1">i = pending</span><span class="s5">-&gt;</span><span class="s1">last;</span>
+        <span class="s2">int </span><span class="s1">j = (i + </span><span class="s6">1</span><span class="s1">) % NPENDINGCALLS;</span>
+        <span class="s2">if </span><span class="s1">(j == pending</span><span class="s5">-&gt;</span><span class="s1">first) {</span>
+            <span class="s2">return </span><span class="s1">-</span><span class="s6">1</span><span class="s1">; </span><span class="s0">/* Queue full */</span>
+        <span class="s1">}</span>
+        <span class="s1">pending</span><span class="s5">-&gt;</span><span class="s1">calls[i].func = func;</span>
+        <span class="s1">pending</span><span class="s5">-&gt;</span><span class="s1">calls[i].arg = arg;</span>
+        <span class="s1">pending</span><span class="s5">-&gt;</span><span class="s1">last = j;</span>
+        <span class="s2">return </span><span class="s6">0</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">static int </span><span class="s1">AddPendingCall(</span><span class="s2">int </span><span class="s1">(*func)(</span><span class="s2">void </span><span class="s1">*), </span><span class="s2">void </span><span class="s1">*arg)</span>
+    <span class="s1">{</span>
+        <span class="s1">_PyRuntimeState *runtime = &amp;_PyRuntime;</span>
+        <span class="s2">if </span><span class="s1">(!runtime) {</span>
+            <span class="s0">// obviously impossible</span>
+            <span class="s2">return </span><span class="s6">0</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s2">struct </span><span class="s1">_pending_calls *pending = &amp;runtime</span><span class="s5">-&gt;</span><span class="s1">ceval.pending;</span>
+        <span class="s2">if </span><span class="s1">(!pending</span><span class="s5">-&gt;</span><span class="s1">lock) {</span>
+            <span class="s2">return </span><span class="s6">0</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s2">int </span><span class="s1">result = </span><span class="s6">0</span><span class="s1">;</span>
+        <span class="s1">PyThread_acquire_lock(pending</span><span class="s5">-&gt;</span><span class="s1">lock, WAIT_LOCK);</span>
+        <span class="s2">if </span><span class="s1">(!pending</span><span class="s5">-&gt;</span><span class="s1">finishing) {</span>
+            <span class="s1">result = _push_pending_call(pending, func, arg);</span>
+        <span class="s1">}</span>
+        <span class="s1">PyThread_release_lock(pending</span><span class="s5">-&gt;</span><span class="s1">lock);</span>
+        <span class="s1">SIGNAL_PENDING_CALLS(&amp;runtime</span><span class="s5">-&gt;</span><span class="s1">ceval);</span>
+        <span class="s2">return </span><span class="s1">result;</span>
+    <span class="s1">}</span>
+<span class="s2">#else</span>
+    <span class="s0">// Python &lt; 3.8 or &gt;= 3.9</span>
+    <span class="s2">static int </span><span class="s1">AddPendingCall(</span><span class="s2">int </span><span class="s1">(*func)(</span><span class="s2">void</span><span class="s1">*), </span><span class="s2">void</span><span class="s1">* arg)</span>
+    <span class="s1">{</span>
+        <span class="s0">// If the interpreter is in the middle of finalizing, we can't add a</span>
+        <span class="s0">// pending call. Trying to do so will end up in a SIGSEGV, as</span>
+        <span class="s0">// Py_AddPendingCall will not be able to get the interpreter and will</span>
+        <span class="s0">// try to dereference a NULL pointer. It's possible this can still</span>
+        <span class="s0">// segfault if we happen to get context switched, and maybe we should</span>
+        <span class="s0">// just always implement our own AddPendingCall, but I'd like to see if</span>
+        <span class="s0">// this works first</span>
+<span class="s2">#if </span><span class="s1">GREENLET_PY313</span>
+        <span class="s2">if </span><span class="s1">(Py_IsFinalizing()) {</span>
+<span class="s2">#else</span>
+        <span class="s2">if </span><span class="s1">(_Py_IsFinalizing()) {</span>
+<span class="s2">#endif</span>
+<span class="s2">#ifdef </span><span class="s1">GREENLET_DEBUG</span>
+            <span class="s0">// No need to log in the general case. Yes, we'll leak,</span>
+            <span class="s0">// but we're shutting down so it should be ok.</span>
+            <span class="s1">fprintf(stderr,</span>
+                    <span class="s3">&quot;greenlet: WARNING: Interpreter is finalizing. Ignoring &quot;</span>
+                    <span class="s3">&quot;call to Py_AddPendingCall; </span><span class="s2">\n</span><span class="s3">&quot;</span><span class="s1">);</span>
+<span class="s2">#endif</span>
+            <span class="s2">return </span><span class="s6">0</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s2">return </span><span class="s1">Py_AddPendingCall(func, arg);</span>
+    <span class="s1">}</span>
+<span class="s2">#endif</span>
+
+
+
+
+<span class="s1">};</span>
+<span class="s1">};</span>
+
+<span class="s1">}; </span><span class="s0">// namespace greenlet</span>
+
+<span class="s0">// The intent when GET_THREAD_STATE() is needed multiple times in a</span>
+<span class="s0">// function is to take a reference to its return value in a local</span>
+<span class="s0">// variable, to avoid the thread-local indirection. On some platforms</span>
+<span class="s0">// (macOS), accessing a thread-local involves a function call (plus an</span>
+<span class="s0">// initial function call in each function that uses a thread local);</span>
+<span class="s0">// in contrast, static volatile variables are at some pre-computed</span>
+<span class="s0">// offset.</span>
+<span class="s2">typedef </span><span class="s1">greenlet::ThreadStateCreator&lt;greenlet::ThreadState_DestroyNoGIL::MarkGreenletDeadAndQueueCleanup&gt; ThreadStateCreator;</span>
+<span class="s2">static </span><span class="s1">thread_local ThreadStateCreator g_thread_state_global;</span>
+<span class="s2">#define </span><span class="s1">GET_THREAD_STATE() g_thread_state_global</span>
+
+<span class="s2">#endif </span><span class="s0">//T_THREADSTATE_DESTROY</span>
+</pre>
+</body>
+</html>

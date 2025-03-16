@@ -1,0 +1,79 @@
+<html>
+<head>
+<title>switch_x64_msvc.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_x64_msvc.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * this is the internal transfer function. 
+ * 
+ * HISTORY 
+ * 24-Nov-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      needed to add another magic constant to insure 
+ *      that f in slp_eval_frame(PyFrameObject *f) 
+ *      STACK_REFPLUS will probably be 1 in most cases. 
+ *      gets included into the saved stack area. 
+ * 26-Sep-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      again as a result of virtualized stack access, 
+ *      the compiler used less registers. Needed to 
+ *      explicit mention registers in order to get them saved. 
+ *      Thanks to Jeff Senn for pointing this out and help. 
+ * 17-Sep-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      after virtualizing stack save/restore, the 
+ *      stack size shrunk a bit. Needed to introduce 
+ *      an adjustment STACK_MAGIC per platform. 
+ * 15-Sep-02  Gerd Woetzel       &lt;gerd.woetzel@GMD.DE&gt; 
+ *      slightly changed framework for sparc 
+ * 01-Mar-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      Initial final version after lots of iterations for i386. 
+ */</span>
+
+<span class="s0">/* Avoid alloca redefined warning on mingw64 */</span>
+<span class="s2">#ifndef </span><span class="s1">alloca</span>
+<span class="s2">#define </span><span class="s1">alloca _alloca</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#define </span><span class="s1">STACK_REFPLUS </span><span class="s3">1</span>
+<span class="s2">#define </span><span class="s1">STACK_MAGIC </span><span class="s3">0</span>
+
+<span class="s0">/* Use the generic support for an external assembly language slp_switch function. */</span>
+<span class="s2">#define </span><span class="s1">EXTERNAL_ASM</span>
+
+<span class="s2">#ifdef </span><span class="s1">SLP_EVAL</span>
+<span class="s0">/* This always uses the external masm assembly file. */</span>
+<span class="s2">#endif</span>
+
+<span class="s0">/* 
+ * further self-processing support 
+ */</span>
+
+<span class="s0">/* we have IsBadReadPtr available, so we can peek at objects */</span>
+<span class="s0">/* 
+#define STACKLESS_SPY 
+ 
+#ifdef IMPLEMENT_STACKLESSMODULE 
+#include &quot;Windows.h&quot; 
+#define CANNOT_READ_MEM(p, bytes) IsBadReadPtr(p, bytes) 
+ 
+static int IS_ON_STACK(void*p) 
+{ 
+    int stackref; 
+    intptr_t stackbase = ((intptr_t)&amp;stackref) &amp; 0xfffff000; 
+    return (intptr_t)p &gt;= stackbase &amp;&amp; (intptr_t)p &lt; stackbase + 0x00100000; 
+} 
+ 
+#endif 
+*/</span></pre>
+</body>
+</html>

@@ -1,0 +1,161 @@
+<html>
+<head>
+<title>test_update_delete.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_update_delete.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># testing/suite/test_update_delete.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+<span class="s0"># mypy: ignore-errors</span>
+
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">fixtures</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">assertions </span><span class="s2">import </span><span class="s1">eq_</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">Column</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">Table</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">Integer</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">String</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">testing</span>
+
+
+<span class="s2">class </span><span class="s1">SimpleUpdateDeleteTest</span><span class="s3">(</span><span class="s1">fixtures</span><span class="s3">.</span><span class="s1">TablesTest</span><span class="s3">):</span>
+    <span class="s1">run_deletes </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+    <span class="s1">__requires__ </span><span class="s3">= (</span><span class="s4">&quot;sane_rowcount&quot;</span><span class="s3">,)</span>
+    <span class="s1">__backend__ </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">define_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">):</span>
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;plain_pk&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">insert_data</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">plain_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(),</span>
+            <span class="s3">[</span>
+                <span class="s3">{</span><span class="s4">&quot;id&quot;</span><span class="s3">: </span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d1&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;id&quot;</span><span class="s3">: </span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d2&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;id&quot;</span><span class="s3">: </span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d3&quot;</span><span class="s3">},</span>
+            <span class="s3">],</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_update</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">t </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">plain_pk</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">t</span><span class="s3">.</span><span class="s1">update</span><span class="s3">().</span><span class="s1">where</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">== </span><span class="s5">2</span><span class="s3">), </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;d2_new&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">is_insert</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">returns_rows</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">rowcount </span><span class="s3">== </span><span class="s5">1</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">select</span><span class="s3">().</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">[(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;d1&quot;</span><span class="s3">), (</span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;d2_new&quot;</span><span class="s3">), (</span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">)],</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_delete</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">t </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">plain_pk</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">delete</span><span class="s3">().</span><span class="s1">where</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">== </span><span class="s5">2</span><span class="s3">))</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">is_insert</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">returns_rows</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">rowcount </span><span class="s3">== </span><span class="s5">1</span>
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">select</span><span class="s3">().</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">[(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;d1&quot;</span><span class="s3">), (</span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">)],</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">variation</span><span class="s3">(</span><span class="s4">&quot;criteria&quot;</span><span class="s3">, [</span><span class="s4">&quot;rows&quot;</span><span class="s3">, </span><span class="s4">&quot;norows&quot;</span><span class="s3">, </span><span class="s4">&quot;emptyin&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">update_returning</span>
+    <span class="s2">def </span><span class="s1">test_update_returning</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">, </span><span class="s1">criteria</span><span class="s3">):</span>
+        <span class="s1">t </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">plain_pk</span>
+
+        <span class="s1">stmt </span><span class="s3">= </span><span class="s1">t</span><span class="s3">.</span><span class="s1">update</span><span class="s3">().</span><span class="s1">returning</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">, </span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">norows</span><span class="s3">:</span>
+            <span class="s1">stmt </span><span class="s3">= </span><span class="s1">stmt</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">== </span><span class="s5">10</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">rows</span><span class="s3">:</span>
+            <span class="s1">stmt </span><span class="s3">= </span><span class="s1">stmt</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">== </span><span class="s5">2</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">emptyin</span><span class="s3">:</span>
+            <span class="s1">stmt </span><span class="s3">= </span><span class="s1">stmt</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([]))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">criteria</span><span class="s3">.</span><span class="s1">fail</span><span class="s3">()</span>
+
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">stmt</span><span class="s3">, </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;d2_new&quot;</span><span class="s3">))</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">is_insert</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">returns_rows</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">(), [</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">])</span>
+
+        <span class="s2">if </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">rows</span><span class="s3">:</span>
+            <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">all</span><span class="s3">(), [(</span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;d2_new&quot;</span><span class="s3">)])</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">all</span><span class="s3">(), [])</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">select</span><span class="s3">().</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">(</span>
+                <span class="s3">[(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;d1&quot;</span><span class="s3">), (</span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;d2_new&quot;</span><span class="s3">), (</span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">)]</span>
+                <span class="s2">if </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">rows</span>
+                <span class="s2">else </span><span class="s3">[(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;d1&quot;</span><span class="s3">), (</span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;d2&quot;</span><span class="s3">), (</span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">)]</span>
+            <span class="s3">),</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">variation</span><span class="s3">(</span><span class="s4">&quot;criteria&quot;</span><span class="s3">, [</span><span class="s4">&quot;rows&quot;</span><span class="s3">, </span><span class="s4">&quot;norows&quot;</span><span class="s3">, </span><span class="s4">&quot;emptyin&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">delete_returning</span>
+    <span class="s2">def </span><span class="s1">test_delete_returning</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">, </span><span class="s1">criteria</span><span class="s3">):</span>
+        <span class="s1">t </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">plain_pk</span>
+
+        <span class="s1">stmt </span><span class="s3">= </span><span class="s1">t</span><span class="s3">.</span><span class="s1">delete</span><span class="s3">().</span><span class="s1">returning</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">, </span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">norows</span><span class="s3">:</span>
+            <span class="s1">stmt </span><span class="s3">= </span><span class="s1">stmt</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">== </span><span class="s5">10</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">rows</span><span class="s3">:</span>
+            <span class="s1">stmt </span><span class="s3">= </span><span class="s1">stmt</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">== </span><span class="s5">2</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">emptyin</span><span class="s3">:</span>
+            <span class="s1">stmt </span><span class="s3">= </span><span class="s1">stmt</span><span class="s3">.</span><span class="s1">where</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([]))</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">criteria</span><span class="s3">.</span><span class="s1">fail</span><span class="s3">()</span>
+
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">stmt</span><span class="s3">)</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">is_insert</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">returns_rows</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">(), [</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">])</span>
+
+        <span class="s2">if </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">rows</span><span class="s3">:</span>
+            <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">all</span><span class="s3">(), [(</span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;d2&quot;</span><span class="s3">)])</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">all</span><span class="s3">(), [])</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">select</span><span class="s3">().</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">(</span>
+                <span class="s3">[(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;d1&quot;</span><span class="s3">), (</span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">)]</span>
+                <span class="s2">if </span><span class="s1">criteria</span><span class="s3">.</span><span class="s1">rows</span>
+                <span class="s2">else </span><span class="s3">[(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;d1&quot;</span><span class="s3">), (</span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;d2&quot;</span><span class="s3">), (</span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;d3&quot;</span><span class="s3">)]</span>
+            <span class="s3">),</span>
+        <span class="s3">)</span>
+
+
+<span class="s1">__all__ </span><span class="s3">= (</span><span class="s4">&quot;SimpleUpdateDeleteTest&quot;</span><span class="s3">,)</span>
+</pre>
+</body>
+</html>

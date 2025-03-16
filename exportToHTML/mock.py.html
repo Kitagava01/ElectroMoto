@@ -1,0 +1,153 @@
+<html>
+<head>
+<title>mock.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+mock.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># engine/mock.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">operator </span><span class="s2">import </span><span class="s1">attrgetter</span>
+<span class="s2">import </span><span class="s1">typing</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Any</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Callable</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">cast</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Optional</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Type</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Union</span>
+
+<span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">url </span><span class="s2">as </span><span class="s1">_url</span>
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">util</span>
+
+
+<span class="s2">if </span><span class="s1">typing</span><span class="s3">.</span><span class="s1">TYPE_CHECKING</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s1">Engine</span>
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">interfaces </span><span class="s2">import </span><span class="s1">_CoreAnyExecuteParams</span>
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">interfaces </span><span class="s2">import </span><span class="s1">CoreExecuteOptionsParameter</span>
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">interfaces </span><span class="s2">import </span><span class="s1">Dialect</span>
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">url </span><span class="s2">import </span><span class="s1">URL</span>
+    <span class="s2">from </span><span class="s3">..</span><span class="s1">sql</span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s1">Executable</span>
+    <span class="s2">from </span><span class="s3">..</span><span class="s1">sql</span><span class="s3">.</span><span class="s1">ddl </span><span class="s2">import </span><span class="s1">SchemaDropper</span>
+    <span class="s2">from </span><span class="s3">..</span><span class="s1">sql</span><span class="s3">.</span><span class="s1">ddl </span><span class="s2">import </span><span class="s1">SchemaGenerator</span>
+    <span class="s2">from </span><span class="s3">..</span><span class="s1">sql</span><span class="s3">.</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">HasSchemaAttr</span>
+    <span class="s2">from </span><span class="s3">..</span><span class="s1">sql</span><span class="s3">.</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">SchemaItem</span>
+
+
+<span class="s2">class </span><span class="s1">MockConnection</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">dialect</span><span class="s3">: </span><span class="s1">Dialect</span><span class="s3">, </span><span class="s1">execute</span><span class="s3">: </span><span class="s1">Callable</span><span class="s3">[..., </span><span class="s1">Any</span><span class="s3">]):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_dialect </span><span class="s3">= </span><span class="s1">dialect</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_execute_impl </span><span class="s3">= </span><span class="s1">execute</span>
+
+    <span class="s1">engine</span><span class="s3">: </span><span class="s1">Engine </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">Any</span><span class="s3">, </span><span class="s1">property</span><span class="s3">(</span><span class="s2">lambda </span><span class="s1">s</span><span class="s3">: </span><span class="s1">s</span><span class="s3">))</span>
+    <span class="s1">dialect</span><span class="s3">: </span><span class="s1">Dialect </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">Any</span><span class="s3">, </span><span class="s1">property</span><span class="s3">(</span><span class="s1">attrgetter</span><span class="s3">(</span><span class="s4">&quot;_dialect&quot;</span><span class="s3">)))</span>
+    <span class="s1">name</span><span class="s3">: </span><span class="s1">str </span><span class="s3">= </span><span class="s1">cast</span><span class="s3">(</span><span class="s1">Any</span><span class="s3">, </span><span class="s1">property</span><span class="s3">(</span><span class="s2">lambda </span><span class="s1">s</span><span class="s3">: </span><span class="s1">s</span><span class="s3">.</span><span class="s1">_dialect</span><span class="s3">.</span><span class="s1">name</span><span class="s3">))</span>
+
+    <span class="s2">def </span><span class="s1">connect</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">) </span><span class="s1">-&gt; MockConnection</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">schema_for_object</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">obj</span><span class="s3">: </span><span class="s1">HasSchemaAttr</span><span class="s3">) </span><span class="s1">-&gt; Optional</span><span class="s3">[</span><span class="s1">str</span><span class="s3">]:</span>
+        <span class="s2">return </span><span class="s1">obj</span><span class="s3">.</span><span class="s1">schema</span>
+
+    <span class="s2">def </span><span class="s1">execution_options</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">) </span><span class="s1">-&gt; MockConnection</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">_run_ddl_visitor</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">visitorcallable</span><span class="s3">: </span><span class="s1">Type</span><span class="s3">[</span><span class="s1">Union</span><span class="s3">[</span><span class="s1">SchemaGenerator</span><span class="s3">, </span><span class="s1">SchemaDropper</span><span class="s3">]],</span>
+        <span class="s1">element</span><span class="s3">: </span><span class="s1">SchemaItem</span><span class="s3">,</span>
+        <span class="s3">**</span><span class="s1">kwargs</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">kwargs</span><span class="s3">[</span><span class="s4">&quot;checkfirst&quot;</span><span class="s3">] = </span><span class="s2">False</span>
+        <span class="s1">visitorcallable</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">dialect</span><span class="s3">, </span><span class="s1">self</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">).</span><span class="s1">traverse_single</span><span class="s3">(</span><span class="s1">element</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">execute</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">obj</span><span class="s3">: </span><span class="s1">Executable</span><span class="s3">,</span>
+        <span class="s1">parameters</span><span class="s3">: </span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">_CoreAnyExecuteParams</span><span class="s3">] = </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">execution_options</span><span class="s3">: </span><span class="s1">Optional</span><span class="s3">[</span><span class="s1">CoreExecuteOptionsParameter</span><span class="s3">] = </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; Any</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_execute_impl</span><span class="s3">(</span><span class="s1">obj</span><span class="s3">, </span><span class="s1">parameters</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">create_mock_engine</span><span class="s3">(</span>
+    <span class="s1">url</span><span class="s3">: </span><span class="s1">Union</span><span class="s3">[</span><span class="s1">str</span><span class="s3">, </span><span class="s1">URL</span><span class="s3">], </span><span class="s1">executor</span><span class="s3">: </span><span class="s1">Any</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">: </span><span class="s1">Any</span>
+<span class="s3">) </span><span class="s1">-&gt; MockConnection</span><span class="s3">:</span>
+    <span class="s5">&quot;&quot;&quot;Create a &quot;mock&quot; engine used for echoing DDL. 
+ 
+    This is a utility function used for debugging or storing the output of DDL 
+    sequences as generated by :meth:`_schema.MetaData.create_all` 
+    and related methods. 
+ 
+    The function accepts a URL which is used only to determine the kind of 
+    dialect to be used, as well as an &quot;executor&quot; callable function which 
+    will receive a SQL expression object and parameters, which can then be 
+    echoed or otherwise printed.   The executor's return value is not handled, 
+    nor does the engine allow regular string statements to be invoked, and 
+    is therefore only useful for DDL that is sent to the database without 
+    receiving any results. 
+ 
+    E.g.:: 
+ 
+        from sqlalchemy import create_mock_engine 
+ 
+        def dump(sql, *multiparams, **params): 
+            print(sql.compile(dialect=engine.dialect)) 
+ 
+        engine = create_mock_engine('postgresql+psycopg2://', dump) 
+        metadata.create_all(engine, checkfirst=False) 
+ 
+    :param url: A string URL which typically needs to contain only the 
+     database backend name. 
+ 
+    :param executor: a callable which receives the arguments ``sql``, 
+     ``*multiparams`` and ``**params``.  The ``sql`` parameter is typically 
+     an instance of :class:`.ExecutableDDLElement`, which can then be compiled 
+     into a string using :meth:`.ExecutableDDLElement.compile`. 
+ 
+    .. versionadded:: 1.4 - the :func:`.create_mock_engine` function replaces 
+       the previous &quot;mock&quot; engine strategy used with 
+       :func:`_sa.create_engine`. 
+ 
+    .. seealso:: 
+ 
+        :ref:`faq_ddl_as_string` 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0"># create url.URL object</span>
+    <span class="s1">u </span><span class="s3">= </span><span class="s1">_url</span><span class="s3">.</span><span class="s1">make_url</span><span class="s3">(</span><span class="s1">url</span><span class="s3">)</span>
+
+    <span class="s1">dialect_cls </span><span class="s3">= </span><span class="s1">u</span><span class="s3">.</span><span class="s1">get_dialect</span><span class="s3">()</span>
+
+    <span class="s1">dialect_args </span><span class="s3">= {}</span>
+    <span class="s0"># consume dialect arguments from kwargs</span>
+    <span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">util</span><span class="s3">.</span><span class="s1">get_cls_kwargs</span><span class="s3">(</span><span class="s1">dialect_cls</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">k </span><span class="s2">in </span><span class="s1">kw</span><span class="s3">:</span>
+            <span class="s1">dialect_args</span><span class="s3">[</span><span class="s1">k</span><span class="s3">] = </span><span class="s1">kw</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s1">k</span><span class="s3">)</span>
+
+    <span class="s0"># create dialect</span>
+    <span class="s1">dialect </span><span class="s3">= </span><span class="s1">dialect_cls</span><span class="s3">(**</span><span class="s1">dialect_args</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">MockConnection</span><span class="s3">(</span><span class="s1">dialect</span><span class="s3">, </span><span class="s1">executor</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

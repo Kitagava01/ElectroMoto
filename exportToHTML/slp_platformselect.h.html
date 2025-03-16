@@ -1,0 +1,95 @@
+<html>
+<head>
+<title>slp_platformselect.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+slp_platformselect.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * Platform Selection for Stackless Python 
+ */</span>
+<span class="s2">#ifdef </span><span class="s1">__cplusplus</span>
+<span class="s2">extern </span><span class="s3">&quot;C&quot; </span><span class="s1">{</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#if   </span><span class="s1">defined(MS_WIN32) &amp;&amp; !defined(MS_WIN64) &amp;&amp; defined(_M_IX86) &amp;&amp; defined(_MSC_VER)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_x86_msvc.h&quot; </span><span class="s0">/* MS Visual Studio on X86 */</span>
+<span class="s1">#elif defined(MS_WIN64) &amp;&amp; defined(_M_X64) &amp;&amp; defined(_MSC_VER) || defined(__MINGW64__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_x64_msvc.h&quot; </span><span class="s0">/* MS Visual Studio on X64 */</span>
+<span class="s1">#elif  defined(MS_WIN64) &amp;&amp; defined(_M_ARM64)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_arm64_msvc.h&quot; </span><span class="s0">/* MS Visual Studio on ARM64 */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__amd64__) &amp;&amp; defined(__ILP32__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_x32_unix.h&quot; </span><span class="s0">/* gcc on amd64 with x32 ABI */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__amd64__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_amd64_unix.h&quot; </span><span class="s0">/* gcc on amd64 */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__i386__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_x86_unix.h&quot; </span><span class="s0">/* gcc on X86 */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__powerpc64__) &amp;&amp; (defined(__linux__) || defined(__FreeBSD__))</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_ppc64_linux.h&quot; </span><span class="s0">/* gcc on PowerPC 64-bit */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__PPC__) &amp;&amp; (defined(__linux__) || defined(__FreeBSD__))</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_ppc_linux.h&quot; </span><span class="s0">/* gcc on PowerPC */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__POWERPC__) &amp;&amp; defined(__APPLE__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_ppc_macosx.h&quot; </span><span class="s0">/* Apple MacOS X on 32-bit PowerPC */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__powerpc64__) &amp;&amp; defined(_AIX)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_ppc64_aix.h&quot; </span><span class="s0">/* gcc on AIX/PowerPC 64-bit */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(_ARCH_PPC) &amp;&amp; defined(_AIX)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_ppc_aix.h&quot; </span><span class="s0">/* gcc on AIX/PowerPC */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__powerpc__) &amp;&amp; defined(__NetBSD__)</span>
+<span class="s2">#include </span><span class="s3">&quot;platform/switch_ppc_unix.h&quot; </span><span class="s0">/* gcc on NetBSD/powerpc */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(sparc)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_sparc_sun_gcc.h&quot; </span><span class="s0">/* SunOS sparc with gcc */</span>
+<span class="s1">#elif defined(__SUNPRO_C) &amp;&amp; defined(sparc) &amp;&amp; defined(sun)</span>
+<span class="s1"># iiclude </span><span class="s3">&quot;platform/switch_sparc_sun_gcc.h&quot; </span><span class="s0">/* SunStudio on amd64 */</span>
+<span class="s1">#elif defined(__SUNPRO_C) &amp;&amp; defined(__amd64__) &amp;&amp; defined(sun)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_amd64_unix.h&quot; </span><span class="s0">/* SunStudio on amd64 */</span>
+<span class="s1">#elif defined(__SUNPRO_C) &amp;&amp; defined(__i386__) &amp;&amp; defined(sun)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_x86_unix.h&quot; </span><span class="s0">/* SunStudio on x86 */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__s390__) &amp;&amp; defined(__linux__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_s390_unix.h&quot; </span><span class="s0">/* Linux/S390 */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__s390x__) &amp;&amp; defined(__linux__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_s390_unix.h&quot; </span><span class="s0">/* Linux/S390 zSeries (64-bit) */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__arm__)</span>
+<span class="s1"># ifdef __APPLE__</span>
+<span class="s1">#  include &lt;TargetConditionals.h&gt;</span>
+<span class="s1"># endif</span>
+<span class="s1"># </span><span class="s2">if </span><span class="s1">TARGET_OS_IPHONE</span>
+<span class="s1">#  include </span><span class="s3">&quot;platform/switch_arm32_ios.h&quot; </span><span class="s0">/* iPhone OS on arm32 */</span>
+<span class="s1"># </span><span class="s2">else</span>
+<span class="s1">#  include </span><span class="s3">&quot;platform/switch_arm32_gcc.h&quot; </span><span class="s0">/* gcc using arm32 */</span>
+<span class="s1"># endif</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__mips__) &amp;&amp; defined(__linux__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_mips_unix.h&quot; </span><span class="s0">/* Linux/MIPS */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__aarch64__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_aarch64_gcc.h&quot; </span><span class="s0">/* Aarch64 ABI */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__mc68000__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_m68k_gcc.h&quot; </span><span class="s0">/* gcc on m68k */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__csky__)</span>
+<span class="s2">#include </span><span class="s3">&quot;platform/switch_csky_gcc.h&quot; </span><span class="s0">/* gcc on csky */</span>
+<span class="s1"># elif defined(__GNUC__) &amp;&amp; defined(__riscv)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_riscv_unix.h&quot; </span><span class="s0">/* gcc on RISC-V */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__alpha__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_alpha_unix.h&quot; </span><span class="s0">/* gcc on DEC Alpha */</span>
+<span class="s1">#elif defined(MS_WIN32) &amp;&amp; defined(__llvm__) &amp;&amp; defined(__aarch64__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_aarch64_gcc.h&quot; </span><span class="s0">/* LLVM Aarch64 ABI for Windows */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__loongarch64) &amp;&amp; defined(__linux__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_loongarch64_linux.h&quot; </span><span class="s0">/* LoongArch64 */</span>
+<span class="s1">#elif defined(__GNUC__) &amp;&amp; defined(__sh__)</span>
+<span class="s1"># include </span><span class="s3">&quot;platform/switch_sh_gcc.h&quot; </span><span class="s0">/* SuperH */</span>
+<span class="s2">#endif</span>
+
+<span class="s2">#ifdef </span><span class="s1">__cplusplus</span>
+<span class="s1">};</span>
+<span class="s2">#endif</span>
+</pre>
+</body>
+</html>

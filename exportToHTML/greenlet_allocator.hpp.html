@@ -1,0 +1,85 @@
+<html>
+<head>
+<title>greenlet_allocator.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #6aab73;}
+.s3 { color: #c77dbb;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+greenlet_allocator.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_ALLOCATOR_HPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_ALLOCATOR_HPP</span>
+
+<span class="s0">#define </span><span class="s1">PY_SSIZE_T_CLEAN</span>
+<span class="s0">#include </span><span class="s1">&lt;Python.h&gt;</span>
+<span class="s0">#include </span><span class="s1">&lt;memory&gt;</span>
+<span class="s0">#include </span><span class="s2">&quot;greenlet_compiler_compat.hpp&quot;</span>
+
+
+<span class="s3">namespace </span><span class="s1">greenlet</span>
+<span class="s1">{</span>
+    <span class="s4">// This allocator is stateless; all instances are identical.</span>
+    <span class="s4">// It can *ONLY* be used when we're sure we're holding the GIL</span>
+    <span class="s4">// (Python's allocators require the GIL).</span>
+    <span class="s1">template &lt;</span><span class="s3">class </span><span class="s1">T&gt;</span>
+    <span class="s0">struct </span><span class="s1">PythonAllocator : </span><span class="s3">public </span><span class="s1">std::allocator&lt;T&gt; {</span>
+
+        <span class="s1">PythonAllocator(</span><span class="s0">const </span><span class="s1">PythonAllocator&amp; UNUSED(other))</span>
+            <span class="s1">: std::allocator&lt;T&gt;()</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PythonAllocator(</span><span class="s0">const </span><span class="s1">std::allocator&lt;T&gt; other)</span>
+            <span class="s1">: std::allocator&lt;T&gt;(other)</span>
+        <span class="s1">{}</span>
+
+        <span class="s1">template &lt;</span><span class="s3">class </span><span class="s1">U&gt;</span>
+        <span class="s1">PythonAllocator(</span><span class="s0">const </span><span class="s1">std::allocator&lt;U&gt;&amp; other)</span>
+            <span class="s1">: std::allocator&lt;T&gt;(other)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PythonAllocator() : std::allocator&lt;T&gt;() {}</span>
+
+        <span class="s1">T* allocate(size_t number_objects, </span><span class="s0">const void</span><span class="s1">* UNUSED(hint)=</span><span class="s5">0</span><span class="s1">)</span>
+        <span class="s1">{</span>
+            <span class="s0">void</span><span class="s1">* p;</span>
+            <span class="s0">if </span><span class="s1">(number_objects == </span><span class="s5">1</span><span class="s1">)</span>
+                <span class="s1">p = PyObject_Malloc(</span><span class="s0">sizeof</span><span class="s1">(T));</span>
+            <span class="s0">else</span>
+                <span class="s1">p = PyMem_Malloc(</span><span class="s0">sizeof</span><span class="s1">(T) * number_objects);</span>
+            <span class="s0">return </span><span class="s3">static_cast</span><span class="s1">&lt;T*&gt;(p);</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void </span><span class="s1">deallocate(T* t, size_t n)</span>
+        <span class="s1">{</span>
+            <span class="s0">void</span><span class="s1">* p = t;</span>
+            <span class="s0">if </span><span class="s1">(n == </span><span class="s5">1</span><span class="s1">) {</span>
+                <span class="s1">PyObject_Free(p);</span>
+            <span class="s1">}</span>
+            <span class="s0">else</span>
+                <span class="s1">PyMem_Free(p);</span>
+        <span class="s1">}</span>
+        <span class="s4">// This member is deprecated in C++17 and removed in C++20</span>
+        <span class="s1">template&lt; </span><span class="s3">class </span><span class="s1">U &gt;</span>
+        <span class="s0">struct </span><span class="s1">rebind {</span>
+            <span class="s0">typedef </span><span class="s1">PythonAllocator&lt;U&gt; other;</span>
+        <span class="s1">};</span>
+
+    <span class="s1">};</span>
+<span class="s1">}</span>
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

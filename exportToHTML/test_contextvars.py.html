@@ -1,0 +1,332 @@
+<html>
+<head>
+<title>test_contextvars.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_contextvars.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">print_function</span>
+
+<span class="s0">import </span><span class="s1">gc</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">unittest</span>
+
+<span class="s0">from </span><span class="s1">functools </span><span class="s0">import </span><span class="s1">partial</span>
+<span class="s0">from </span><span class="s1">unittest </span><span class="s0">import </span><span class="s1">skipUnless</span>
+<span class="s0">from </span><span class="s1">unittest </span><span class="s0">import </span><span class="s1">skipIf</span>
+
+<span class="s0">from </span><span class="s1">greenlet </span><span class="s0">import </span><span class="s1">greenlet</span>
+<span class="s0">from </span><span class="s1">greenlet </span><span class="s0">import </span><span class="s1">getcurrent</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">TestCase</span>
+
+
+<span class="s0">try</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s1">contextvars </span><span class="s0">import </span><span class="s1">Context</span>
+    <span class="s0">from </span><span class="s1">contextvars </span><span class="s0">import </span><span class="s1">ContextVar</span>
+    <span class="s0">from </span><span class="s1">contextvars </span><span class="s0">import </span><span class="s1">copy_context</span>
+    <span class="s3"># From the documentation:</span>
+    <span class="s3">#</span>
+    <span class="s3"># Important: Context Variables should be created at the top module</span>
+    <span class="s3"># level and never in closures. Context objects hold strong</span>
+    <span class="s3"># references to context variables which prevents context variables</span>
+    <span class="s3"># from being properly garbage collected.</span>
+    <span class="s1">ID_VAR </span><span class="s2">= </span><span class="s1">ContextVar</span><span class="s2">(</span><span class="s4">&quot;id&quot;</span><span class="s2">, </span><span class="s1">default</span><span class="s2">=</span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s1">VAR_VAR </span><span class="s2">= </span><span class="s1">ContextVar</span><span class="s2">(</span><span class="s4">&quot;var&quot;</span><span class="s2">, </span><span class="s1">default</span><span class="s2">=</span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s1">ContextVar </span><span class="s2">= </span><span class="s0">None</span>
+<span class="s0">except </span><span class="s1">ImportError</span><span class="s2">:</span>
+    <span class="s1">Context </span><span class="s2">= </span><span class="s1">ContextVar </span><span class="s2">= </span><span class="s1">copy_context </span><span class="s2">= </span><span class="s0">None</span>
+
+<span class="s3"># We don't support testing if greenlet's built-in context var support is disabled.</span>
+<span class="s2">@</span><span class="s1">skipUnless</span><span class="s2">(</span><span class="s1">Context </span><span class="s0">is not None</span><span class="s2">, </span><span class="s4">&quot;ContextVar not supported&quot;</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">ContextVarsTests</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">_new_ctx_run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, *</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">copy_context</span><span class="s2">().</span><span class="s1">run</span><span class="s2">(*</span><span class="s1">args</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_increment</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">greenlet_id</span><span class="s2">, </span><span class="s1">callback</span><span class="s2">, </span><span class="s1">counts</span><span class="s2">, </span><span class="s1">expect</span><span class="s2">):</span>
+        <span class="s1">ctx_var </span><span class="s2">= </span><span class="s1">ID_VAR</span>
+        <span class="s0">if </span><span class="s1">expect </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">ctx_var</span><span class="s2">.</span><span class="s1">get</span><span class="s2">())</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">ctx_var</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(), </span><span class="s1">expect</span><span class="s2">)</span>
+        <span class="s1">ctx_var</span><span class="s2">.</span><span class="s1">set</span><span class="s2">(</span><span class="s1">greenlet_id</span><span class="s2">)</span>
+        <span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">2</span><span class="s2">):</span>
+            <span class="s1">counts</span><span class="s2">[</span><span class="s1">ctx_var</span><span class="s2">.</span><span class="s1">get</span><span class="s2">()] += </span><span class="s5">1</span>
+            <span class="s1">callback</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">_test_context</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">propagate_by</span><span class="s2">):</span>
+        <span class="s3"># pylint:disable=too-many-branches</span>
+        <span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">set</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+        <span class="s1">callback </span><span class="s2">= </span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">switch</span>
+        <span class="s1">counts </span><span class="s2">= </span><span class="s1">dict</span><span class="s2">((</span><span class="s1">i</span><span class="s2">, </span><span class="s5">0</span><span class="s2">) </span><span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">5</span><span class="s2">))</span>
+
+        <span class="s1">lets </span><span class="s2">= [</span>
+            <span class="s1">greenlet</span><span class="s2">(</span><span class="s1">partial</span><span class="s2">(</span>
+                <span class="s1">partial</span><span class="s2">(</span>
+                    <span class="s1">copy_context</span><span class="s2">().</span><span class="s1">run</span><span class="s2">,</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">_increment</span>
+                <span class="s2">) </span><span class="s0">if </span><span class="s1">propagate_by </span><span class="s2">== </span><span class="s4">&quot;run&quot; </span><span class="s0">else </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_increment</span><span class="s2">,</span>
+                <span class="s1">greenlet_id</span><span class="s2">=</span><span class="s1">i</span><span class="s2">,</span>
+                <span class="s1">callback</span><span class="s2">=</span><span class="s1">callback</span><span class="s2">,</span>
+                <span class="s1">counts</span><span class="s2">=</span><span class="s1">counts</span><span class="s2">,</span>
+                <span class="s1">expect</span><span class="s2">=(</span>
+                    <span class="s1">i </span><span class="s2">- </span><span class="s5">1 </span><span class="s0">if </span><span class="s1">propagate_by </span><span class="s2">== </span><span class="s4">&quot;share&quot; </span><span class="s0">else</span>
+                    <span class="s5">0 </span><span class="s0">if </span><span class="s1">propagate_by </span><span class="s0">in </span><span class="s2">(</span><span class="s4">&quot;set&quot;</span><span class="s2">, </span><span class="s4">&quot;run&quot;</span><span class="s2">) </span><span class="s0">else None</span>
+                <span class="s2">)</span>
+            <span class="s2">))</span>
+            <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">1</span><span class="s2">, </span><span class="s5">5</span><span class="s2">)</span>
+        <span class="s2">]</span>
+
+        <span class="s0">for </span><span class="s1">let </span><span class="s0">in </span><span class="s1">lets</span><span class="s2">:</span>
+            <span class="s0">if </span><span class="s1">propagate_by </span><span class="s2">== </span><span class="s4">&quot;set&quot;</span><span class="s2">:</span>
+                <span class="s1">let</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">copy_context</span><span class="s2">()</span>
+            <span class="s0">elif </span><span class="s1">propagate_by </span><span class="s2">== </span><span class="s4">&quot;share&quot;</span><span class="s2">:</span>
+                <span class="s1">let</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">gr_context</span>
+
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range</span><span class="s2">(</span><span class="s5">2</span><span class="s2">):</span>
+            <span class="s1">counts</span><span class="s2">[</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">()] += </span><span class="s5">1</span>
+            <span class="s0">for </span><span class="s1">let </span><span class="s0">in </span><span class="s1">lets</span><span class="s2">:</span>
+                <span class="s1">let</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s0">if </span><span class="s1">propagate_by </span><span class="s2">== </span><span class="s4">&quot;run&quot;</span><span class="s2">:</span>
+            <span class="s3"># Must leave each context.run() in reverse order of entry</span>
+            <span class="s0">for </span><span class="s1">let </span><span class="s0">in </span><span class="s1">reversed</span><span class="s2">(</span><span class="s1">lets</span><span class="s2">):</span>
+                <span class="s1">let</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s3"># No context.run(), so fine to exit in any order.</span>
+            <span class="s0">for </span><span class="s1">let </span><span class="s0">in </span><span class="s1">lets</span><span class="s2">:</span>
+                <span class="s1">let</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s0">for </span><span class="s1">let </span><span class="s0">in </span><span class="s1">lets</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span><span class="s1">let</span><span class="s2">.</span><span class="s1">dead</span><span class="s2">)</span>
+            <span class="s3"># When using run(), we leave the run() as the greenlet dies,</span>
+            <span class="s3"># and there's no context &quot;underneath&quot;. When not using run(),</span>
+            <span class="s3"># gr_context still reflects the context the greenlet was</span>
+            <span class="s3"># running in.</span>
+            <span class="s0">if </span><span class="s1">propagate_by </span><span class="s2">== </span><span class="s4">'run'</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">let</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNotNone</span><span class="s2">(</span><span class="s1">let</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+
+
+        <span class="s0">if </span><span class="s1">propagate_by </span><span class="s2">== </span><span class="s4">&quot;share&quot;</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">counts</span><span class="s2">, {</span><span class="s5">0</span><span class="s2">: </span><span class="s5">1</span><span class="s2">, </span><span class="s5">1</span><span class="s2">: </span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">: </span><span class="s5">1</span><span class="s2">, </span><span class="s5">3</span><span class="s2">: </span><span class="s5">1</span><span class="s2">, </span><span class="s5">4</span><span class="s2">: </span><span class="s5">6</span><span class="s2">})</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">set</span><span class="s2">(</span><span class="s1">counts</span><span class="s2">.</span><span class="s1">values</span><span class="s2">()), </span><span class="s1">set</span><span class="s2">([</span><span class="s5">2</span><span class="s2">]))</span>
+
+    <span class="s0">def </span><span class="s1">test_context_propagated_by_context_run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_new_ctx_run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_test_context</span><span class="s2">, </span><span class="s4">&quot;run&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_context_propagated_by_setting_attribute</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_new_ctx_run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_test_context</span><span class="s2">, </span><span class="s4">&quot;set&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_context_not_propagated</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_new_ctx_run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_test_context</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_context_shared</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_new_ctx_run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_test_context</span><span class="s2">, </span><span class="s4">&quot;share&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_break_ctxvars</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">let1 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">copy_context</span><span class="s2">().</span><span class="s1">run</span><span class="s2">)</span>
+        <span class="s1">let2 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">copy_context</span><span class="s2">().</span><span class="s1">run</span><span class="s2">)</span>
+        <span class="s1">let1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">switch</span><span class="s2">)</span>
+        <span class="s1">let2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">switch</span><span class="s2">)</span>
+        <span class="s3"># Since let2 entered the current context and let1 exits its own, the</span>
+        <span class="s3"># interpreter emits:</span>
+        <span class="s3"># RuntimeError: cannot exit context: thread state references a different context object</span>
+        <span class="s1">let1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_not_broken_if_using_attribute_instead_of_context_run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">let1 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">switch</span><span class="s2">)</span>
+        <span class="s1">let2 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">switch</span><span class="s2">)</span>
+        <span class="s1">let1</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">copy_context</span><span class="s2">()</span>
+        <span class="s1">let2</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">copy_context</span><span class="s2">()</span>
+        <span class="s1">let1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">let2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">let1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">let2</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_context_assignment_while_running</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># pylint:disable=too-many-statements</span>
+        <span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">set</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+
+        <span class="s0">def </span><span class="s1">target</span><span class="s2">():</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">())</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+
+            <span class="s3"># Context is created on first use</span>
+            <span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">set</span><span class="s2">(</span><span class="s5">1</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsInstance</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">, </span><span class="s1">Context</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(), </span><span class="s5">1</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">[</span><span class="s1">ID_VAR</span><span class="s2">], </span><span class="s5">1</span><span class="s2">)</span>
+
+            <span class="s3"># Clearing the context makes it get re-created as another</span>
+            <span class="s3"># empty context when next used</span>
+            <span class="s1">old_context </span><span class="s2">= </span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span>
+            <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># assign None while running</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">())</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+            <span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">set</span><span class="s2">(</span><span class="s5">2</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsInstance</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">, </span><span class="s1">Context</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(), </span><span class="s5">2</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">[</span><span class="s1">ID_VAR</span><span class="s2">], </span><span class="s5">2</span><span class="s2">)</span>
+
+            <span class="s1">new_context </span><span class="s2">= </span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span>
+            <span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">((</span><span class="s1">old_context</span><span class="s2">, </span><span class="s1">new_context</span><span class="s2">))</span>
+            <span class="s3"># parent switches us back to old_context</span>
+
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(), </span><span class="s5">1</span><span class="s2">)</span>
+            <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">new_context  </span><span class="s3"># assign non-None while running</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(), </span><span class="s5">2</span><span class="s2">)</span>
+
+            <span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s3"># parent switches us back to no context</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">())</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+            <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">old_context</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(), </span><span class="s5">1</span><span class="s2">)</span>
+
+            <span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s3"># parent switches us back to no context</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">())</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+
+        <span class="s1">gr </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaisesRegex</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">, </span><span class="s4">&quot;can't delete context attribute&quot;</span><span class="s2">):</span>
+            <span class="s0">del </span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+        <span class="s1">old_context</span><span class="s2">, </span><span class="s1">new_context </span><span class="s2">= </span><span class="s1">gr</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIs</span><span class="s2">(</span><span class="s1">new_context</span><span class="s2">, </span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">old_context</span><span class="s2">[</span><span class="s1">ID_VAR</span><span class="s2">], </span><span class="s5">1</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">new_context</span><span class="s2">[</span><span class="s1">ID_VAR</span><span class="s2">], </span><span class="s5">2</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">new_context</span><span class="s2">.</span><span class="s1">run</span><span class="s2">(</span><span class="s1">ID_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">), </span><span class="s5">2</span><span class="s2">)</span>
+        <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">old_context  </span><span class="s3"># assign non-None while suspended</span>
+        <span class="s1">gr</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIs</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">, </span><span class="s1">new_context</span><span class="s2">)</span>
+        <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s0">None  </span><span class="s3"># assign None while suspended</span>
+        <span class="s1">gr</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIs</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">, </span><span class="s1">old_context</span><span class="s2">)</span>
+        <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">gr</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+
+        <span class="s3"># Make sure there are no reference leaks</span>
+        <span class="s1">gr </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getrefcount</span><span class="s2">(</span><span class="s1">old_context</span><span class="s2">), </span><span class="s5">2</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getrefcount</span><span class="s2">(</span><span class="s1">new_context</span><span class="s2">), </span><span class="s5">2</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_context_assignment_different_thread</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">import </span><span class="s1">threading</span>
+        <span class="s1">VAR_VAR</span><span class="s2">.</span><span class="s1">set</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s1">ctx </span><span class="s2">= </span><span class="s1">Context</span><span class="s2">()</span>
+
+        <span class="s1">is_running </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">should_suspend </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">did_suspend </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">should_exit </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Event</span><span class="s2">()</span>
+        <span class="s1">holder </span><span class="s2">= []</span>
+
+        <span class="s0">def </span><span class="s1">greenlet_in_thread_fn</span><span class="s2">():</span>
+            <span class="s1">VAR_VAR</span><span class="s2">.</span><span class="s1">set</span><span class="s2">(</span><span class="s5">1</span><span class="s2">)</span>
+            <span class="s1">is_running</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s1">should_suspend</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+            <span class="s1">VAR_VAR</span><span class="s2">.</span><span class="s1">set</span><span class="s2">(</span><span class="s5">2</span><span class="s2">)</span>
+            <span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">holder</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">VAR_VAR</span><span class="s2">.</span><span class="s1">get</span><span class="s2">())</span>
+
+        <span class="s0">def </span><span class="s1">thread_fn</span><span class="s2">():</span>
+            <span class="s1">gr </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">greenlet_in_thread_fn</span><span class="s2">)</span>
+            <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">ctx</span>
+            <span class="s1">holder</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">)</span>
+            <span class="s1">gr</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">did_suspend</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+            <span class="s1">should_exit</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+            <span class="s1">gr</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s0">del </span><span class="s1">gr</span>
+            <span class="s1">greenlet</span><span class="s2">() </span><span class="s3"># trigger cleanup</span>
+
+        <span class="s1">thread </span><span class="s2">= </span><span class="s1">threading</span><span class="s2">.</span><span class="s1">Thread</span><span class="s2">(</span><span class="s1">target</span><span class="s2">=</span><span class="s1">thread_fn</span><span class="s2">, </span><span class="s1">daemon</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+        <span class="s1">thread</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+        <span class="s1">is_running</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+        <span class="s1">gr </span><span class="s2">= </span><span class="s1">holder</span><span class="s2">[</span><span class="s5">0</span><span class="s2">]</span>
+
+        <span class="s3"># Can't access or modify context if the greenlet is running</span>
+        <span class="s3"># in a different thread</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaisesRegex</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s4">&quot;running in a different&quot;</span><span class="s2">):</span>
+            <span class="s1">getattr</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">, </span><span class="s4">'gr_context'</span><span class="s2">)</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaisesRegex</span><span class="s2">(</span><span class="s1">ValueError</span><span class="s2">, </span><span class="s4">&quot;running in a different&quot;</span><span class="s2">):</span>
+            <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s0">None</span>
+
+        <span class="s1">should_suspend</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s1">did_suspend</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+
+        <span class="s3"># OK to access and modify context if greenlet is suspended</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIs</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">[</span><span class="s1">VAR_VAR</span><span class="s2">], </span><span class="s5">2</span><span class="s2">)</span>
+        <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s0">None</span>
+
+        <span class="s1">should_exit</span><span class="s2">.</span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s1">thread</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s5">10</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">holder</span><span class="s2">, [</span><span class="s1">gr</span><span class="s2">, </span><span class="s0">None</span><span class="s2">])</span>
+
+        <span class="s3"># Context can still be accessed/modified when greenlet is dead:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">)</span>
+        <span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">ctx</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIs</span><span class="s2">(</span><span class="s1">gr</span><span class="s2">.</span><span class="s1">gr_context</span><span class="s2">, </span><span class="s1">ctx</span><span class="s2">)</span>
+
+        <span class="s3"># Otherwise we leak greenlets on some platforms.</span>
+        <span class="s3"># XXX: Should be able to do this automatically</span>
+        <span class="s0">del </span><span class="s1">holder</span><span class="s2">[:]</span>
+        <span class="s1">gr </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">thread </span><span class="s2">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">test_context_assignment_wrong_type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">()</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaisesRegex</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">,</span>
+                                    <span class="s4">&quot;greenlet context must be a contextvars.Context or None&quot;</span><span class="s2">):</span>
+            <span class="s1">g</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s1">self</span>
+
+
+<span class="s2">@</span><span class="s1">skipIf</span><span class="s2">(</span><span class="s1">Context </span><span class="s0">is not None</span><span class="s2">, </span><span class="s4">&quot;ContextVar supported&quot;</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">NoContextVarsTests</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">test_contextvars_errors</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">let1 </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">switch</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertFalse</span><span class="s2">(</span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">let1</span><span class="s2">, </span><span class="s4">'gr_context'</span><span class="s2">))</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">):</span>
+            <span class="s1">getattr</span><span class="s2">(</span><span class="s1">let1</span><span class="s2">, </span><span class="s4">'gr_context'</span><span class="s2">)</span>
+
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">):</span>
+            <span class="s1">let1</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s0">None</span>
+
+        <span class="s1">let1</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">):</span>
+            <span class="s1">getattr</span><span class="s2">(</span><span class="s1">let1</span><span class="s2">, </span><span class="s4">'gr_context'</span><span class="s2">)</span>
+
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">AttributeError</span><span class="s2">):</span>
+            <span class="s1">let1</span><span class="s2">.</span><span class="s1">gr_context </span><span class="s2">= </span><span class="s0">None</span>
+
+        <span class="s0">del </span><span class="s1">let1</span>
+
+
+<span class="s0">if </span><span class="s1">__name__ </span><span class="s2">== </span><span class="s4">'__main__'</span><span class="s2">:</span>
+    <span class="s1">unittest</span><span class="s2">.</span><span class="s1">main</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

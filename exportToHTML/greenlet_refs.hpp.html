@@ -1,0 +1,1141 @@
+<html>
+<head>
+<title>greenlet_refs.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #0da19e;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+greenlet_refs.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_REFS_HPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_REFS_HPP</span>
+
+<span class="s0">#define </span><span class="s1">PY_SSIZE_T_CLEAN</span>
+<span class="s0">#include </span><span class="s1">&lt;Python.h&gt;</span>
+
+<span class="s0">#include </span><span class="s1">&lt;string&gt;</span>
+
+<span class="s2">//#include &quot;greenlet_internal.hpp&quot;</span>
+<span class="s0">#include </span><span class="s3">&quot;greenlet_compiler_compat.hpp&quot;</span>
+<span class="s0">#include </span><span class="s3">&quot;greenlet_cpython_compat.hpp&quot;</span>
+<span class="s0">#include </span><span class="s3">&quot;greenlet_exceptions.hpp&quot;</span>
+
+<span class="s0">struct </span><span class="s1">_greenlet;</span>
+<span class="s0">struct </span><span class="s1">_PyMainGreenlet;</span>
+
+<span class="s0">typedef struct </span><span class="s1">_greenlet PyGreenlet;</span>
+<span class="s0">extern </span><span class="s1">PyTypeObject PyGreenlet_Type;</span>
+
+
+<span class="s0">#ifdef  </span><span class="s1">GREENLET_USE_STDIO</span>
+<span class="s0">#include </span><span class="s1">&lt;iostream&gt;</span>
+<span class="s4">using </span><span class="s1">std::cerr;</span>
+<span class="s4">using </span><span class="s1">std::endl;</span>
+<span class="s0">#endif</span>
+
+<span class="s4">namespace </span><span class="s1">greenlet</span>
+<span class="s1">{</span>
+    <span class="s4">class </span><span class="s1">Greenlet;</span>
+
+    <span class="s4">namespace </span><span class="s1">refs</span>
+    <span class="s1">{</span>
+        <span class="s2">// Type checkers throw a TypeError if the argument is not</span>
+        <span class="s2">// null, and isn't of the required Python type.</span>
+        <span class="s2">// (We can't use most of the defined type checkers</span>
+        <span class="s2">// like PyList_Check, etc, directly, because they are</span>
+        <span class="s2">// implemented as macros.)</span>
+        <span class="s0">typedef void </span><span class="s1">(*TypeChecker)(</span><span class="s0">void</span><span class="s1">*);</span>
+
+        <span class="s0">void</span>
+        <span class="s1">NoOpChecker(</span><span class="s0">void</span><span class="s1">*)</span>
+        <span class="s1">{</span>
+            <span class="s0">return</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void</span>
+        <span class="s1">GreenletChecker(</span><span class="s0">void </span><span class="s1">*p)</span>
+        <span class="s1">{</span>
+            <span class="s0">if </span><span class="s1">(!p) {</span>
+                <span class="s0">return</span><span class="s1">;</span>
+            <span class="s1">}</span>
+
+            <span class="s1">PyTypeObject* typ = Py_TYPE(p);</span>
+            <span class="s2">// fast, common path. (PyObject_TypeCheck is a macro or</span>
+            <span class="s2">// static inline function, and it also does a</span>
+            <span class="s2">// direct comparison of the type pointers, but its fast</span>
+            <span class="s2">// path only handles one type)</span>
+            <span class="s0">if </span><span class="s1">(typ == &amp;PyGreenlet_Type) {</span>
+                <span class="s0">return</span><span class="s1">;</span>
+            <span class="s1">}</span>
+
+            <span class="s0">if </span><span class="s1">(!PyObject_TypeCheck(p, &amp;PyGreenlet_Type)) {</span>
+                <span class="s1">std::string err(</span><span class="s3">&quot;GreenletChecker: Expected any type of greenlet, not &quot;</span><span class="s1">);</span>
+                <span class="s1">err += Py_TYPE(p)</span><span class="s5">-&gt;</span><span class="s1">tp_name;</span>
+                <span class="s4">throw </span><span class="s1">TypeError(err);</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void</span>
+        <span class="s1">MainGreenletExactChecker(</span><span class="s0">void </span><span class="s1">*p);</span>
+
+        <span class="s1">template &lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker&gt;</span>
+        <span class="s4">class </span><span class="s1">PyObjectPointer;</span>
+
+        <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker&gt;</span>
+        <span class="s4">class </span><span class="s1">OwnedReference;</span>
+
+
+        <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker&gt;</span>
+        <span class="s4">class </span><span class="s1">BorrowedReference;</span>
+
+        <span class="s0">typedef </span><span class="s1">BorrowedReference&lt;PyObject, NoOpChecker&gt; BorrowedObject;</span>
+        <span class="s0">typedef </span><span class="s1">OwnedReference&lt;PyObject, NoOpChecker&gt; OwnedObject;</span>
+
+        <span class="s4">class </span><span class="s1">ImmortalObject;</span>
+        <span class="s4">class </span><span class="s1">ImmortalString;</span>
+
+        <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+        <span class="s4">class </span><span class="s1">_OwnedGreenlet;</span>
+
+        <span class="s0">typedef </span><span class="s1">_OwnedGreenlet&lt;PyGreenlet, GreenletChecker&gt; OwnedGreenlet;</span>
+        <span class="s0">typedef </span><span class="s1">_OwnedGreenlet&lt;PyGreenlet, MainGreenletExactChecker&gt; OwnedMainGreenlet;</span>
+
+        <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+        <span class="s4">class </span><span class="s1">_BorrowedGreenlet;</span>
+
+        <span class="s0">typedef </span><span class="s1">_BorrowedGreenlet&lt;PyGreenlet, GreenletChecker&gt; BorrowedGreenlet;</span>
+
+        <span class="s0">void</span>
+        <span class="s1">ContextExactChecker(</span><span class="s0">void </span><span class="s1">*p)</span>
+        <span class="s1">{</span>
+            <span class="s0">if </span><span class="s1">(!p) {</span>
+                <span class="s0">return</span><span class="s1">;</span>
+            <span class="s1">}</span>
+            <span class="s0">if </span><span class="s1">(!PyContext_CheckExact(p)) {</span>
+                <span class="s4">throw </span><span class="s1">TypeError(</span>
+                    <span class="s3">&quot;greenlet context must be a contextvars.Context or None&quot;</span>
+                <span class="s1">);</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+
+        <span class="s0">typedef </span><span class="s1">OwnedReference&lt;PyObject, ContextExactChecker&gt; OwnedContext;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s4">namespace </span><span class="s1">greenlet {</span>
+
+
+    <span class="s4">namespace </span><span class="s1">refs {</span>
+    <span class="s2">// A set of classes to make reference counting rules in python</span>
+    <span class="s2">// code explicit.</span>
+    <span class="s2">//</span>
+    <span class="s2">// Rules of use:</span>
+    <span class="s2">// (1) Functions returning a new reference that the caller of the</span>
+    <span class="s2">// function is expected to dispose of should return a</span>
+    <span class="s2">// ``OwnedObject`` object. This object automatically releases its</span>
+    <span class="s2">// reference when it goes out of scope. It works like a ``std::shared_ptr``</span>
+    <span class="s2">// and can be copied or used as a function parameter (but don't do</span>
+    <span class="s2">// that). Note that constructing a ``OwnedObject`` from a</span>
+    <span class="s2">// PyObject* steals the reference.</span>
+    <span class="s2">// (2) Parameters to functions should be either a</span>
+    <span class="s2">// ``OwnedObject&amp;``, or, more generally, a ``PyObjectPointer&amp;``.</span>
+    <span class="s2">// If the function needs to create its own new reference, it can</span>
+    <span class="s2">// do so by copying to a local ``OwnedObject``.</span>
+    <span class="s2">// (3) Functions returning an existing pointer that is NOT</span>
+    <span class="s2">// incref'd, and which the caller MUST NOT decref,</span>
+    <span class="s2">// should return a ``BorrowedObject``.</span>
+
+    <span class="s2">// XXX: The following two paragraphs do not hold for all platforms.</span>
+    <span class="s2">// Notably, 32-bit PPC Linux passes structs by reference, not by</span>
+    <span class="s2">// value, so this actually doesn't work. (Although that's the only</span>
+    <span class="s2">// platform that doesn't work on.) DO NOT ATTEMPT IT. The</span>
+    <span class="s2">// unfortunate consequence of that is that the slots which we</span>
+    <span class="s2">// *know* are already type safe will wind up calling the type</span>
+    <span class="s2">// checker function (when we had the slots accepting</span>
+    <span class="s2">// BorrowedGreenlet, this was bypassed), so this slows us down.</span>
+    <span class="s2">// TODO: Optimize this again.</span>
+
+    <span class="s2">// For a class with a single pointer member, whose constructor</span>
+    <span class="s2">// does nothing but copy a pointer parameter into the member, and</span>
+    <span class="s2">// which can then be converted back to the pointer type, compilers</span>
+    <span class="s2">// generate code that's the same as just passing the pointer.</span>
+    <span class="s2">// That is, func(BorrowedObject x) called like ``PyObject* p =</span>
+    <span class="s2">// ...; f(p)`` has 0 overhead. Similarly, they &quot;unpack&quot; to the</span>
+    <span class="s2">// pointer type with 0 overhead.</span>
+    <span class="s2">//</span>
+    <span class="s2">// If there are no virtual functions, no complex inheritance (maybe?) and</span>
+    <span class="s2">// no destructor, these can be directly used as parameters in</span>
+    <span class="s2">// Python callbacks like tp_init: the layout is the same as a</span>
+    <span class="s2">// single pointer. Only subclasses with trivial constructors that</span>
+    <span class="s2">// do nothing but set the single pointer member are safe to use</span>
+    <span class="s2">// that way.</span>
+
+
+    <span class="s2">// This is the base class for things that can be done with a</span>
+    <span class="s2">// PyObject pointer. It assumes nothing about memory management.</span>
+    <span class="s2">// NOTE: Nothing is virtual, so subclasses shouldn't add new</span>
+    <span class="s2">// storage fields or try to override these methods.</span>
+    <span class="s1">template &lt;</span><span class="s4">typename </span><span class="s1">T=PyObject, TypeChecker TC=NoOpChecker&gt;</span>
+    <span class="s4">class </span><span class="s1">PyObjectPointer</span>
+    <span class="s1">{</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s0">typedef </span><span class="s1">T PyType;</span>
+    <span class="s4">protected</span><span class="s1">:</span>
+        <span class="s1">T* p;</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">PyObjectPointer(T* it=nullptr) : p(it)</span>
+        <span class="s1">{</span>
+            <span class="s1">TC(p);</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// We don't allow automatic casting to PyObject* at this</span>
+        <span class="s2">// level, because then we could be passed to Py_DECREF/INCREF,</span>
+        <span class="s2">// but we want nothing to do with memory management. If you</span>
+        <span class="s2">// know better, then you can use the get() method, like on a</span>
+        <span class="s2">// std::shared_ptr. Except we name it borrow() to clarify that</span>
+        <span class="s2">// if this is a reference-tracked object, the pointer you get</span>
+        <span class="s2">// back will go away when the object does.</span>
+        <span class="s2">// TODO: This should probably not exist here, but be moved</span>
+        <span class="s2">// down to relevant sub-types.</span>
+
+        <span class="s1">T* borrow() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyObject* borrow_o() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyObject*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s1">}</span>
+
+         <span class="s1">T* </span><span class="s4">operator</span><span class="s5">-&gt;</span><span class="s1">() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+
+        <span class="s0">bool </span><span class="s1">is_None() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p == Py_None;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyObject* acquire_or_None() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s1">PyObject* result = </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p ? </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyObject*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p) : Py_None;</span>
+            <span class="s1">Py_INCREF(result);</span>
+            <span class="s0">return </span><span class="s1">result;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">explicit operator </span><span class="s0">bool</span><span class="s1">() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p != nullptr;</span>
+        <span class="s1">}</span>
+
+        <span class="s0">bool </span><span class="s4">operator</span><span class="s1">!() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p == nullptr;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">Py_ssize_t REFCNT() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">p ? Py_REFCNT(p) : -</span><span class="s6">42</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyTypeObject* TYPE() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">p ? Py_TYPE(p) : nullptr;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s1">OwnedObject PyStr() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">inline </span><span class="s0">const </span><span class="s1">std::string as_str() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">inline </span><span class="s1">OwnedObject PyGetAttr(</span><span class="s0">const </span><span class="s1">ImmortalObject&amp; name) </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">inline </span><span class="s1">OwnedObject PyRequireAttr(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">name) </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">inline </span><span class="s1">OwnedObject PyRequireAttr(</span><span class="s0">const </span><span class="s1">ImmortalString&amp; name) </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">inline </span><span class="s1">OwnedObject PyCall(</span><span class="s0">const </span><span class="s1">BorrowedObject&amp; arg) </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">inline </span><span class="s1">OwnedObject PyCall(PyGreenlet* arg) </span><span class="s0">const </span><span class="s1">;</span>
+        <span class="s4">inline </span><span class="s1">OwnedObject PyCall(PyObject* arg) </span><span class="s0">const </span><span class="s1">;</span>
+        <span class="s2">// PyObject_Call(this, args, kwargs);</span>
+        <span class="s4">inline </span><span class="s1">OwnedObject PyCall(</span><span class="s0">const </span><span class="s1">BorrowedObject args,</span>
+                                  <span class="s0">const </span><span class="s1">BorrowedObject kwargs) </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">inline </span><span class="s1">OwnedObject PyCall(</span><span class="s0">const </span><span class="s1">OwnedObject&amp; args,</span>
+                                  <span class="s0">const </span><span class="s1">OwnedObject&amp; kwargs) </span><span class="s0">const</span><span class="s1">;</span>
+
+    <span class="s4">protected</span><span class="s1">:</span>
+        <span class="s0">void </span><span class="s1">_set_raw_pointer(</span><span class="s0">void</span><span class="s1">* t)</span>
+        <span class="s1">{</span>
+            <span class="s1">TC(t);</span>
+            <span class="s1">p = </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;T*&gt;(t);</span>
+        <span class="s1">}</span>
+        <span class="s0">void</span><span class="s1">* _get_raw_pointer() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">p;</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+<span class="s0">#ifdef </span><span class="s1">GREENLET_USE_STDIO</span>
+        <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+        <span class="s1">std::ostream&amp; </span><span class="s4">operator</span><span class="s1">&lt;&lt;(std::ostream&amp; os, </span><span class="s0">const </span><span class="s1">PyObjectPointer&lt;T, TC&gt;&amp; s)</span>
+        <span class="s1">{</span>
+            <span class="s0">const </span><span class="s1">std::type_info&amp; t = </span><span class="s4">typeid</span><span class="s1">(s);</span>
+            <span class="s1">os &lt;&lt; t.name()</span>
+               <span class="s1">&lt;&lt; </span><span class="s3">&quot;(addr=&quot; </span><span class="s1">&lt;&lt; s.borrow()</span>
+               <span class="s1">&lt;&lt; </span><span class="s3">&quot;, refcnt=&quot; </span><span class="s1">&lt;&lt; s.REFCNT()</span>
+               <span class="s1">&lt;&lt; </span><span class="s3">&quot;, value=&quot; </span><span class="s1">&lt;&lt; s.as_str()</span>
+               <span class="s1">&lt;&lt; </span><span class="s3">&quot;)&quot;</span><span class="s1">;</span>
+
+            <span class="s0">return </span><span class="s1">os;</span>
+        <span class="s1">}</span>
+<span class="s0">#endif</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s0">bool </span><span class="s4">operator</span><span class="s1">==(</span><span class="s0">const </span><span class="s1">PyObjectPointer&lt;T, TC&gt;&amp; lhs, </span><span class="s0">const </span><span class="s1">PyObject* </span><span class="s0">const </span><span class="s1">rhs) noexcept</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s4">static_cast</span><span class="s1">&lt;</span><span class="s0">const void</span><span class="s1">*&gt;(lhs.borrow_o()) == </span><span class="s4">static_cast</span><span class="s1">&lt;</span><span class="s0">const void</span><span class="s1">*&gt;(rhs);</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC, </span><span class="s4">typename </span><span class="s1">X, TypeChecker XC&gt;</span>
+    <span class="s4">inline </span><span class="s0">bool </span><span class="s4">operator</span><span class="s1">==(</span><span class="s0">const </span><span class="s1">PyObjectPointer&lt;T, TC&gt;&amp; lhs, </span><span class="s0">const </span><span class="s1">PyObjectPointer&lt;X, XC&gt;&amp; rhs) noexcept</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s1">lhs.borrow_o() == rhs.borrow_o();</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC, </span><span class="s4">typename </span><span class="s1">X, TypeChecker XC&gt;</span>
+    <span class="s4">inline </span><span class="s0">bool </span><span class="s4">operator</span><span class="s1">!=(</span><span class="s0">const </span><span class="s1">PyObjectPointer&lt;T, TC&gt;&amp; lhs,</span>
+                           <span class="s0">const </span><span class="s1">PyObjectPointer&lt;X, XC&gt;&amp; rhs) noexcept</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s1">lhs.borrow_o() != rhs.borrow_o();</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T=PyObject, TypeChecker TC=NoOpChecker&gt;</span>
+    <span class="s4">class </span><span class="s1">OwnedReference : </span><span class="s4">public </span><span class="s1">PyObjectPointer&lt;T, TC&gt;</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s4">friend class </span><span class="s1">OwnedList;</span>
+
+    <span class="s4">protected</span><span class="s1">:</span>
+        <span class="s4">explicit </span><span class="s1">OwnedReference(T* it) : PyObjectPointer&lt;T, TC&gt;(it)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+
+    <span class="s4">public</span><span class="s1">:</span>
+
+        <span class="s2">// Constructors</span>
+
+        <span class="s0">static </span><span class="s1">OwnedReference&lt;T, TC&gt; consuming(PyObject* p)</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">OwnedReference&lt;T, TC&gt;(</span><span class="s4">reinterpret_cast</span><span class="s1">&lt;T*&gt;(p));</span>
+        <span class="s1">}</span>
+
+        <span class="s0">static </span><span class="s1">OwnedReference&lt;T, TC&gt; owning(T* p)</span>
+        <span class="s1">{</span>
+            <span class="s1">OwnedReference&lt;T, TC&gt; result(p);</span>
+            <span class="s1">Py_XINCREF(result.p);</span>
+            <span class="s0">return </span><span class="s1">result;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">OwnedReference() : PyObjectPointer&lt;T, TC&gt;(nullptr)</span>
+        <span class="s1">{}</span>
+
+        <span class="s4">explicit </span><span class="s1">OwnedReference(</span><span class="s0">const </span><span class="s1">PyObjectPointer&lt;&gt;&amp; other)</span>
+            <span class="s1">: PyObjectPointer&lt;T, TC&gt;(nullptr)</span>
+        <span class="s1">{</span>
+            <span class="s1">T* op = other.borrow();</span>
+            <span class="s1">TC(op);</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = other.borrow();</span>
+            <span class="s1">Py_XINCREF(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// It would be good to make use of the C++11 distinction</span>
+        <span class="s2">// between move and copy operations, e.g., constructing from a</span>
+        <span class="s2">// pointer should be a move operation.</span>
+        <span class="s2">// In the common case of ``OwnedObject x = Py_SomeFunction()``,</span>
+        <span class="s2">// the call to the copy constructor will be elided completely.</span>
+        <span class="s1">OwnedReference(</span><span class="s0">const </span><span class="s1">OwnedReference&lt;T, TC&gt;&amp; other)</span>
+            <span class="s1">: PyObjectPointer&lt;T, TC&gt;(other.p)</span>
+        <span class="s1">{</span>
+            <span class="s1">Py_XINCREF(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s1">}</span>
+
+        <span class="s0">static </span><span class="s1">OwnedReference&lt;PyObject&gt; None()</span>
+        <span class="s1">{</span>
+            <span class="s1">Py_INCREF(Py_None);</span>
+            <span class="s0">return </span><span class="s1">OwnedReference&lt;PyObject&gt;(Py_None);</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// We can assign from exactly our type without any extra checking</span>
+        <span class="s1">OwnedReference&lt;T, TC&gt;&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">OwnedReference&lt;T, TC&gt;&amp; other)</span>
+        <span class="s1">{</span>
+            <span class="s1">Py_XINCREF(other.p);</span>
+            <span class="s0">const </span><span class="s1">T* tmp = </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = other.p;</span>
+            <span class="s1">Py_XDECREF(tmp);</span>
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">OwnedReference&lt;T, TC&gt;&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">BorrowedReference&lt;T, TC&gt; other)</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s4">operator</span><span class="s1">=(other.borrow());</span>
+        <span class="s1">}</span>
+
+        <span class="s1">OwnedReference&lt;T, TC&gt;&amp; </span><span class="s4">operator</span><span class="s1">=(T* </span><span class="s0">const </span><span class="s1">other)</span>
+        <span class="s1">{</span>
+            <span class="s1">TC(other);</span>
+            <span class="s1">Py_XINCREF(other);</span>
+            <span class="s1">T* tmp = </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = other;</span>
+            <span class="s1">Py_XDECREF(tmp);</span>
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// We can assign from an arbitrary reference type</span>
+        <span class="s2">// if it passes our check.</span>
+        <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">X, TypeChecker XC&gt;</span>
+        <span class="s1">OwnedReference&lt;T, TC&gt;&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">OwnedReference&lt;X, XC&gt;&amp; other)</span>
+        <span class="s1">{</span>
+            <span class="s1">X* op = other.borrow();</span>
+            <span class="s1">TC(op);</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s4">operator</span><span class="s1">=(</span><span class="s4">reinterpret_cast</span><span class="s1">&lt;T*&gt;(op));</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">steal(T* other)</span>
+        <span class="s1">{</span>
+            <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p == nullptr);</span>
+            <span class="s1">TC(other);</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = other;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">T* relinquish_ownership()</span>
+        <span class="s1">{</span>
+            <span class="s1">T* result = </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = nullptr;</span>
+            <span class="s0">return </span><span class="s1">result;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">T* acquire() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s2">// Return a new reference.</span>
+            <span class="s2">// TODO: This may go away when we have reference objects</span>
+            <span class="s2">// throughout the code.</span>
+            <span class="s1">Py_XINCREF(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// Nothing else declares a destructor, we're the leaf, so we</span>
+        <span class="s2">// should be able to get away without virtual.</span>
+        <span class="s1">~OwnedReference()</span>
+        <span class="s1">{</span>
+            <span class="s1">Py_CLEAR(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void </span><span class="s1">CLEAR()</span>
+        <span class="s1">{</span>
+            <span class="s1">Py_CLEAR(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+            <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p == nullptr);</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s0">static </span><span class="s4">inline</span>
+    <span class="s0">void </span><span class="s4">operator</span><span class="s1">&lt;&lt;=(PyObject*&amp; target, OwnedObject&amp; o)</span>
+    <span class="s1">{</span>
+        <span class="s1">target = o.relinquish_ownership();</span>
+    <span class="s1">}</span>
+
+
+    <span class="s4">class </span><span class="s1">NewReference : </span><span class="s4">public </span><span class="s1">OwnedObject</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(NewReference);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s2">// Consumes the reference. Only use this</span>
+        <span class="s2">// for API return values.</span>
+        <span class="s1">NewReference(PyObject* it) : OwnedObject(it)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">NewDictReference : </span><span class="s4">public </span><span class="s1">NewReference</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(NewDictReference);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">NewDictReference() : NewReference(PyDict_New())</span>
+        <span class="s1">{</span>
+            <span class="s0">if </span><span class="s1">(!</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p) {</span>
+                <span class="s4">throw </span><span class="s1">PyErrOccurred();</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void </span><span class="s1">SetItem(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">key, PyObject* value)</span>
+        <span class="s1">{</span>
+            <span class="s1">Require(PyDict_SetItemString(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p, key, value));</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void </span><span class="s1">SetItem(</span><span class="s0">const </span><span class="s1">PyObjectPointer&lt;&gt;&amp; key, PyObject* value)</span>
+        <span class="s1">{</span>
+            <span class="s1">Require(PyDict_SetItem(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p, key.borrow_o(), value));</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T=PyGreenlet, TypeChecker TC=GreenletChecker&gt;</span>
+    <span class="s4">class </span><span class="s1">_OwnedGreenlet: </span><span class="s4">public </span><span class="s1">OwnedReference&lt;T, TC&gt;</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+    <span class="s4">protected</span><span class="s1">:</span>
+        <span class="s1">_OwnedGreenlet(T* it) : OwnedReference&lt;T, TC&gt;(it)</span>
+        <span class="s1">{}</span>
+
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">_OwnedGreenlet() : OwnedReference&lt;T, TC&gt;()</span>
+        <span class="s1">{}</span>
+
+        <span class="s1">_OwnedGreenlet(</span><span class="s0">const </span><span class="s1">_OwnedGreenlet&lt;T, TC&gt;&amp; other) : OwnedReference&lt;T, TC&gt;(other)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+        <span class="s1">_OwnedGreenlet(OwnedMainGreenlet&amp; other) :</span>
+            <span class="s1">OwnedReference&lt;T, TC&gt;(</span><span class="s4">reinterpret_cast</span><span class="s1">&lt;T*&gt;(other.acquire()))</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+        <span class="s1">_OwnedGreenlet(</span><span class="s0">const </span><span class="s1">BorrowedGreenlet&amp; other);</span>
+        <span class="s2">// Steals a reference.</span>
+        <span class="s0">static </span><span class="s1">_OwnedGreenlet&lt;T, TC&gt; consuming(PyGreenlet* it)</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">_OwnedGreenlet&lt;T, TC&gt;(</span><span class="s4">reinterpret_cast</span><span class="s1">&lt;T*&gt;(it));</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s1">_OwnedGreenlet&lt;T, TC&gt;&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">OwnedGreenlet&amp; other)</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s4">operator</span><span class="s1">=(other.borrow());</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s1">_OwnedGreenlet&lt;T, TC&gt;&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">BorrowedGreenlet&amp; other);</span>
+
+        <span class="s1">_OwnedGreenlet&lt;T, TC&gt;&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">OwnedMainGreenlet&amp; other)</span>
+        <span class="s1">{</span>
+            <span class="s1">PyGreenlet* owned = other.acquire();</span>
+            <span class="s1">Py_XDECREF(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;T*&gt;(owned);</span>
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">_OwnedGreenlet&lt;T, TC&gt;&amp; </span><span class="s4">operator</span><span class="s1">=(T* </span><span class="s0">const </span><span class="s1">other)</span>
+        <span class="s1">{</span>
+            <span class="s1">OwnedReference&lt;T, TC&gt;::</span><span class="s4">operator</span><span class="s1">=(other);</span>
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">T* relinquish_ownership()</span>
+        <span class="s1">{</span>
+            <span class="s1">T* result = </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = nullptr;</span>
+            <span class="s0">return </span><span class="s1">result;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyObject* relinquish_ownership_o()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyObject*&gt;(relinquish_ownership());</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s1">Greenlet* </span><span class="s4">operator</span><span class="s5">-&gt;</span><span class="s1">() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">inline operator </span><span class="s1">Greenlet*() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+    <span class="s1">};</span>
+
+    <span class="s1">template &lt;</span><span class="s4">typename </span><span class="s1">T=PyObject, TypeChecker TC=NoOpChecker&gt;</span>
+    <span class="s4">class </span><span class="s1">BorrowedReference : </span><span class="s4">public </span><span class="s1">PyObjectPointer&lt;T, TC&gt;</span>
+    <span class="s1">{</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s2">// Allow implicit creation from PyObject* pointers as we</span>
+        <span class="s2">// transition to using these classes. Also allow automatic</span>
+        <span class="s2">// conversion to PyObject* for passing to C API calls and even</span>
+        <span class="s2">// for Py_INCREF/DECREF, because we ourselves do no memory management.</span>
+        <span class="s1">BorrowedReference(T* it) : PyObjectPointer&lt;T, TC&gt;(it)</span>
+        <span class="s1">{}</span>
+
+        <span class="s1">BorrowedReference(</span><span class="s0">const </span><span class="s1">PyObjectPointer&lt;T&gt;&amp; ref) : PyObjectPointer&lt;T, TC&gt;(ref.borrow())</span>
+        <span class="s1">{}</span>
+
+        <span class="s1">BorrowedReference() : PyObjectPointer&lt;T, TC&gt;(nullptr)</span>
+        <span class="s1">{}</span>
+
+        <span class="s4">operator </span><span class="s1">T*() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s0">typedef </span><span class="s1">BorrowedReference&lt;PyObject&gt; BorrowedObject;</span>
+    <span class="s2">//typedef BorrowedReference&lt;PyGreenlet&gt; BorrowedGreenlet;</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T=PyGreenlet, TypeChecker TC=GreenletChecker&gt;</span>
+    <span class="s4">class </span><span class="s1">_BorrowedGreenlet : </span><span class="s4">public </span><span class="s1">BorrowedReference&lt;T, TC&gt;</span>
+    <span class="s1">{</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">_BorrowedGreenlet() :</span>
+            <span class="s1">BorrowedReference&lt;T, TC&gt;(nullptr)</span>
+        <span class="s1">{}</span>
+
+        <span class="s1">_BorrowedGreenlet(T* it) :</span>
+            <span class="s1">BorrowedReference&lt;T, TC&gt;(it)</span>
+        <span class="s1">{}</span>
+
+        <span class="s1">_BorrowedGreenlet(</span><span class="s0">const </span><span class="s1">BorrowedObject&amp; it);</span>
+
+        <span class="s1">_BorrowedGreenlet(</span><span class="s0">const </span><span class="s1">OwnedGreenlet&amp; it) :</span>
+            <span class="s1">BorrowedReference&lt;T, TC&gt;(it.borrow())</span>
+        <span class="s1">{}</span>
+
+        <span class="s1">_BorrowedGreenlet&lt;T, TC&gt;&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">BorrowedObject&amp; other);</span>
+
+        <span class="s2">// We get one of these for PyGreenlet, but one for PyObject</span>
+        <span class="s2">// is handy as well</span>
+        <span class="s4">operator </span><span class="s1">PyObject*() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyObject*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s1">}</span>
+        <span class="s1">Greenlet* </span><span class="s4">operator</span><span class="s5">-&gt;</span><span class="s1">() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">operator </span><span class="s1">Greenlet*() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+    <span class="s1">};</span>
+
+    <span class="s0">typedef </span><span class="s1">_BorrowedGreenlet&lt;PyGreenlet&gt; BorrowedGreenlet;</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s1">_OwnedGreenlet&lt;T, TC&gt;::_OwnedGreenlet(</span><span class="s0">const </span><span class="s1">BorrowedGreenlet&amp; other)</span>
+        <span class="s1">: OwnedReference&lt;T, TC&gt;(</span><span class="s4">reinterpret_cast</span><span class="s1">&lt;T*&gt;(other.borrow()))</span>
+    <span class="s1">{</span>
+        <span class="s1">Py_XINCREF(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+    <span class="s1">}</span>
+
+
+     <span class="s4">class </span><span class="s1">BorrowedMainGreenlet</span>
+            <span class="s1">: </span><span class="s4">public </span><span class="s1">_BorrowedGreenlet&lt;PyGreenlet, MainGreenletExactChecker&gt;</span>
+    <span class="s1">{</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">BorrowedMainGreenlet(</span><span class="s0">const </span><span class="s1">OwnedMainGreenlet&amp; it) :</span>
+            <span class="s1">_BorrowedGreenlet&lt;PyGreenlet, MainGreenletExactChecker&gt;(it.borrow())</span>
+        <span class="s1">{}</span>
+        <span class="s1">BorrowedMainGreenlet(PyGreenlet* it=nullptr)</span>
+            <span class="s1">: _BorrowedGreenlet&lt;PyGreenlet, MainGreenletExactChecker&gt;(it)</span>
+        <span class="s1">{}</span>
+    <span class="s1">};</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s1">_OwnedGreenlet&lt;T, TC&gt;&amp; _OwnedGreenlet&lt;T, TC&gt;::</span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">BorrowedGreenlet&amp; other)</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s4">operator</span><span class="s1">=(other.borrow());</span>
+    <span class="s1">}</span>
+
+
+    <span class="s4">class </span><span class="s1">ImmortalObject : </span><span class="s4">public </span><span class="s1">PyObjectPointer&lt;&gt;</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_ASSIGNMENT_OF_CLS(ImmortalObject);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s4">explicit </span><span class="s1">ImmortalObject(PyObject* it) : PyObjectPointer&lt;&gt;(it)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+
+        <span class="s1">ImmortalObject(</span><span class="s0">const </span><span class="s1">ImmortalObject&amp; other)</span>
+            <span class="s1">: PyObjectPointer&lt;&gt;(other.p)</span>
+        <span class="s1">{</span>
+
+        <span class="s1">}</span>
+
+        <span class="s2">/** 
+         * Become the new owner of the object. Does not change the 
+         * reference count. 
+         */</span>
+        <span class="s1">ImmortalObject&amp; </span><span class="s4">operator</span><span class="s1">=(PyObject* it)</span>
+        <span class="s1">{</span>
+            <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p == nullptr);</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = it;</span>
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s0">static </span><span class="s1">ImmortalObject consuming(PyObject* it)</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">ImmortalObject(it);</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline operator </span><span class="s1">PyObject*() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">ImmortalString : </span><span class="s4">public </span><span class="s1">ImmortalObject</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(ImmortalString);</span>
+        <span class="s0">const char</span><span class="s1">* str;</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">ImmortalString(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">str) :</span>
+            <span class="s1">ImmortalObject(str ? Require(PyUnicode_InternFromString(str)) : nullptr)</span>
+        <span class="s1">{</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">str = str;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s1">ImmortalString&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">str)</span>
+        <span class="s1">{</span>
+            <span class="s0">if </span><span class="s1">(!</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p) {</span>
+                <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = Require(PyUnicode_InternFromString(str));</span>
+                <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">str = str;</span>
+            <span class="s1">}</span>
+            <span class="s0">else </span><span class="s1">{</span>
+                <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">str == str);</span>
+            <span class="s1">}</span>
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline operator </span><span class="s1">std::string() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">str;</span>
+        <span class="s1">}</span>
+
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">ImmortalEventName : </span><span class="s4">public </span><span class="s1">ImmortalString</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(ImmortalEventName);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">ImmortalEventName(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">str) : ImmortalString(str)</span>
+        <span class="s1">{}</span>
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">ImmortalException : </span><span class="s4">public </span><span class="s1">ImmortalObject</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(ImmortalException);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">ImmortalException(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">name, PyObject* base=nullptr) :</span>
+            <span class="s1">ImmortalObject(name</span>
+                           <span class="s2">// Python 2.7 isn't const correct</span>
+                           <span class="s1">? Require(PyErr_NewException((</span><span class="s0">char</span><span class="s1">*)name, base, nullptr))</span>
+                           <span class="s1">: nullptr)</span>
+        <span class="s1">{}</span>
+
+        <span class="s4">inline </span><span class="s0">bool </span><span class="s1">PyExceptionMatches() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">PyErr_ExceptionMatches(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p) &gt; </span><span class="s6">0</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+    <span class="s1">};</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s1">OwnedObject PyObjectPointer&lt;T, TC&gt;::PyStr() </span><span class="s0">const </span><span class="s1">noexcept</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(!</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p) {</span>
+            <span class="s0">return </span><span class="s1">OwnedObject();</span>
+        <span class="s1">}</span>
+        <span class="s0">return </span><span class="s1">OwnedObject::consuming(PyObject_Str(</span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyObject*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p)));</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s0">const </span><span class="s1">std::string PyObjectPointer&lt;T, TC&gt;::as_str() </span><span class="s0">const </span><span class="s1">noexcept</span>
+    <span class="s1">{</span>
+        <span class="s2">// NOTE: This is not Python exception safe.</span>
+        <span class="s0">if </span><span class="s1">(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p) {</span>
+            <span class="s2">// The Python APIs return a cached char* value that's only valid</span>
+            <span class="s2">// as long as the original object stays around, and we're</span>
+            <span class="s2">// about to (probably) toss it. Hence the copy to std::string.</span>
+            <span class="s1">OwnedObject py_str = </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">PyStr();</span>
+            <span class="s0">if </span><span class="s1">(!py_str) {</span>
+                <span class="s0">return </span><span class="s3">&quot;(nil)&quot;</span><span class="s1">;</span>
+            <span class="s1">}</span>
+            <span class="s0">return </span><span class="s1">PyUnicode_AsUTF8(py_str.borrow());</span>
+        <span class="s1">}</span>
+        <span class="s0">return </span><span class="s3">&quot;(nil)&quot;</span><span class="s1">;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s1">OwnedObject PyObjectPointer&lt;T, TC&gt;::PyGetAttr(</span><span class="s0">const </span><span class="s1">ImmortalObject&amp; name) </span><span class="s0">const </span><span class="s1">noexcept</span>
+    <span class="s1">{</span>
+        <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s0">return </span><span class="s1">OwnedObject::consuming(PyObject_GetAttr(</span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyObject*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p), name));</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s1">OwnedObject PyObjectPointer&lt;T, TC&gt;::PyRequireAttr(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">name) </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s0">return </span><span class="s1">OwnedObject::consuming(Require(PyObject_GetAttrString(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p, name), name));</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s1">OwnedObject PyObjectPointer&lt;T, TC&gt;::PyRequireAttr(</span><span class="s0">const </span><span class="s1">ImmortalString&amp; name) </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s0">return </span><span class="s1">OwnedObject::consuming(Require(</span>
+                   <span class="s1">PyObject_GetAttr(</span>
+                      <span class="s4">reinterpret_cast</span><span class="s1">&lt;PyObject*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p),</span>
+                      <span class="s1">name</span>
+                   <span class="s1">),</span>
+                   <span class="s1">name</span>
+               <span class="s1">));</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s1">OwnedObject PyObjectPointer&lt;T, TC&gt;::PyCall(</span><span class="s0">const </span><span class="s1">BorrowedObject&amp; arg) </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">PyCall(arg.borrow());</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s1">OwnedObject PyObjectPointer&lt;T, TC&gt;::PyCall(PyGreenlet* arg) </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">PyCall(</span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyObject*&gt;(arg));</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s1">OwnedObject PyObjectPointer&lt;T, TC&gt;::PyCall(PyObject* arg) </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s0">return </span><span class="s1">OwnedObject::consuming(PyObject_CallFunctionObjArgs(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p, arg, NULL));</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s1">OwnedObject PyObjectPointer&lt;T, TC&gt;::PyCall(</span><span class="s0">const </span><span class="s1">BorrowedObject args,</span>
+                                                  <span class="s0">const </span><span class="s1">BorrowedObject kwargs) </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s0">return </span><span class="s1">OwnedObject::consuming(PyObject_Call(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p, args, kwargs));</span>
+    <span class="s1">}</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T, TypeChecker TC&gt;</span>
+    <span class="s4">inline </span><span class="s1">OwnedObject PyObjectPointer&lt;T, TC&gt;::PyCall(</span><span class="s0">const </span><span class="s1">OwnedObject&amp; args,</span>
+                                                  <span class="s0">const </span><span class="s1">OwnedObject&amp; kwargs) </span><span class="s0">const</span>
+    <span class="s1">{</span>
+        <span class="s1">assert(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s0">return </span><span class="s1">OwnedObject::consuming(PyObject_Call(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p, args.borrow(), kwargs.borrow()));</span>
+    <span class="s1">}</span>
+
+    <span class="s4">inline </span><span class="s0">void</span>
+    <span class="s1">ListChecker(</span><span class="s0">void </span><span class="s1">* p)</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(!p) {</span>
+            <span class="s0">return</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s0">if </span><span class="s1">(!PyList_Check(p)) {</span>
+            <span class="s4">throw </span><span class="s1">TypeError(</span><span class="s3">&quot;Expected a list&quot;</span><span class="s1">);</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s4">class </span><span class="s1">OwnedList : </span><span class="s4">public </span><span class="s1">OwnedReference&lt;PyObject, ListChecker&gt;</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_ASSIGNMENT_OF_CLS(OwnedList);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s2">// TODO: Would like to use move.</span>
+        <span class="s4">explicit </span><span class="s1">OwnedList(</span><span class="s0">const </span><span class="s1">OwnedObject&amp; other)</span>
+            <span class="s1">: OwnedReference&lt;PyObject, ListChecker&gt;(other)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+
+        <span class="s1">OwnedList&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">OwnedObject&amp; other)</span>
+        <span class="s1">{</span>
+            <span class="s0">if </span><span class="s1">(other &amp;&amp; PyList_Check(other.p)) {</span>
+                <span class="s2">// Valid list. Own a new reference to it, discard the</span>
+                <span class="s2">// reference to what we did own.</span>
+                <span class="s1">PyObject* new_ptr = other.p;</span>
+                <span class="s1">Py_INCREF(new_ptr);</span>
+                <span class="s1">Py_XDECREF(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+                <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = new_ptr;</span>
+            <span class="s1">}</span>
+            <span class="s0">else </span><span class="s1">{</span>
+                <span class="s2">// Either the other object was NULL (an error) or it</span>
+                <span class="s2">// wasn't a list. Either way, we're now invalidated.</span>
+                <span class="s1">Py_XDECREF(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+                <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = nullptr;</span>
+            <span class="s1">}</span>
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s0">bool </span><span class="s1">empty() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">PyList_GET_SIZE(p) == </span><span class="s6">0</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s1">Py_ssize_t size() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">PyList_GET_SIZE(p);</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s1">BorrowedObject at(</span><span class="s0">const </span><span class="s1">Py_ssize_t index) </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">PyList_GET_ITEM(p, index);</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">clear()</span>
+        <span class="s1">{</span>
+            <span class="s1">PyList_SetSlice(p, </span><span class="s6">0</span><span class="s1">, PyList_GET_SIZE(p), NULL);</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s2">// Use this to represent the module object used at module init</span>
+    <span class="s2">// time.</span>
+    <span class="s2">// This could either be a borrowed (Py2) or new (Py3) reference;</span>
+    <span class="s2">// either way, we don't want to do any memory management</span>
+    <span class="s2">// on it here, Python itself will handle that.</span>
+    <span class="s2">// XXX: Actually, that's not quite right. On Python 3, if an</span>
+    <span class="s2">// exception occurs before we return to the interpreter, this will</span>
+    <span class="s2">// leak; but all previous versions also had that problem.</span>
+    <span class="s4">class </span><span class="s1">CreatedModule : </span><span class="s4">public </span><span class="s1">PyObjectPointer&lt;&gt;</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(CreatedModule);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">CreatedModule(PyModuleDef&amp; mod_def) : PyObjectPointer&lt;&gt;(</span>
+            <span class="s1">Require(PyModule_Create(&amp;mod_def)))</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// PyAddObject(): Add a reference to the object to the module.</span>
+        <span class="s2">// On return, the reference count of the object is unchanged.</span>
+        <span class="s2">//</span>
+        <span class="s2">// The docs warn that PyModule_AddObject only steals the</span>
+        <span class="s2">// reference on success, so if it fails after we've incref'd</span>
+        <span class="s2">// or allocated, we're responsible for the decref.</span>
+        <span class="s0">void </span><span class="s1">PyAddObject(</span><span class="s0">const char</span><span class="s1">* name, </span><span class="s0">const long </span><span class="s1">new_bool)</span>
+        <span class="s1">{</span>
+            <span class="s1">OwnedObject p = OwnedObject::consuming(Require(PyBool_FromLong(new_bool)));</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">PyAddObject(name, p);</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void </span><span class="s1">PyAddObject(</span><span class="s0">const char</span><span class="s1">* name, </span><span class="s0">const </span><span class="s1">OwnedObject&amp; new_object)</span>
+        <span class="s1">{</span>
+            <span class="s2">// The caller already owns a reference they will decref</span>
+            <span class="s2">// when their variable goes out of scope, we still need to</span>
+            <span class="s2">// incref/decref.</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">PyAddObject(name, new_object.borrow());</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void </span><span class="s1">PyAddObject(</span><span class="s0">const char</span><span class="s1">* name, </span><span class="s0">const </span><span class="s1">ImmortalObject&amp; new_object)</span>
+        <span class="s1">{</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">PyAddObject(name, new_object.borrow());</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void </span><span class="s1">PyAddObject(</span><span class="s0">const char</span><span class="s1">* name, PyTypeObject&amp; type)</span>
+        <span class="s1">{</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">PyAddObject(name, </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyObject*&gt;(&amp;type));</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void </span><span class="s1">PyAddObject(</span><span class="s0">const char</span><span class="s1">* name, PyObject* new_object)</span>
+        <span class="s1">{</span>
+            <span class="s1">Py_INCREF(new_object);</span>
+            <span class="s4">try </span><span class="s1">{</span>
+                <span class="s1">Require(PyModule_AddObject(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p, name, new_object));</span>
+            <span class="s1">}</span>
+            <span class="s4">catch </span><span class="s1">(</span><span class="s0">const </span><span class="s1">PyErrOccurred&amp;) {</span>
+                <span class="s1">Py_DECREF(p);</span>
+                <span class="s4">throw</span><span class="s1">;</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">PyErrFetchParam : </span><span class="s4">public </span><span class="s1">PyObjectPointer&lt;&gt;</span>
+    <span class="s1">{</span>
+        <span class="s2">// Not an owned object, because we can't be initialized with</span>
+        <span class="s2">// one, and we only sometimes acquire ownership.</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(PyErrFetchParam);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s2">// To allow declaring these and passing them to</span>
+        <span class="s2">// PyErr_Fetch we implement the empty constructor,</span>
+        <span class="s2">// and the address operator.</span>
+        <span class="s1">PyErrFetchParam() : PyObjectPointer&lt;&gt;(nullptr)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyObject** </span><span class="s4">operator</span><span class="s1">&amp;()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">&amp;</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// This allows us to pass one directly without the &amp;,</span>
+        <span class="s2">// BUT it has higher precedence than the bool operator</span>
+        <span class="s2">// if it's not explicit.</span>
+        <span class="s4">operator </span><span class="s1">PyObject**()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">&amp;</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// We don't want to be able to pass these to Py_DECREF and</span>
+        <span class="s2">// such so we don't have the implicit PyObject* conversion.</span>
+
+        <span class="s4">inline </span><span class="s1">PyObject* relinquish_ownership()</span>
+        <span class="s1">{</span>
+            <span class="s1">PyObject* result = </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p = nullptr;</span>
+            <span class="s0">return </span><span class="s1">result;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">~PyErrFetchParam()</span>
+        <span class="s1">{</span>
+            <span class="s1">Py_XDECREF(p);</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">OwnedErrPiece : </span><span class="s4">public </span><span class="s1">OwnedObject</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s2">// Unlike OwnedObject, this increments the refcount.</span>
+        <span class="s1">OwnedErrPiece(PyObject* p=nullptr) : OwnedObject(p)</span>
+        <span class="s1">{</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">acquire();</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyObject** </span><span class="s4">operator</span><span class="s1">&amp;()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">&amp;</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline operator </span><span class="s1">PyObject*() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">operator </span><span class="s1">PyTypeObject*() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">reinterpret_cast</span><span class="s1">&lt;PyTypeObject*&gt;(</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p);</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">PyErrPieces</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">OwnedErrPiece type;</span>
+        <span class="s1">OwnedErrPiece instance;</span>
+        <span class="s1">OwnedErrPiece traceback;</span>
+        <span class="s0">bool </span><span class="s1">restored;</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s2">// Takes new references; if we're destroyed before</span>
+        <span class="s2">// restoring the error, we drop the references.</span>
+        <span class="s1">PyErrPieces(PyObject* t, PyObject* v, PyObject* tb) :</span>
+            <span class="s1">type(t),</span>
+            <span class="s1">instance(v),</span>
+            <span class="s1">traceback(tb),</span>
+            <span class="s1">restored(</span><span class="s6">0</span><span class="s1">)</span>
+        <span class="s1">{</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">normalize();</span>
+        <span class="s1">}</span>
+
+        <span class="s1">PyErrPieces() :</span>
+            <span class="s1">restored(</span><span class="s6">0</span><span class="s1">)</span>
+        <span class="s1">{</span>
+            <span class="s2">// PyErr_Fetch transfers ownership to us, so</span>
+            <span class="s2">// we don't actually need to INCREF; but we *do*</span>
+            <span class="s2">// need to DECREF if we're not restored.</span>
+            <span class="s1">PyErrFetchParam t, v, tb;</span>
+            <span class="s1">PyErr_Fetch(&amp;t, &amp;v, &amp;tb);</span>
+            <span class="s1">type.steal(t.relinquish_ownership());</span>
+            <span class="s1">instance.steal(v.relinquish_ownership());</span>
+            <span class="s1">traceback.steal(tb.relinquish_ownership());</span>
+        <span class="s1">}</span>
+
+        <span class="s0">void </span><span class="s1">PyErrRestore()</span>
+        <span class="s1">{</span>
+            <span class="s2">// can only do this once</span>
+            <span class="s1">assert(!</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">restored);</span>
+            <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">restored = </span><span class="s4">true</span><span class="s1">;</span>
+            <span class="s1">PyErr_Restore(</span>
+                <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">type.relinquish_ownership(),</span>
+                <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">instance.relinquish_ownership(),</span>
+                <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">traceback.relinquish_ownership());</span>
+            <span class="s1">assert(!</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">type &amp;&amp; !</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">instance &amp;&amp; !</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">traceback);</span>
+        <span class="s1">}</span>
+
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s0">void </span><span class="s1">normalize()</span>
+        <span class="s1">{</span>
+            <span class="s2">// First, check the traceback argument, replacing None,</span>
+            <span class="s2">// with NULL</span>
+            <span class="s0">if </span><span class="s1">(traceback.is_None()) {</span>
+                <span class="s1">traceback = nullptr;</span>
+            <span class="s1">}</span>
+
+            <span class="s0">if </span><span class="s1">(traceback &amp;&amp; !PyTraceBack_Check(traceback.borrow())) {</span>
+                <span class="s4">throw </span><span class="s1">PyErrOccurred(PyExc_TypeError,</span>
+                                    <span class="s3">&quot;throw() third argument must be a traceback object&quot;</span><span class="s1">);</span>
+            <span class="s1">}</span>
+
+            <span class="s0">if </span><span class="s1">(PyExceptionClass_Check(type)) {</span>
+                <span class="s2">// If we just had a type, we'll now have a type and</span>
+                <span class="s2">// instance.</span>
+                <span class="s2">// The type's refcount will have gone up by one</span>
+                <span class="s2">// because of the instance and the instance will have</span>
+                <span class="s2">// a refcount of one. Either way, we owned, and still</span>
+                <span class="s2">// do own, exactly one reference.</span>
+                <span class="s1">PyErr_NormalizeException(&amp;type, &amp;instance, &amp;traceback);</span>
+
+            <span class="s1">}</span>
+            <span class="s0">else if </span><span class="s1">(PyExceptionInstance_Check(type)) {</span>
+                <span class="s2">/* Raising an instance --- usually that means an 
+                   object that is a subclass of BaseException, but on 
+                   Python 2, that can also mean an arbitrary old-style 
+                   object. The value should be a dummy. */</span>
+                <span class="s0">if </span><span class="s1">(instance &amp;&amp; !instance.is_None()) {</span>
+                    <span class="s4">throw </span><span class="s1">PyErrOccurred(</span>
+                                    <span class="s1">PyExc_TypeError,</span>
+                                    <span class="s3">&quot;instance exception may not have a separate value&quot;</span><span class="s1">);</span>
+                <span class="s1">}</span>
+                <span class="s2">/* Normalize to raise &lt;class&gt;, &lt;instance&gt; */</span>
+                <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">instance = </span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">type;</span>
+                <span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">type = PyExceptionInstance_Class(instance.borrow());</span>
+
+                <span class="s2">/* 
+                  It would be tempting to do this: 
+ 
+                Py_ssize_t type_count = Py_REFCNT(Py_TYPE(instance.borrow())); 
+                this-&gt;type = PyExceptionInstance_Class(instance.borrow()); 
+                assert(this-&gt;type.REFCNT() == type_count + 1); 
+ 
+                But that doesn't work on Python 2 in the case of 
+                old-style instances: The result of Py_TYPE is going to 
+                be the global shared &lt;type instance&gt; that all 
+                old-style classes have, while the return of Instance_Class() 
+                will be the Python-level class object. The two are unrelated. 
+                */</span>
+            <span class="s1">}</span>
+            <span class="s0">else </span><span class="s1">{</span>
+                <span class="s2">/* Not something you can raise. throw() fails. */</span>
+                <span class="s1">PyErr_Format(PyExc_TypeError,</span>
+                     <span class="s3">&quot;exceptions must be classes, or instances, not %s&quot;</span><span class="s1">,</span>
+                             <span class="s1">Py_TYPE(type.borrow())</span><span class="s5">-&gt;</span><span class="s1">tp_name);</span>
+                <span class="s4">throw </span><span class="s1">PyErrOccurred();</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s2">// PyArg_Parse's O argument returns a borrowed reference.</span>
+    <span class="s4">class </span><span class="s1">PyArgParseParam : </span><span class="s4">public </span><span class="s1">BorrowedObject</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(PyArgParseParam);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s4">explicit </span><span class="s1">PyArgParseParam(PyObject* p=nullptr) : BorrowedObject(p)</span>
+        <span class="s1">{</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s1">PyObject** </span><span class="s4">operator</span><span class="s1">&amp;()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">&amp;</span><span class="s4">this</span><span class="s5">-&gt;</span><span class="s1">p;</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+<span class="s1">};};</span>
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

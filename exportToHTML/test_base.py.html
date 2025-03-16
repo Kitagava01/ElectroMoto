@@ -1,0 +1,128 @@
+<html>
+<head>
+<title>test_base.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_base.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2010, 2011 Sebastian Thiel (byronimo@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitDB and is released under</span>
+<span class="s0"># the New BSD License: https://opensource.org/license/bsd-3-clause/</span>
+<span class="s2">&quot;&quot;&quot;Test for object db&quot;&quot;&quot;</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">test</span><span class="s4">.</span><span class="s1">lib </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">TestBase</span><span class="s4">,</span>
+    <span class="s1">DummyStream</span><span class="s4">,</span>
+    <span class="s1">DeriveTest</span><span class="s4">,</span>
+<span class="s4">)</span>
+
+<span class="s3">from </span><span class="s1">gitdb </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">OInfo</span><span class="s4">,</span>
+    <span class="s1">OPackInfo</span><span class="s4">,</span>
+    <span class="s1">ODeltaPackInfo</span><span class="s4">,</span>
+    <span class="s1">OStream</span><span class="s4">,</span>
+    <span class="s1">OPackStream</span><span class="s4">,</span>
+    <span class="s1">ODeltaPackStream</span><span class="s4">,</span>
+    <span class="s1">IStream</span>
+<span class="s4">)</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">util </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">NULL_BIN_SHA</span>
+<span class="s4">)</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">typ </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">str_blob_type</span>
+<span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">TestBaseTypes</span><span class="s4">(</span><span class="s1">TestBase</span><span class="s4">):</span>
+
+    <span class="s3">def </span><span class="s1">test_streams</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s0"># test info</span>
+        <span class="s1">sha </span><span class="s4">= </span><span class="s1">NULL_BIN_SHA</span>
+        <span class="s1">s </span><span class="s4">= </span><span class="s5">20</span>
+        <span class="s1">blob_id </span><span class="s4">= </span><span class="s5">3</span>
+
+        <span class="s1">info </span><span class="s4">= </span><span class="s1">OInfo</span><span class="s4">(</span><span class="s1">sha</span><span class="s4">, </span><span class="s1">str_blob_type</span><span class="s4">, </span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s3">assert </span><span class="s1">info</span><span class="s4">.</span><span class="s1">binsha </span><span class="s4">== </span><span class="s1">sha</span>
+        <span class="s3">assert </span><span class="s1">info</span><span class="s4">.</span><span class="s1">type </span><span class="s4">== </span><span class="s1">str_blob_type</span>
+        <span class="s3">assert </span><span class="s1">info</span><span class="s4">.</span><span class="s1">type_id </span><span class="s4">== </span><span class="s1">blob_id</span>
+        <span class="s3">assert </span><span class="s1">info</span><span class="s4">.</span><span class="s1">size </span><span class="s4">== </span><span class="s1">s</span>
+
+        <span class="s0"># test pack info</span>
+        <span class="s0"># provides type_id</span>
+        <span class="s1">pinfo </span><span class="s4">= </span><span class="s1">OPackInfo</span><span class="s4">(</span><span class="s5">0</span><span class="s4">, </span><span class="s1">blob_id</span><span class="s4">, </span><span class="s1">s</span><span class="s4">)</span>
+        <span class="s3">assert </span><span class="s1">pinfo</span><span class="s4">.</span><span class="s1">type </span><span class="s4">== </span><span class="s1">str_blob_type</span>
+        <span class="s3">assert </span><span class="s1">pinfo</span><span class="s4">.</span><span class="s1">type_id </span><span class="s4">== </span><span class="s1">blob_id</span>
+        <span class="s3">assert </span><span class="s1">pinfo</span><span class="s4">.</span><span class="s1">pack_offset </span><span class="s4">== </span><span class="s5">0</span>
+
+        <span class="s1">dpinfo </span><span class="s4">= </span><span class="s1">ODeltaPackInfo</span><span class="s4">(</span><span class="s5">0</span><span class="s4">, </span><span class="s1">blob_id</span><span class="s4">, </span><span class="s1">s</span><span class="s4">, </span><span class="s1">sha</span><span class="s4">)</span>
+        <span class="s3">assert </span><span class="s1">dpinfo</span><span class="s4">.</span><span class="s1">type </span><span class="s4">== </span><span class="s1">str_blob_type</span>
+        <span class="s3">assert </span><span class="s1">dpinfo</span><span class="s4">.</span><span class="s1">type_id </span><span class="s4">== </span><span class="s1">blob_id</span>
+        <span class="s3">assert </span><span class="s1">dpinfo</span><span class="s4">.</span><span class="s1">delta_info </span><span class="s4">== </span><span class="s1">sha</span>
+        <span class="s3">assert </span><span class="s1">dpinfo</span><span class="s4">.</span><span class="s1">pack_offset </span><span class="s4">== </span><span class="s5">0</span>
+
+        <span class="s0"># test ostream</span>
+        <span class="s1">stream </span><span class="s4">= </span><span class="s1">DummyStream</span><span class="s4">()</span>
+        <span class="s1">ostream </span><span class="s4">= </span><span class="s1">OStream</span><span class="s4">(*(</span><span class="s1">info </span><span class="s4">+ (</span><span class="s1">stream</span><span class="s4">, )))</span>
+        <span class="s3">assert </span><span class="s1">ostream</span><span class="s4">.</span><span class="s1">stream </span><span class="s3">is </span><span class="s1">stream</span>
+        <span class="s1">ostream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">(</span><span class="s5">15</span><span class="s4">)</span>
+        <span class="s1">stream</span><span class="s4">.</span><span class="s1">_assert</span><span class="s4">()</span>
+        <span class="s3">assert </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">bytes </span><span class="s4">== </span><span class="s5">15</span>
+        <span class="s1">ostream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">(</span><span class="s5">20</span><span class="s4">)</span>
+        <span class="s3">assert </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">bytes </span><span class="s4">== </span><span class="s5">20</span>
+
+        <span class="s0"># test packstream</span>
+        <span class="s1">postream </span><span class="s4">= </span><span class="s1">OPackStream</span><span class="s4">(*(</span><span class="s1">pinfo </span><span class="s4">+ (</span><span class="s1">stream</span><span class="s4">, )))</span>
+        <span class="s3">assert </span><span class="s1">postream</span><span class="s4">.</span><span class="s1">stream </span><span class="s3">is </span><span class="s1">stream</span>
+        <span class="s1">postream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">(</span><span class="s5">10</span><span class="s4">)</span>
+        <span class="s1">stream</span><span class="s4">.</span><span class="s1">_assert</span><span class="s4">()</span>
+        <span class="s3">assert </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">bytes </span><span class="s4">== </span><span class="s5">10</span>
+
+        <span class="s0"># test deltapackstream</span>
+        <span class="s1">dpostream </span><span class="s4">= </span><span class="s1">ODeltaPackStream</span><span class="s4">(*(</span><span class="s1">dpinfo </span><span class="s4">+ (</span><span class="s1">stream</span><span class="s4">, )))</span>
+        <span class="s1">dpostream</span><span class="s4">.</span><span class="s1">stream </span><span class="s3">is </span><span class="s1">stream</span>
+        <span class="s1">dpostream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">(</span><span class="s5">5</span><span class="s4">)</span>
+        <span class="s1">stream</span><span class="s4">.</span><span class="s1">_assert</span><span class="s4">()</span>
+        <span class="s3">assert </span><span class="s1">stream</span><span class="s4">.</span><span class="s1">bytes </span><span class="s4">== </span><span class="s5">5</span>
+
+        <span class="s0"># derive with own args</span>
+        <span class="s1">DeriveTest</span><span class="s4">(</span><span class="s1">sha</span><span class="s4">, </span><span class="s1">str_blob_type</span><span class="s4">, </span><span class="s1">s</span><span class="s4">, </span><span class="s1">stream</span><span class="s4">, </span><span class="s6">'mine'</span><span class="s4">, </span><span class="s1">myarg</span><span class="s4">=</span><span class="s5">3</span><span class="s4">).</span><span class="s1">_assert</span><span class="s4">()</span>
+
+        <span class="s0"># test istream</span>
+        <span class="s1">istream </span><span class="s4">= </span><span class="s1">IStream</span><span class="s4">(</span><span class="s1">str_blob_type</span><span class="s4">, </span><span class="s1">s</span><span class="s4">, </span><span class="s1">stream</span><span class="s4">)</span>
+        <span class="s3">assert </span><span class="s1">istream</span><span class="s4">.</span><span class="s1">binsha </span><span class="s4">== </span><span class="s3">None</span>
+        <span class="s1">istream</span><span class="s4">.</span><span class="s1">binsha </span><span class="s4">= </span><span class="s1">sha</span>
+        <span class="s3">assert </span><span class="s1">istream</span><span class="s4">.</span><span class="s1">binsha </span><span class="s4">== </span><span class="s1">sha</span>
+
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">istream</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">) == </span><span class="s5">20</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">istream</span><span class="s4">.</span><span class="s1">hexsha</span><span class="s4">) == </span><span class="s5">40</span>
+
+        <span class="s3">assert </span><span class="s1">istream</span><span class="s4">.</span><span class="s1">size </span><span class="s4">== </span><span class="s1">s</span>
+        <span class="s1">istream</span><span class="s4">.</span><span class="s1">size </span><span class="s4">= </span><span class="s1">s </span><span class="s4">* </span><span class="s5">2</span>
+        <span class="s1">istream</span><span class="s4">.</span><span class="s1">size </span><span class="s4">== </span><span class="s1">s </span><span class="s4">* </span><span class="s5">2</span>
+        <span class="s3">assert </span><span class="s1">istream</span><span class="s4">.</span><span class="s1">type </span><span class="s4">== </span><span class="s1">str_blob_type</span>
+        <span class="s1">istream</span><span class="s4">.</span><span class="s1">type </span><span class="s4">= </span><span class="s6">&quot;something&quot;</span>
+        <span class="s3">assert </span><span class="s1">istream</span><span class="s4">.</span><span class="s1">type </span><span class="s4">== </span><span class="s6">&quot;something&quot;</span>
+        <span class="s3">assert </span><span class="s1">istream</span><span class="s4">.</span><span class="s1">stream </span><span class="s3">is </span><span class="s1">stream</span>
+        <span class="s1">istream</span><span class="s4">.</span><span class="s1">stream </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s3">assert </span><span class="s1">istream</span><span class="s4">.</span><span class="s1">stream </span><span class="s3">is None</span>
+
+        <span class="s3">assert </span><span class="s1">istream</span><span class="s4">.</span><span class="s1">error </span><span class="s3">is None</span>
+        <span class="s1">istream</span><span class="s4">.</span><span class="s1">error </span><span class="s4">= </span><span class="s1">Exception</span><span class="s4">()</span>
+        <span class="s3">assert </span><span class="s1">isinstance</span><span class="s4">(</span><span class="s1">istream</span><span class="s4">.</span><span class="s1">error</span><span class="s4">, </span><span class="s1">Exception</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

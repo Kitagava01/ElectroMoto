@@ -1,0 +1,145 @@
+<html>
+<head>
+<title>py_spec.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+py_spec.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;A Python specification is an abstract requirement definition of an interpreter.&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">re</span>
+
+<span class="s1">PATTERN </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r&quot;^(?P&lt;impl&gt;[a-zA-Z]+)?(?P&lt;version&gt;[0-9.]+)?(?:-(?P&lt;arch&gt;32|64))?$&quot;</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">PythonSpec</span><span class="s3">:</span>
+    <span class="s0">&quot;&quot;&quot;Contains specification about a Python Interpreter.&quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(  </span><span class="s5"># noqa: PLR0913</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">str_spec</span><span class="s3">: </span><span class="s1">str</span><span class="s3">,</span>
+        <span class="s1">implementation</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">major</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">minor</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">micro</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">architecture</span><span class="s3">: </span><span class="s1">int </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">path</span><span class="s3">: </span><span class="s1">str </span><span class="s3">| </span><span class="s2">None</span><span class="s3">,</span>
+    <span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">str_spec </span><span class="s3">= </span><span class="s1">str_spec</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">implementation </span><span class="s3">= </span><span class="s1">implementation</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">major </span><span class="s3">= </span><span class="s1">major</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">minor </span><span class="s3">= </span><span class="s1">minor</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">micro </span><span class="s3">= </span><span class="s1">micro</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">architecture </span><span class="s3">= </span><span class="s1">architecture</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">path </span><span class="s3">= </span><span class="s1">path</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">from_string_spec</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">string_spec</span><span class="s3">: </span><span class="s1">str</span><span class="s3">):  </span><span class="s5"># noqa: C901, PLR0912</span>
+        <span class="s1">impl</span><span class="s3">, </span><span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">micro</span><span class="s3">, </span><span class="s1">arch</span><span class="s3">, </span><span class="s1">path </span><span class="s3">= </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">isabs</span><span class="s3">(</span><span class="s1">string_spec</span><span class="s3">):  </span><span class="s5"># noqa: PLR1702</span>
+            <span class="s1">path </span><span class="s3">= </span><span class="s1">string_spec</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">ok </span><span class="s3">= </span><span class="s2">False</span>
+            <span class="s1">match </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">match</span><span class="s3">(</span><span class="s1">PATTERN</span><span class="s3">, </span><span class="s1">string_spec</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">match</span><span class="s3">:</span>
+
+                <span class="s2">def </span><span class="s1">_int_or_none</span><span class="s3">(</span><span class="s1">val</span><span class="s3">):</span>
+                    <span class="s2">return None if </span><span class="s1">val </span><span class="s2">is None else </span><span class="s1">int</span><span class="s3">(</span><span class="s1">val</span><span class="s3">)</span>
+
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s1">groups </span><span class="s3">= </span><span class="s1">match</span><span class="s3">.</span><span class="s1">groupdict</span><span class="s3">()</span>
+                    <span class="s1">version </span><span class="s3">= </span><span class="s1">groups</span><span class="s3">[</span><span class="s4">&quot;version&quot;</span><span class="s3">]</span>
+                    <span class="s2">if </span><span class="s1">version </span><span class="s2">is not None</span><span class="s3">:</span>
+                        <span class="s1">versions </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">int</span><span class="s3">(</span><span class="s1">i</span><span class="s3">) </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">version</span><span class="s3">.</span><span class="s1">split</span><span class="s3">(</span><span class="s4">&quot;.&quot;</span><span class="s3">) </span><span class="s2">if </span><span class="s1">i</span><span class="s3">)</span>
+                        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">versions</span><span class="s3">) &gt; </span><span class="s6">3</span><span class="s3">:  </span><span class="s5"># noqa: PLR2004</span>
+                            <span class="s2">raise </span><span class="s1">ValueError  </span><span class="s5"># noqa: TRY301</span>
+                        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">versions</span><span class="s3">) == </span><span class="s6">3</span><span class="s3">:  </span><span class="s5"># noqa: PLR2004</span>
+                            <span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">micro </span><span class="s3">= </span><span class="s1">versions</span>
+                        <span class="s2">elif </span><span class="s1">len</span><span class="s3">(</span><span class="s1">versions</span><span class="s3">) == </span><span class="s6">2</span><span class="s3">:  </span><span class="s5"># noqa: PLR2004</span>
+                            <span class="s1">major</span><span class="s3">, </span><span class="s1">minor </span><span class="s3">= </span><span class="s1">versions</span>
+                        <span class="s2">elif </span><span class="s1">len</span><span class="s3">(</span><span class="s1">versions</span><span class="s3">) == </span><span class="s6">1</span><span class="s3">:</span>
+                            <span class="s1">version_data </span><span class="s3">= </span><span class="s1">versions</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+                            <span class="s1">major </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">version_data</span><span class="s3">)[</span><span class="s6">0</span><span class="s3">])  </span><span class="s5"># first digit major</span>
+                            <span class="s2">if </span><span class="s1">version_data </span><span class="s3">&gt; </span><span class="s6">9</span><span class="s3">:  </span><span class="s5"># noqa: PLR2004</span>
+                                <span class="s1">minor </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">version_data</span><span class="s3">)[</span><span class="s6">1</span><span class="s3">:])</span>
+                    <span class="s1">ok </span><span class="s3">= </span><span class="s2">True</span>
+                <span class="s2">except </span><span class="s1">ValueError</span><span class="s3">:</span>
+                    <span class="s2">pass</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">impl </span><span class="s3">= </span><span class="s1">groups</span><span class="s3">[</span><span class="s4">&quot;impl&quot;</span><span class="s3">]</span>
+                    <span class="s2">if </span><span class="s1">impl </span><span class="s2">in </span><span class="s3">{</span><span class="s4">&quot;py&quot;</span><span class="s3">, </span><span class="s4">&quot;python&quot;</span><span class="s3">}:</span>
+                        <span class="s1">impl </span><span class="s3">= </span><span class="s2">None</span>
+                    <span class="s1">arch </span><span class="s3">= </span><span class="s1">_int_or_none</span><span class="s3">(</span><span class="s1">groups</span><span class="s3">[</span><span class="s4">&quot;arch&quot;</span><span class="s3">])</span>
+
+            <span class="s2">if not </span><span class="s1">ok</span><span class="s3">:</span>
+                <span class="s1">path </span><span class="s3">= </span><span class="s1">string_spec</span>
+
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">(</span><span class="s1">string_spec</span><span class="s3">, </span><span class="s1">impl</span><span class="s3">, </span><span class="s1">major</span><span class="s3">, </span><span class="s1">minor</span><span class="s3">, </span><span class="s1">micro</span><span class="s3">, </span><span class="s1">arch</span><span class="s3">, </span><span class="s1">path</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">generate_re</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, *, </span><span class="s1">windows</span><span class="s3">: </span><span class="s1">bool</span><span class="s3">) </span><span class="s1">-&gt; re</span><span class="s3">.</span><span class="s1">Pattern</span><span class="s3">:</span>
+        <span class="s0">&quot;&quot;&quot;Generate a regular expression for matching against a filename.&quot;&quot;&quot;</span>
+        <span class="s1">version </span><span class="s3">= </span><span class="s4">r&quot;{}(\.{}(\.{})?)?&quot;</span><span class="s3">.</span><span class="s1">format</span><span class="s3">(</span>
+            <span class="s3">*(</span><span class="s4">r&quot;\d+&quot; </span><span class="s2">if </span><span class="s1">v </span><span class="s2">is None else </span><span class="s1">v </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">major</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">minor</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">micro</span><span class="s3">))</span>
+        <span class="s3">)</span>
+        <span class="s1">impl </span><span class="s3">= </span><span class="s4">&quot;python&quot; </span><span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">implementation </span><span class="s2">is None else </span><span class="s4">f&quot;python|</span><span class="s2">{</span><span class="s1">re</span><span class="s3">.</span><span class="s1">escape</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">implementation</span><span class="s3">)</span><span class="s2">}</span><span class="s4">&quot;</span>
+        <span class="s1">suffix </span><span class="s3">= </span><span class="s4">r&quot;\.exe&quot; </span><span class="s2">if </span><span class="s1">windows </span><span class="s2">else </span><span class="s4">&quot;&quot;</span>
+        <span class="s1">version_conditional </span><span class="s3">= (</span>
+            <span class="s4">&quot;?&quot;</span>
+            <span class="s5"># Windows Python executables are almost always unversioned</span>
+            <span class="s2">if </span><span class="s1">windows</span>
+            <span class="s5"># Spec is an empty string</span>
+            <span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">major </span><span class="s2">is None</span>
+            <span class="s2">else </span><span class="s4">&quot;&quot;</span>
+        <span class="s3">)</span>
+        <span class="s5"># Try matching `direct` first, so the `direct` group is filled when possible.</span>
+        <span class="s2">return </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span>
+            <span class="s4">rf&quot;(?P&lt;impl&gt;</span><span class="s2">{</span><span class="s1">impl</span><span class="s2">}</span><span class="s4">)(?P&lt;v&gt;</span><span class="s2">{</span><span class="s1">version</span><span class="s2">}</span><span class="s4">)</span><span class="s2">{</span><span class="s1">version_conditional</span><span class="s2">}{</span><span class="s1">suffix</span><span class="s2">}</span><span class="s4">$&quot;</span><span class="s3">,</span>
+            <span class="s1">flags</span><span class="s3">=</span><span class="s1">re</span><span class="s3">.</span><span class="s1">IGNORECASE</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">is_abs</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">path </span><span class="s2">is not None and </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">isabs</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">path</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">satisfies</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">spec</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Called when there's a candidate metadata spec to see if compatible - e.g. PEP-514 on Windows.&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">spec</span><span class="s3">.</span><span class="s1">is_abs </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">is_abs </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">path </span><span class="s3">!= </span><span class="s1">spec</span><span class="s3">.</span><span class="s1">path</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+        <span class="s2">if </span><span class="s1">spec</span><span class="s3">.</span><span class="s1">implementation </span><span class="s2">is not None and </span><span class="s1">spec</span><span class="s3">.</span><span class="s1">implementation</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">() != </span><span class="s1">self</span><span class="s3">.</span><span class="s1">implementation</span><span class="s3">.</span><span class="s1">lower</span><span class="s3">():</span>
+            <span class="s2">return False</span>
+        <span class="s2">if </span><span class="s1">spec</span><span class="s3">.</span><span class="s1">architecture </span><span class="s2">is not None and </span><span class="s1">spec</span><span class="s3">.</span><span class="s1">architecture </span><span class="s3">!= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">architecture</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">for </span><span class="s1">our</span><span class="s3">, </span><span class="s1">req </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">((</span><span class="s1">self</span><span class="s3">.</span><span class="s1">major</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">minor</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">micro</span><span class="s3">), (</span><span class="s1">spec</span><span class="s3">.</span><span class="s1">major</span><span class="s3">, </span><span class="s1">spec</span><span class="s3">.</span><span class="s1">minor</span><span class="s3">, </span><span class="s1">spec</span><span class="s3">.</span><span class="s1">micro</span><span class="s3">)):</span>
+            <span class="s2">if </span><span class="s1">req </span><span class="s2">is not None and </span><span class="s1">our </span><span class="s2">is not None and </span><span class="s1">our </span><span class="s3">!= </span><span class="s1">req</span><span class="s3">:</span>
+                <span class="s2">return False</span>
+        <span class="s2">return True</span>
+
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s1">name </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">).</span><span class="s1">__name__</span>
+        <span class="s1">params </span><span class="s3">= </span><span class="s4">&quot;implementation&quot;</span><span class="s3">, </span><span class="s4">&quot;major&quot;</span><span class="s3">, </span><span class="s4">&quot;minor&quot;</span><span class="s3">, </span><span class="s4">&quot;micro&quot;</span><span class="s3">, </span><span class="s4">&quot;architecture&quot;</span><span class="s3">, </span><span class="s4">&quot;path&quot;</span>
+        <span class="s2">return </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">name</span><span class="s2">}</span><span class="s4">(</span><span class="s2">{</span><span class="s4">', '</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s4">f'</span><span class="s2">{</span><span class="s1">k</span><span class="s2">}</span><span class="s4">=</span><span class="s2">{</span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">k</span><span class="s3">)</span><span class="s2">}</span><span class="s4">' </span><span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">params </span><span class="s2">if </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">k</span><span class="s3">) </span><span class="s2">is not None</span><span class="s3">)</span><span class="s2">}</span><span class="s4">)&quot;</span>
+
+
+<span class="s1">__all__ </span><span class="s3">= [</span>
+    <span class="s4">&quot;PythonSpec&quot;</span><span class="s3">,</span>
+<span class="s3">]</span>
+</pre>
+</body>
+</html>

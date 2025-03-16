@@ -1,0 +1,700 @@
+<html>
+<head>
+<title>writeonly.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+writeonly.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># orm/writeonly.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+
+<span class="s2">&quot;&quot;&quot;Write-only collection API. 
+ 
+This is an alternate mapped attribute style that only supports single-item 
+collection mutation operations.   To read the collection, a select() 
+object must be executed each time. 
+ 
+.. versionadded:: 2.0 
+ 
+ 
+&quot;&quot;&quot;</span>
+
+<span class="s3">from </span><span class="s1">__future__ </span><span class="s3">import </span><span class="s1">annotations</span>
+
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Any</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Collection</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Dict</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Generic</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Iterable</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Iterator</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">List</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">NoReturn</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Optional</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">overload</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Tuple</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Type</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">TYPE_CHECKING</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">TypeVar</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Union</span>
+
+<span class="s3">from </span><span class="s1">sqlalchemy</span><span class="s4">.</span><span class="s1">sql </span><span class="s3">import </span><span class="s1">bindparam</span>
+<span class="s3">from </span><span class="s4">. </span><span class="s3">import </span><span class="s1">attributes</span>
+<span class="s3">from </span><span class="s4">. </span><span class="s3">import </span><span class="s1">interfaces</span>
+<span class="s3">from </span><span class="s4">. </span><span class="s3">import </span><span class="s1">relationships</span>
+<span class="s3">from </span><span class="s4">. </span><span class="s3">import </span><span class="s1">strategies</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s1">NEVER_SET</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s1">object_mapper</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s1">PassiveFlag</span>
+<span class="s3">from </span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s1">RelationshipDirection</span>
+<span class="s3">from </span><span class="s4">.. </span><span class="s3">import </span><span class="s1">exc</span>
+<span class="s3">from </span><span class="s4">.. </span><span class="s3">import </span><span class="s1">inspect</span>
+<span class="s3">from </span><span class="s4">.. </span><span class="s3">import </span><span class="s1">log</span>
+<span class="s3">from </span><span class="s4">.. </span><span class="s3">import </span><span class="s1">util</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">sql </span><span class="s3">import </span><span class="s1">delete</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">sql </span><span class="s3">import </span><span class="s1">insert</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">sql </span><span class="s3">import </span><span class="s1">select</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">sql </span><span class="s3">import </span><span class="s1">update</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">sql</span><span class="s4">.</span><span class="s1">dml </span><span class="s3">import </span><span class="s1">Delete</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">sql</span><span class="s4">.</span><span class="s1">dml </span><span class="s3">import </span><span class="s1">Insert</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">sql</span><span class="s4">.</span><span class="s1">dml </span><span class="s3">import </span><span class="s1">Update</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">util</span><span class="s4">.</span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Literal</span>
+
+<span class="s3">if </span><span class="s1">TYPE_CHECKING</span><span class="s4">:</span>
+    <span class="s3">from </span><span class="s4">. </span><span class="s3">import </span><span class="s1">QueryableAttribute</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">_typing </span><span class="s3">import </span><span class="s1">_InstanceDict</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">attributes </span><span class="s3">import </span><span class="s1">AttributeEventToken</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s1">LoaderCallableStatus</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">collections </span><span class="s3">import </span><span class="s1">_AdaptedCollectionProtocol</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">collections </span><span class="s3">import </span><span class="s1">CollectionAdapter</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">mapper </span><span class="s3">import </span><span class="s1">Mapper</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">relationships </span><span class="s3">import </span><span class="s1">_RelationshipOrderByArg</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">state </span><span class="s3">import </span><span class="s1">InstanceState</span>
+    <span class="s3">from </span><span class="s4">.</span><span class="s1">util </span><span class="s3">import </span><span class="s1">AliasedClass</span>
+    <span class="s3">from </span><span class="s4">..</span><span class="s1">event </span><span class="s3">import </span><span class="s1">_Dispatch</span>
+    <span class="s3">from </span><span class="s4">..</span><span class="s1">sql</span><span class="s4">.</span><span class="s1">selectable </span><span class="s3">import </span><span class="s1">FromClause</span>
+    <span class="s3">from </span><span class="s4">..</span><span class="s1">sql</span><span class="s4">.</span><span class="s1">selectable </span><span class="s3">import </span><span class="s1">Select</span>
+
+<span class="s1">_T </span><span class="s4">= </span><span class="s1">TypeVar</span><span class="s4">(</span><span class="s5">&quot;_T&quot;</span><span class="s4">, </span><span class="s1">bound</span><span class="s4">=</span><span class="s1">Any</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">WriteOnlyHistory</span><span class="s4">(</span><span class="s1">Generic</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]):</span>
+    <span class="s2">&quot;&quot;&quot;Overrides AttributeHistory to receive append/remove events directly.&quot;&quot;&quot;</span>
+
+    <span class="s1">unchanged_items</span><span class="s4">: </span><span class="s1">util</span><span class="s4">.</span><span class="s1">OrderedIdentitySet</span>
+    <span class="s1">added_items</span><span class="s4">: </span><span class="s1">util</span><span class="s4">.</span><span class="s1">OrderedIdentitySet</span>
+    <span class="s1">deleted_items</span><span class="s4">: </span><span class="s1">util</span><span class="s4">.</span><span class="s1">OrderedIdentitySet</span>
+    <span class="s1">_reconcile_collection</span><span class="s4">: </span><span class="s1">bool</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">attr</span><span class="s4">: </span><span class="s1">WriteOnlyAttributeImpl</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">],</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag</span><span class="s4">,</span>
+        <span class="s1">apply_to</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">WriteOnlyHistory</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]] = </span><span class="s3">None</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">apply_to</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">passive </span><span class="s4">&amp; </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">SQL_OK</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">exc</span><span class="s4">.</span><span class="s1">InvalidRequestError</span><span class="s4">(</span>
+                    <span class="s5">f&quot;Attribute </span><span class="s3">{</span><span class="s1">attr</span><span class="s3">} </span><span class="s5">can't load the existing state from the &quot;</span>
+                    <span class="s5">&quot;database for this operation; full iteration is not &quot;</span>
+                    <span class="s5">&quot;permitted.  If this is a delete operation, configure &quot;</span>
+                    <span class="s5">f&quot;passive_deletes=True on the </span><span class="s3">{</span><span class="s1">attr</span><span class="s3">} </span><span class="s5">relationship in &quot;</span>
+                    <span class="s5">&quot;order to resolve this error.&quot;</span>
+                <span class="s4">)</span>
+
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">unchanged_items </span><span class="s4">= </span><span class="s1">apply_to</span><span class="s4">.</span><span class="s1">unchanged_items</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">added_items </span><span class="s4">= </span><span class="s1">apply_to</span><span class="s4">.</span><span class="s1">added_items</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">deleted_items </span><span class="s4">= </span><span class="s1">apply_to</span><span class="s4">.</span><span class="s1">deleted_items</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_reconcile_collection </span><span class="s4">= </span><span class="s1">apply_to</span><span class="s4">.</span><span class="s1">_reconcile_collection</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">deleted_items </span><span class="s4">= </span><span class="s1">util</span><span class="s4">.</span><span class="s1">OrderedIdentitySet</span><span class="s4">()</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">added_items </span><span class="s4">= </span><span class="s1">util</span><span class="s4">.</span><span class="s1">OrderedIdentitySet</span><span class="s4">()</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">unchanged_items </span><span class="s4">= </span><span class="s1">util</span><span class="s4">.</span><span class="s1">OrderedIdentitySet</span><span class="s4">()</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_reconcile_collection </span><span class="s4">= </span><span class="s3">False</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">added_plus_unchanged</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; List</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]:</span>
+        <span class="s3">return </span><span class="s1">list</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">added_items</span><span class="s4">.</span><span class="s1">union</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">unchanged_items</span><span class="s4">))</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">all_items</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; List</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]:</span>
+        <span class="s3">return </span><span class="s1">list</span><span class="s4">(</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">added_items</span><span class="s4">.</span><span class="s1">union</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">unchanged_items</span><span class="s4">).</span><span class="s1">union</span><span class="s4">(</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">deleted_items</span>
+            <span class="s4">)</span>
+        <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">as_history</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; attributes</span><span class="s4">.</span><span class="s1">History</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_reconcile_collection</span><span class="s4">:</span>
+            <span class="s1">added </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">added_items</span><span class="s4">.</span><span class="s1">difference</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">unchanged_items</span><span class="s4">)</span>
+            <span class="s1">deleted </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">deleted_items</span><span class="s4">.</span><span class="s1">intersection</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">unchanged_items</span><span class="s4">)</span>
+            <span class="s1">unchanged </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">unchanged_items</span><span class="s4">.</span><span class="s1">difference</span><span class="s4">(</span><span class="s1">deleted</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">added</span><span class="s4">, </span><span class="s1">unchanged</span><span class="s4">, </span><span class="s1">deleted </span><span class="s4">= (</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">added_items</span><span class="s4">,</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">unchanged_items</span><span class="s4">,</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">deleted_items</span><span class="s4">,</span>
+            <span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">attributes</span><span class="s4">.</span><span class="s1">History</span><span class="s4">(</span><span class="s1">list</span><span class="s4">(</span><span class="s1">added</span><span class="s4">), </span><span class="s1">list</span><span class="s4">(</span><span class="s1">unchanged</span><span class="s4">), </span><span class="s1">list</span><span class="s4">(</span><span class="s1">deleted</span><span class="s4">))</span>
+
+    <span class="s3">def </span><span class="s1">indexed</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">index</span><span class="s4">: </span><span class="s1">Union</span><span class="s4">[</span><span class="s1">int</span><span class="s4">, </span><span class="s1">slice</span><span class="s4">]) </span><span class="s1">-&gt; Union</span><span class="s4">[</span><span class="s1">List</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">], </span><span class="s1">_T</span><span class="s4">]:</span>
+        <span class="s3">return </span><span class="s1">list</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">added_items</span><span class="s4">)[</span><span class="s1">index</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">add_added</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">: </span><span class="s1">_T</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">added_items</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">add_removed</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">value</span><span class="s4">: </span><span class="s1">_T</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">value </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">added_items</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">added_items</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">deleted_items</span><span class="s4">.</span><span class="s1">add</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">WriteOnlyAttributeImpl</span><span class="s4">(</span>
+    <span class="s1">attributes</span><span class="s4">.</span><span class="s1">HasCollectionAdapter</span><span class="s4">, </span><span class="s1">attributes</span><span class="s4">.</span><span class="s1">AttributeImpl</span>
+<span class="s4">):</span>
+    <span class="s1">uses_objects</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s3">True</span>
+    <span class="s1">default_accepts_scalar_loader</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s3">False</span>
+    <span class="s1">supports_population</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s3">False</span>
+    <span class="s1">_supports_dynamic_iteration</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s3">False</span>
+    <span class="s1">collection</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s3">False</span>
+    <span class="s1">dynamic</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s3">True</span>
+    <span class="s1">order_by</span><span class="s4">: </span><span class="s1">_RelationshipOrderByArg </span><span class="s4">= ()</span>
+    <span class="s1">collection_history_cls</span><span class="s4">: </span><span class="s1">Type</span><span class="s4">[</span><span class="s1">WriteOnlyHistory</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]] = </span><span class="s1">WriteOnlyHistory</span>
+
+    <span class="s1">query_class</span><span class="s4">: </span><span class="s1">Type</span><span class="s4">[</span><span class="s1">WriteOnlyCollection</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]]</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">class_</span><span class="s4">: </span><span class="s1">Union</span><span class="s4">[</span><span class="s1">Type</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">], </span><span class="s1">AliasedClass</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]],</span>
+        <span class="s1">key</span><span class="s4">: </span><span class="s1">str</span><span class="s4">,</span>
+        <span class="s1">dispatch</span><span class="s4">: </span><span class="s1">_Dispatch</span><span class="s4">[</span><span class="s1">QueryableAttribute</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]],</span>
+        <span class="s1">target_mapper</span><span class="s4">: </span><span class="s1">Mapper</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">],</span>
+        <span class="s1">order_by</span><span class="s4">: </span><span class="s1">_RelationshipOrderByArg</span><span class="s4">,</span>
+        <span class="s4">**</span><span class="s1">kw</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">,</span>
+    <span class="s4">):</span>
+        <span class="s1">super</span><span class="s4">().</span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">class_</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s3">None</span><span class="s4">, </span><span class="s1">dispatch</span><span class="s4">, **</span><span class="s1">kw</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">target_mapper </span><span class="s4">= </span><span class="s1">target_mapper</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">query_class </span><span class="s4">= </span><span class="s1">WriteOnlyCollection</span>
+        <span class="s3">if </span><span class="s1">order_by</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">order_by </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">(</span><span class="s1">order_by</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">get</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_OFF</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; Union</span><span class="s4">[</span><span class="s1">util</span><span class="s4">.</span><span class="s1">OrderedIdentitySet</span><span class="s4">, </span><span class="s1">WriteOnlyCollection</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]]:</span>
+        <span class="s3">if not </span><span class="s1">passive </span><span class="s4">&amp; </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">SQL_OK</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_get_collection_history</span><span class="s4">(</span>
+                <span class="s1">state</span><span class="s4">, </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_NO_INITIALIZE</span>
+            <span class="s4">).</span><span class="s1">added_items</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">query_class</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">state</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">overload</span>
+    <span class="s3">def </span><span class="s1">get_collection</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">user_data</span><span class="s4">: </span><span class="s1">Literal</span><span class="s4">[</span><span class="s3">None</span><span class="s4">] = ...,</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">Literal</span><span class="s4">[</span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_OFF</span><span class="s4">] = ...,</span>
+    <span class="s4">) </span><span class="s1">-&gt; CollectionAdapter</span><span class="s4">: ...</span>
+
+    <span class="s4">@</span><span class="s1">overload</span>
+    <span class="s3">def </span><span class="s1">get_collection</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">user_data</span><span class="s4">: </span><span class="s1">_AdaptedCollectionProtocol </span><span class="s4">= ...,</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= ...,</span>
+    <span class="s4">) </span><span class="s1">-&gt; CollectionAdapter</span><span class="s4">: ...</span>
+
+    <span class="s4">@</span><span class="s1">overload</span>
+    <span class="s3">def </span><span class="s1">get_collection</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">user_data</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">_AdaptedCollectionProtocol</span><span class="s4">] = ...,</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= ...,</span>
+    <span class="s4">) </span><span class="s1">-&gt; Union</span><span class="s4">[</span>
+        <span class="s1">Literal</span><span class="s4">[</span><span class="s1">LoaderCallableStatus</span><span class="s4">.</span><span class="s1">PASSIVE_NO_RESULT</span><span class="s4">], </span><span class="s1">CollectionAdapter</span>
+    <span class="s4">]: ...</span>
+
+    <span class="s3">def </span><span class="s1">get_collection</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">user_data</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">_AdaptedCollectionProtocol</span><span class="s4">] = </span><span class="s3">None</span><span class="s4">,</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_OFF</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; Union</span><span class="s4">[</span>
+        <span class="s1">Literal</span><span class="s4">[</span><span class="s1">LoaderCallableStatus</span><span class="s4">.</span><span class="s1">PASSIVE_NO_RESULT</span><span class="s4">], </span><span class="s1">CollectionAdapter</span>
+    <span class="s4">]:</span>
+        <span class="s1">data</span><span class="s4">: </span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]</span>
+        <span class="s3">if not </span><span class="s1">passive </span><span class="s4">&amp; </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">SQL_OK</span><span class="s4">:</span>
+            <span class="s1">data </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_get_collection_history</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">passive</span><span class="s4">).</span><span class="s1">added_items</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">history </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_get_collection_history</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">passive</span><span class="s4">)</span>
+            <span class="s1">data </span><span class="s4">= </span><span class="s1">history</span><span class="s4">.</span><span class="s1">added_plus_unchanged</span>
+        <span class="s3">return </span><span class="s1">DynamicCollectionAdapter</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)  </span><span class="s0"># type: ignore[return-value]</span>
+
+    <span class="s4">@</span><span class="s1">util</span><span class="s4">.</span><span class="s1">memoized_property</span>
+    <span class="s3">def </span><span class="s1">_append_token</span><span class="s4">(  </span><span class="s0"># type:ignore[override]</span>
+        <span class="s1">self</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; attributes</span><span class="s4">.</span><span class="s1">AttributeEventToken</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">attributes</span><span class="s4">.</span><span class="s1">AttributeEventToken</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">attributes</span><span class="s4">.</span><span class="s1">OP_APPEND</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">util</span><span class="s4">.</span><span class="s1">memoized_property</span>
+    <span class="s3">def </span><span class="s1">_remove_token</span><span class="s4">(  </span><span class="s0"># type:ignore[override]</span>
+        <span class="s1">self</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; attributes</span><span class="s4">.</span><span class="s1">AttributeEventToken</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">attributes</span><span class="s4">.</span><span class="s1">AttributeEventToken</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">attributes</span><span class="s4">.</span><span class="s1">OP_REMOVE</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">fire_append_event</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">value</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">,</span>
+        <span class="s1">initiator</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">AttributeEventToken</span><span class="s4">],</span>
+        <span class="s1">collection_history</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">WriteOnlyHistory</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]] = </span><span class="s3">None</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">collection_history </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s1">collection_history </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_modified_event</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">dict_</span><span class="s4">)</span>
+
+        <span class="s1">collection_history</span><span class="s4">.</span><span class="s1">add_added</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s3">for </span><span class="s1">fn </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dispatch</span><span class="s4">.</span><span class="s1">append</span><span class="s4">:</span>
+            <span class="s1">value </span><span class="s4">= </span><span class="s1">fn</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">initiator </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_append_token</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">trackparent </span><span class="s3">and </span><span class="s1">value </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">sethasparent</span><span class="s4">(</span><span class="s1">attributes</span><span class="s4">.</span><span class="s1">instance_state</span><span class="s4">(</span><span class="s1">value</span><span class="s4">), </span><span class="s1">state</span><span class="s4">, </span><span class="s3">True</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">fire_remove_event</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">value</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">,</span>
+        <span class="s1">initiator</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">AttributeEventToken</span><span class="s4">],</span>
+        <span class="s1">collection_history</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">WriteOnlyHistory</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]] = </span><span class="s3">None</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">collection_history </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s1">collection_history </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_modified_event</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">dict_</span><span class="s4">)</span>
+
+        <span class="s1">collection_history</span><span class="s4">.</span><span class="s1">add_removed</span><span class="s4">(</span><span class="s1">value</span><span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">trackparent </span><span class="s3">and </span><span class="s1">value </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">sethasparent</span><span class="s4">(</span><span class="s1">attributes</span><span class="s4">.</span><span class="s1">instance_state</span><span class="s4">(</span><span class="s1">value</span><span class="s4">), </span><span class="s1">state</span><span class="s4">, </span><span class="s3">False</span><span class="s4">)</span>
+
+        <span class="s3">for </span><span class="s1">fn </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">dispatch</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">:</span>
+            <span class="s1">fn</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">initiator </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_remove_token</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_modified_event</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">], </span><span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span>
+    <span class="s4">) </span><span class="s1">-&gt; WriteOnlyHistory</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]:</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s3">not in </span><span class="s1">state</span><span class="s4">.</span><span class="s1">committed_state</span><span class="s4">:</span>
+            <span class="s1">state</span><span class="s4">.</span><span class="s1">committed_state</span><span class="s4">[</span><span class="s1">self</span><span class="s4">.</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">self</span><span class="s4">.</span><span class="s1">collection_history_cls</span><span class="s4">(</span>
+                <span class="s1">self</span><span class="s4">, </span><span class="s1">state</span><span class="s4">, </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_NO_FETCH</span>
+            <span class="s4">)</span>
+
+        <span class="s1">state</span><span class="s4">.</span><span class="s1">_modified_event</span><span class="s4">(</span><span class="s1">dict_</span><span class="s4">, </span><span class="s1">self</span><span class="s4">, </span><span class="s1">NEVER_SET</span><span class="s4">)</span>
+
+        <span class="s0"># this is a hack to allow the entities.ComparableEntity fixture</span>
+        <span class="s0"># to work</span>
+        <span class="s1">dict_</span><span class="s4">[</span><span class="s1">self</span><span class="s4">.</span><span class="s1">key</span><span class="s4">] = </span><span class="s3">True</span>
+        <span class="s3">return </span><span class="s1">state</span><span class="s4">.</span><span class="s1">committed_state</span><span class="s4">[</span><span class="s1">self</span><span class="s4">.</span><span class="s1">key</span><span class="s4">]  </span><span class="s0"># type: ignore[no-any-return]</span>
+
+    <span class="s3">def </span><span class="s1">set</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">value</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">,</span>
+        <span class="s1">initiator</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">AttributeEventToken</span><span class="s4">] = </span><span class="s3">None</span><span class="s4">,</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_OFF</span><span class="s4">,</span>
+        <span class="s1">check_old</span><span class="s4">: </span><span class="s1">Any </span><span class="s4">= </span><span class="s3">None</span><span class="s4">,</span>
+        <span class="s1">pop</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s3">False</span><span class="s4">,</span>
+        <span class="s1">_adapt</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s3">True</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">initiator </span><span class="s3">and </span><span class="s1">initiator</span><span class="s4">.</span><span class="s1">parent_token </span><span class="s3">is </span><span class="s1">self</span><span class="s4">.</span><span class="s1">parent_token</span><span class="s4">:</span>
+            <span class="s3">return</span>
+
+        <span class="s3">if </span><span class="s1">pop </span><span class="s3">and </span><span class="s1">value </span><span class="s3">is None</span><span class="s4">:</span>
+            <span class="s3">return</span>
+
+        <span class="s1">iterable </span><span class="s4">= </span><span class="s1">value</span>
+        <span class="s1">new_values </span><span class="s4">= </span><span class="s1">list</span><span class="s4">(</span><span class="s1">iterable</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">state</span><span class="s4">.</span><span class="s1">has_identity</span><span class="s4">:</span>
+            <span class="s3">if not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_supports_dynamic_iteration</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">exc</span><span class="s4">.</span><span class="s1">InvalidRequestError</span><span class="s4">(</span>
+                    <span class="s5">f'Collection &quot;</span><span class="s3">{</span><span class="s1">self</span><span class="s3">}</span><span class="s5">&quot; does not support implicit '</span>
+                    <span class="s5">&quot;iteration; collection replacement operations &quot;</span>
+                    <span class="s5">&quot;can't be used&quot;</span>
+                <span class="s4">)</span>
+            <span class="s1">old_collection </span><span class="s4">= </span><span class="s1">util</span><span class="s4">.</span><span class="s1">IdentitySet</span><span class="s4">(</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">get</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">dict_</span><span class="s4">, </span><span class="s1">passive</span><span class="s4">=</span><span class="s1">passive</span><span class="s4">)</span>
+            <span class="s4">)</span>
+
+        <span class="s1">collection_history </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_modified_event</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">dict_</span><span class="s4">)</span>
+        <span class="s3">if not </span><span class="s1">state</span><span class="s4">.</span><span class="s1">has_identity</span><span class="s4">:</span>
+            <span class="s1">old_collection </span><span class="s4">= </span><span class="s1">collection_history</span><span class="s4">.</span><span class="s1">added_items</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">old_collection </span><span class="s4">= </span><span class="s1">old_collection</span><span class="s4">.</span><span class="s1">union</span><span class="s4">(</span>
+                <span class="s1">collection_history</span><span class="s4">.</span><span class="s1">added_items</span>
+            <span class="s4">)</span>
+
+        <span class="s1">constants </span><span class="s4">= </span><span class="s1">old_collection</span><span class="s4">.</span><span class="s1">intersection</span><span class="s4">(</span><span class="s1">new_values</span><span class="s4">)</span>
+        <span class="s1">additions </span><span class="s4">= </span><span class="s1">util</span><span class="s4">.</span><span class="s1">IdentitySet</span><span class="s4">(</span><span class="s1">new_values</span><span class="s4">).</span><span class="s1">difference</span><span class="s4">(</span><span class="s1">constants</span><span class="s4">)</span>
+        <span class="s1">removals </span><span class="s4">= </span><span class="s1">old_collection</span><span class="s4">.</span><span class="s1">difference</span><span class="s4">(</span><span class="s1">constants</span><span class="s4">)</span>
+
+        <span class="s3">for </span><span class="s1">member </span><span class="s3">in </span><span class="s1">new_values</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">member </span><span class="s3">in </span><span class="s1">additions</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">fire_append_event</span><span class="s4">(</span>
+                    <span class="s1">state</span><span class="s4">,</span>
+                    <span class="s1">dict_</span><span class="s4">,</span>
+                    <span class="s1">member</span><span class="s4">,</span>
+                    <span class="s3">None</span><span class="s4">,</span>
+                    <span class="s1">collection_history</span><span class="s4">=</span><span class="s1">collection_history</span><span class="s4">,</span>
+                <span class="s4">)</span>
+
+        <span class="s3">for </span><span class="s1">member </span><span class="s3">in </span><span class="s1">removals</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">fire_remove_event</span><span class="s4">(</span>
+                <span class="s1">state</span><span class="s4">,</span>
+                <span class="s1">dict_</span><span class="s4">,</span>
+                <span class="s1">member</span><span class="s4">,</span>
+                <span class="s3">None</span><span class="s4">,</span>
+                <span class="s1">collection_history</span><span class="s4">=</span><span class="s1">collection_history</span><span class="s4">,</span>
+            <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">delete</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, *</span><span class="s1">args</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">, **</span><span class="s1">kwargs</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">) </span><span class="s1">-&gt; NoReturn</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">set_committed_value</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">], </span><span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">, </span><span class="s1">value</span><span class="s4">: </span><span class="s1">Any</span>
+    <span class="s4">) </span><span class="s1">-&gt; NoReturn</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">NotImplementedError</span><span class="s4">(</span>
+            <span class="s5">&quot;Dynamic attributes don't support collection population.&quot;</span>
+        <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">get_history</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_NO_FETCH</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; attributes</span><span class="s4">.</span><span class="s1">History</span><span class="s4">:</span>
+        <span class="s1">c </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_get_collection_history</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">passive</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">c</span><span class="s4">.</span><span class="s1">as_history</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">get_all_pending</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_NO_INITIALIZE</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; List</span><span class="s4">[</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">], </span><span class="s1">Any</span><span class="s4">]]:</span>
+        <span class="s1">c </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_get_collection_history</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">passive</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s4">[(</span><span class="s1">attributes</span><span class="s4">.</span><span class="s1">instance_state</span><span class="s4">(</span><span class="s1">x</span><span class="s4">), </span><span class="s1">x</span><span class="s4">) </span><span class="s3">for </span><span class="s1">x </span><span class="s3">in </span><span class="s1">c</span><span class="s4">.</span><span class="s1">all_items</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">_get_collection_history</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">, </span><span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">], </span><span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag</span>
+    <span class="s4">) </span><span class="s1">-&gt; WriteOnlyHistory</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]:</span>
+        <span class="s1">c</span><span class="s4">: </span><span class="s1">WriteOnlyHistory</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s3">in </span><span class="s1">state</span><span class="s4">.</span><span class="s1">committed_state</span><span class="s4">:</span>
+            <span class="s1">c </span><span class="s4">= </span><span class="s1">state</span><span class="s4">.</span><span class="s1">committed_state</span><span class="s4">[</span><span class="s1">self</span><span class="s4">.</span><span class="s1">key</span><span class="s4">]</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">c </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">collection_history_cls</span><span class="s4">(</span>
+                <span class="s1">self</span><span class="s4">, </span><span class="s1">state</span><span class="s4">, </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_NO_FETCH</span>
+            <span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">state</span><span class="s4">.</span><span class="s1">has_identity </span><span class="s3">and </span><span class="s4">(</span><span class="s1">passive </span><span class="s4">&amp; </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">INIT_OK</span><span class="s4">):</span>
+            <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">collection_history_cls</span><span class="s4">(</span>
+                <span class="s1">self</span><span class="s4">, </span><span class="s1">state</span><span class="s4">, </span><span class="s1">passive</span><span class="s4">, </span><span class="s1">apply_to</span><span class="s4">=</span><span class="s1">c</span>
+            <span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">c</span>
+
+    <span class="s3">def </span><span class="s1">append</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">value</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">,</span>
+        <span class="s1">initiator</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">AttributeEventToken</span><span class="s4">],</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_NO_FETCH</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">initiator </span><span class="s3">is not </span><span class="s1">self</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">fire_append_event</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">dict_</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">remove</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">value</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">,</span>
+        <span class="s1">initiator</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">AttributeEventToken</span><span class="s4">],</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_NO_FETCH</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">if </span><span class="s1">initiator </span><span class="s3">is not </span><span class="s1">self</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">fire_remove_event</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">dict_</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">pop</span><span class="s4">(</span>
+        <span class="s1">self</span><span class="s4">,</span>
+        <span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">],</span>
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">_InstanceDict</span><span class="s4">,</span>
+        <span class="s1">value</span><span class="s4">: </span><span class="s1">Any</span><span class="s4">,</span>
+        <span class="s1">initiator</span><span class="s4">: </span><span class="s1">Optional</span><span class="s4">[</span><span class="s1">AttributeEventToken</span><span class="s4">],</span>
+        <span class="s1">passive</span><span class="s4">: </span><span class="s1">PassiveFlag </span><span class="s4">= </span><span class="s1">PassiveFlag</span><span class="s4">.</span><span class="s1">PASSIVE_NO_FETCH</span><span class="s4">,</span>
+    <span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">state</span><span class="s4">, </span><span class="s1">dict_</span><span class="s4">, </span><span class="s1">value</span><span class="s4">, </span><span class="s1">initiator</span><span class="s4">, </span><span class="s1">passive</span><span class="s4">=</span><span class="s1">passive</span><span class="s4">)</span>
+
+
+<span class="s4">@</span><span class="s1">log</span><span class="s4">.</span><span class="s1">class_logger</span>
+<span class="s4">@</span><span class="s1">relationships</span><span class="s4">.</span><span class="s1">RelationshipProperty</span><span class="s4">.</span><span class="s1">strategy_for</span><span class="s4">(</span><span class="s1">lazy</span><span class="s4">=</span><span class="s5">&quot;write_only&quot;</span><span class="s4">)</span>
+<span class="s3">class </span><span class="s1">WriteOnlyLoader</span><span class="s4">(</span><span class="s1">strategies</span><span class="s4">.</span><span class="s1">AbstractRelationshipLoader</span><span class="s4">, </span><span class="s1">log</span><span class="s4">.</span><span class="s1">Identified</span><span class="s4">):</span>
+    <span class="s1">impl_class </span><span class="s4">= </span><span class="s1">WriteOnlyAttributeImpl</span>
+
+    <span class="s3">def </span><span class="s1">init_class_attribute</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">mapper</span><span class="s4">: </span><span class="s1">Mapper</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">is_class_level </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s3">if not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">uselist </span><span class="s3">or </span><span class="s1">self</span><span class="s4">.</span><span class="s1">parent_property</span><span class="s4">.</span><span class="s1">direction </span><span class="s3">not in </span><span class="s4">(</span>
+            <span class="s1">interfaces</span><span class="s4">.</span><span class="s1">ONETOMANY</span><span class="s4">,</span>
+            <span class="s1">interfaces</span><span class="s4">.</span><span class="s1">MANYTOMANY</span><span class="s4">,</span>
+        <span class="s4">):</span>
+            <span class="s3">raise </span><span class="s1">exc</span><span class="s4">.</span><span class="s1">InvalidRequestError</span><span class="s4">(</span>
+                <span class="s5">&quot;On relationship %s, 'dynamic' loaders cannot be used with &quot;</span>
+                <span class="s5">&quot;many-to-one/one-to-one relationships and/or &quot;</span>
+                <span class="s5">&quot;uselist=False.&quot; </span><span class="s4">% </span><span class="s1">self</span><span class="s4">.</span><span class="s1">parent_property</span>
+            <span class="s4">)</span>
+
+        <span class="s1">strategies</span><span class="s4">.</span><span class="s1">_register_attribute</span><span class="s4">(  </span><span class="s0"># type: ignore[no-untyped-call]</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">parent_property</span><span class="s4">,</span>
+            <span class="s1">mapper</span><span class="s4">,</span>
+            <span class="s1">useobject</span><span class="s4">=</span><span class="s3">True</span><span class="s4">,</span>
+            <span class="s1">impl_class</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">impl_class</span><span class="s4">,</span>
+            <span class="s1">target_mapper</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">parent_property</span><span class="s4">.</span><span class="s1">mapper</span><span class="s4">,</span>
+            <span class="s1">order_by</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">parent_property</span><span class="s4">.</span><span class="s1">order_by</span><span class="s4">,</span>
+            <span class="s1">query_class</span><span class="s4">=</span><span class="s1">self</span><span class="s4">.</span><span class="s1">parent_property</span><span class="s4">.</span><span class="s1">query_class</span><span class="s4">,</span>
+        <span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">DynamicCollectionAdapter</span><span class="s4">:</span>
+    <span class="s2">&quot;&quot;&quot;simplified CollectionAdapter for internal API consistency&quot;&quot;&quot;</span>
+
+    <span class="s1">data</span><span class="s4">: </span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">data</span><span class="s4">: </span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">data </span><span class="s4">= </span><span class="s1">data</span>
+
+    <span class="s3">def </span><span class="s1">__iter__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; Iterator</span><span class="s4">[</span><span class="s1">Any</span><span class="s4">]:</span>
+        <span class="s3">return </span><span class="s1">iter</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">data</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_reset_empty</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">pass</span>
+
+    <span class="s3">def </span><span class="s1">__len__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; int</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">data</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__bool__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; bool</span><span class="s4">:</span>
+        <span class="s3">return True</span>
+
+
+<span class="s3">class </span><span class="s1">AbstractCollectionWriter</span><span class="s4">(</span><span class="s1">Generic</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]):</span>
+    <span class="s2">&quot;&quot;&quot;Virtual collection which includes append/remove methods that synchronize 
+    into the attribute event system. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">if not </span><span class="s1">TYPE_CHECKING</span><span class="s4">:</span>
+        <span class="s1">__slots__ </span><span class="s4">= ()</span>
+
+    <span class="s1">instance</span><span class="s4">: </span><span class="s1">_T</span>
+    <span class="s1">_from_obj</span><span class="s4">: </span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">FromClause</span><span class="s4">, ...]</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">: </span><span class="s1">WriteOnlyAttributeImpl</span><span class="s4">, </span><span class="s1">state</span><span class="s4">: </span><span class="s1">InstanceState</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]):</span>
+        <span class="s1">instance </span><span class="s4">= </span><span class="s1">state</span><span class="s4">.</span><span class="s1">obj</span><span class="s4">()</span>
+        <span class="s3">if </span><span class="s1">TYPE_CHECKING</span><span class="s4">:</span>
+            <span class="s3">assert </span><span class="s1">instance</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">instance </span><span class="s4">= </span><span class="s1">instance</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">attr </span><span class="s4">= </span><span class="s1">attr</span>
+
+        <span class="s1">mapper </span><span class="s4">= </span><span class="s1">object_mapper</span><span class="s4">(</span><span class="s1">instance</span><span class="s4">)</span>
+        <span class="s1">prop </span><span class="s4">= </span><span class="s1">mapper</span><span class="s4">.</span><span class="s1">_props</span><span class="s4">[</span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">key</span><span class="s4">]</span>
+
+        <span class="s3">if </span><span class="s1">prop</span><span class="s4">.</span><span class="s1">secondary </span><span class="s3">is not None</span><span class="s4">:</span>
+            <span class="s0"># this is a hack right now.  The Query only knows how to</span>
+            <span class="s0"># make subsequent joins() without a given left-hand side</span>
+            <span class="s0"># from self._from_obj[0].  We need to ensure prop.secondary</span>
+            <span class="s0"># is in the FROM.  So we purposely put the mapper selectable</span>
+            <span class="s0"># in _from_obj[0] to ensure a user-defined join() later on</span>
+            <span class="s0"># doesn't fail, and secondary is then in _from_obj[1].</span>
+
+            <span class="s0"># note also, we are using the official ORM-annotated selectable</span>
+            <span class="s0"># from __clause_element__(), see #7868</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_from_obj </span><span class="s4">= (</span><span class="s1">prop</span><span class="s4">.</span><span class="s1">mapper</span><span class="s4">.</span><span class="s1">__clause_element__</span><span class="s4">(), </span><span class="s1">prop</span><span class="s4">.</span><span class="s1">secondary</span><span class="s4">)</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_from_obj </span><span class="s4">= ()</span>
+
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_where_criteria </span><span class="s4">= (</span>
+            <span class="s1">prop</span><span class="s4">.</span><span class="s1">_with_parent</span><span class="s4">(</span><span class="s1">instance</span><span class="s4">, </span><span class="s1">alias_secondary</span><span class="s4">=</span><span class="s3">False</span><span class="s4">),</span>
+        <span class="s4">)</span>
+
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">order_by</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_order_by_clauses </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">order_by</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_order_by_clauses </span><span class="s4">= ()</span>
+
+    <span class="s3">def </span><span class="s1">_add_all_impl</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">iterator</span><span class="s4">: </span><span class="s1">Iterable</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">iterator</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span>
+                <span class="s1">attributes</span><span class="s4">.</span><span class="s1">instance_state</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">instance</span><span class="s4">),</span>
+                <span class="s1">attributes</span><span class="s4">.</span><span class="s1">instance_dict</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">instance</span><span class="s4">),</span>
+                <span class="s1">item</span><span class="s4">,</span>
+                <span class="s3">None</span><span class="s4">,</span>
+            <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_remove_impl</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">: </span><span class="s1">_T</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span>
+            <span class="s1">attributes</span><span class="s4">.</span><span class="s1">instance_state</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">instance</span><span class="s4">),</span>
+            <span class="s1">attributes</span><span class="s4">.</span><span class="s1">instance_dict</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">instance</span><span class="s4">),</span>
+            <span class="s1">item</span><span class="s4">,</span>
+            <span class="s3">None</span><span class="s4">,</span>
+        <span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">WriteOnlyCollection</span><span class="s4">(</span><span class="s1">AbstractCollectionWriter</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]):</span>
+    <span class="s2">&quot;&quot;&quot;Write-only collection which can synchronize changes into the 
+    attribute event system. 
+ 
+    The :class:`.WriteOnlyCollection` is used in a mapping by 
+    using the ``&quot;write_only&quot;`` lazy loading strategy with 
+    :func:`_orm.relationship`.     For background on this configuration, 
+    see :ref:`write_only_relationship`. 
+ 
+    .. versionadded:: 2.0 
+ 
+    .. seealso:: 
+ 
+        :ref:`write_only_relationship` 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s4">= (</span>
+        <span class="s5">&quot;instance&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;attr&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;_where_criteria&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;_from_obj&quot;</span><span class="s4">,</span>
+        <span class="s5">&quot;_order_by_clauses&quot;</span><span class="s4">,</span>
+    <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__iter__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; NoReturn</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">TypeError</span><span class="s4">(</span>
+            <span class="s5">&quot;WriteOnly collections don't support iteration in-place; &quot;</span>
+            <span class="s5">&quot;to query for collection items, use the select() method to &quot;</span>
+            <span class="s5">&quot;produce a SQL statement and execute it with session.scalars().&quot;</span>
+        <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">select</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; Select</span><span class="s4">[</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]]:</span>
+        <span class="s2">&quot;&quot;&quot;Produce a :class:`_sql.Select` construct that represents the 
+        rows within this instance-local :class:`_orm.WriteOnlyCollection`. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">stmt </span><span class="s4">= </span><span class="s1">select</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">target_mapper</span><span class="s4">).</span><span class="s1">where</span><span class="s4">(*</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_where_criteria</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_from_obj</span><span class="s4">:</span>
+            <span class="s1">stmt </span><span class="s4">= </span><span class="s1">stmt</span><span class="s4">.</span><span class="s1">select_from</span><span class="s4">(*</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_from_obj</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_order_by_clauses</span><span class="s4">:</span>
+            <span class="s1">stmt </span><span class="s4">= </span><span class="s1">stmt</span><span class="s4">.</span><span class="s1">order_by</span><span class="s4">(*</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_order_by_clauses</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">stmt</span>
+
+    <span class="s3">def </span><span class="s1">insert</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; Insert</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;For one-to-many collections, produce a :class:`_dml.Insert` which 
+        will insert new rows in terms of this this instance-local 
+        :class:`_orm.WriteOnlyCollection`. 
+ 
+        This construct is only supported for a :class:`_orm.Relationship` 
+        that does **not** include the :paramref:`_orm.relationship.secondary` 
+        parameter.  For relationships that refer to a many-to-many table, 
+        use ordinary bulk insert techniques to produce new objects, then 
+        use :meth:`_orm.AbstractCollectionWriter.add_all` to associate them 
+        with the collection. 
+ 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s1">state </span><span class="s4">= </span><span class="s1">inspect</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">instance</span><span class="s4">)</span>
+        <span class="s1">mapper </span><span class="s4">= </span><span class="s1">state</span><span class="s4">.</span><span class="s1">mapper</span>
+        <span class="s1">prop </span><span class="s4">= </span><span class="s1">mapper</span><span class="s4">.</span><span class="s1">_props</span><span class="s4">[</span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">key</span><span class="s4">]</span>
+
+        <span class="s3">if </span><span class="s1">prop</span><span class="s4">.</span><span class="s1">direction </span><span class="s3">is not </span><span class="s1">RelationshipDirection</span><span class="s4">.</span><span class="s1">ONETOMANY</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">exc</span><span class="s4">.</span><span class="s1">InvalidRequestError</span><span class="s4">(</span>
+                <span class="s5">&quot;Write only bulk INSERT only supported for one-to-many &quot;</span>
+                <span class="s5">&quot;collections; for many-to-many, use a separate bulk &quot;</span>
+                <span class="s5">&quot;INSERT along with add_all().&quot;</span>
+            <span class="s4">)</span>
+
+        <span class="s1">dict_</span><span class="s4">: </span><span class="s1">Dict</span><span class="s4">[</span><span class="s1">str</span><span class="s4">, </span><span class="s1">Any</span><span class="s4">] = {}</span>
+
+        <span class="s3">for </span><span class="s1">l</span><span class="s4">, </span><span class="s1">r </span><span class="s3">in </span><span class="s1">prop</span><span class="s4">.</span><span class="s1">synchronize_pairs</span><span class="s4">:</span>
+            <span class="s1">fn </span><span class="s4">= </span><span class="s1">prop</span><span class="s4">.</span><span class="s1">_get_attr_w_warn_on_none</span><span class="s4">(</span>
+                <span class="s1">mapper</span><span class="s4">,</span>
+                <span class="s1">state</span><span class="s4">,</span>
+                <span class="s1">state</span><span class="s4">.</span><span class="s1">dict</span><span class="s4">,</span>
+                <span class="s1">l</span><span class="s4">,</span>
+            <span class="s4">)</span>
+
+            <span class="s1">dict_</span><span class="s4">[</span><span class="s1">r</span><span class="s4">.</span><span class="s1">key</span><span class="s4">] = </span><span class="s1">bindparam</span><span class="s4">(</span><span class="s3">None</span><span class="s4">, </span><span class="s1">callable_</span><span class="s4">=</span><span class="s1">fn</span><span class="s4">)</span>
+
+        <span class="s3">return </span><span class="s1">insert</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">target_mapper</span><span class="s4">).</span><span class="s1">values</span><span class="s4">(**</span><span class="s1">dict_</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">update</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; Update</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Produce a :class:`_dml.Update` which will refer to rows in terms 
+        of this instance-local :class:`_orm.WriteOnlyCollection`. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">update</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">target_mapper</span><span class="s4">).</span><span class="s1">where</span><span class="s4">(*</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_where_criteria</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">delete</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; Delete</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Produce a :class:`_dml.Delete` which will refer to rows in terms 
+        of this instance-local :class:`_orm.WriteOnlyCollection`. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">delete</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">attr</span><span class="s4">.</span><span class="s1">target_mapper</span><span class="s4">).</span><span class="s1">where</span><span class="s4">(*</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_where_criteria</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">add_all</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">iterator</span><span class="s4">: </span><span class="s1">Iterable</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Add an iterable of items to this :class:`_orm.WriteOnlyCollection`. 
+ 
+        The given items will be persisted to the database in terms of 
+        the parent instance's collection on the next flush. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_add_all_impl</span><span class="s4">(</span><span class="s1">iterator</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">add</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">: </span><span class="s1">_T</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Add an item to this :class:`_orm.WriteOnlyCollection`. 
+ 
+        The given item will be persisted to the database in terms of 
+        the parent instance's collection on the next flush. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_add_all_impl</span><span class="s4">([</span><span class="s1">item</span><span class="s4">])</span>
+
+    <span class="s3">def </span><span class="s1">remove</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">item</span><span class="s4">: </span><span class="s1">_T</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s2">&quot;&quot;&quot;Remove an item from this :class:`_orm.WriteOnlyCollection`. 
+ 
+        The given item will be removed from the parent instance's collection on 
+        the next flush. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_remove_impl</span><span class="s4">(</span><span class="s1">item</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

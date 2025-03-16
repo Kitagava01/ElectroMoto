@@ -1,0 +1,728 @@
+<html>
+<head>
+<title>fun.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #a5c261;}
+.s7 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+fun.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2010, 2011 Sebastian Thiel (byronimo@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitDB and is released under</span>
+<span class="s0"># the New BSD License: https://opensource.org/license/bsd-3-clause/</span>
+<span class="s2">&quot;&quot;&quot;Contains basic c-functions which usually contain performance critical code 
+Keeping this code separate from the beginning makes it easier to out-source 
+it into c later, if required&quot;&quot;&quot;</span>
+
+<span class="s3">import </span><span class="s1">zlib</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">util </span><span class="s3">import </span><span class="s1">byte_ord</span>
+<span class="s1">decompressobj </span><span class="s4">= </span><span class="s1">zlib</span><span class="s4">.</span><span class="s1">decompressobj</span>
+
+<span class="s3">import </span><span class="s1">mmap</span>
+<span class="s3">from </span><span class="s1">itertools </span><span class="s3">import </span><span class="s1">islice</span>
+<span class="s3">from </span><span class="s1">functools </span><span class="s3">import </span><span class="s1">reduce</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">const </span><span class="s3">import </span><span class="s1">NULL_BYTE</span><span class="s4">, </span><span class="s1">BYTE_SPACE</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">utils</span><span class="s4">.</span><span class="s1">encoding </span><span class="s3">import </span><span class="s1">force_text</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">typ </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">str_blob_type</span><span class="s4">,</span>
+    <span class="s1">str_commit_type</span><span class="s4">,</span>
+    <span class="s1">str_tree_type</span><span class="s4">,</span>
+    <span class="s1">str_tag_type</span><span class="s4">,</span>
+<span class="s4">)</span>
+
+<span class="s3">from </span><span class="s1">io </span><span class="s3">import </span><span class="s1">StringIO</span>
+
+<span class="s0"># INVARIANTS</span>
+<span class="s1">OFS_DELTA </span><span class="s4">= </span><span class="s5">6</span>
+<span class="s1">REF_DELTA </span><span class="s4">= </span><span class="s5">7</span>
+<span class="s1">delta_types </span><span class="s4">= (</span><span class="s1">OFS_DELTA</span><span class="s4">, </span><span class="s1">REF_DELTA</span><span class="s4">)</span>
+
+<span class="s1">type_id_to_type_map </span><span class="s4">= {</span>
+    <span class="s5">0</span><span class="s4">: </span><span class="s6">b''</span><span class="s4">,             </span><span class="s0"># EXT 1</span>
+    <span class="s5">1</span><span class="s4">: </span><span class="s1">str_commit_type</span><span class="s4">,</span>
+    <span class="s5">2</span><span class="s4">: </span><span class="s1">str_tree_type</span><span class="s4">,</span>
+    <span class="s5">3</span><span class="s4">: </span><span class="s1">str_blob_type</span><span class="s4">,</span>
+    <span class="s5">4</span><span class="s4">: </span><span class="s1">str_tag_type</span><span class="s4">,</span>
+    <span class="s5">5</span><span class="s4">: </span><span class="s6">b''</span><span class="s4">,             </span><span class="s0"># EXT 2</span>
+    <span class="s1">OFS_DELTA</span><span class="s4">: </span><span class="s7">&quot;OFS_DELTA&quot;</span><span class="s4">,    </span><span class="s0"># OFFSET DELTA</span>
+    <span class="s1">REF_DELTA</span><span class="s4">: </span><span class="s7">&quot;REF_DELTA&quot;     </span><span class="s0"># REFERENCE DELTA</span>
+<span class="s4">}</span>
+
+<span class="s1">type_to_type_id_map </span><span class="s4">= {</span>
+    <span class="s1">str_commit_type</span><span class="s4">: </span><span class="s5">1</span><span class="s4">,</span>
+    <span class="s1">str_tree_type</span><span class="s4">: </span><span class="s5">2</span><span class="s4">,</span>
+    <span class="s1">str_blob_type</span><span class="s4">: </span><span class="s5">3</span><span class="s4">,</span>
+    <span class="s1">str_tag_type</span><span class="s4">: </span><span class="s5">4</span><span class="s4">,</span>
+    <span class="s7">&quot;OFS_DELTA&quot;</span><span class="s4">: </span><span class="s1">OFS_DELTA</span><span class="s4">,</span>
+    <span class="s7">&quot;REF_DELTA&quot;</span><span class="s4">: </span><span class="s1">REF_DELTA</span><span class="s4">,</span>
+<span class="s4">}</span>
+
+<span class="s0"># used when dealing with larger streams</span>
+<span class="s1">chunk_size </span><span class="s4">= </span><span class="s5">1000 </span><span class="s4">* </span><span class="s1">mmap</span><span class="s4">.</span><span class="s1">PAGESIZE</span>
+
+<span class="s1">__all__ </span><span class="s4">= (</span><span class="s7">'is_loose_object'</span><span class="s4">, </span><span class="s7">'loose_object_header_info'</span><span class="s4">, </span><span class="s7">'msb_size'</span><span class="s4">, </span><span class="s7">'pack_object_header_info'</span><span class="s4">,</span>
+           <span class="s7">'write_object'</span><span class="s4">, </span><span class="s7">'loose_object_header'</span><span class="s4">, </span><span class="s7">'stream_copy'</span><span class="s4">, </span><span class="s7">'apply_delta_data'</span><span class="s4">,</span>
+           <span class="s7">'is_equal_canonical_sha'</span><span class="s4">, </span><span class="s7">'connect_deltas'</span><span class="s4">, </span><span class="s7">'DeltaChunkList'</span><span class="s4">, </span><span class="s7">'create_pack_object_header'</span><span class="s4">)</span>
+
+
+<span class="s0">#{ Structures</span>
+
+<span class="s3">def </span><span class="s1">_set_delta_rbound</span><span class="s4">(</span><span class="s1">d</span><span class="s4">, </span><span class="s1">size</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Truncate the given delta to the given size 
+    :param size: size relative to our target offset, may not be 0, must be smaller or equal 
+        to our size 
+    :return: d&quot;&quot;&quot;</span>
+    <span class="s1">d</span><span class="s4">.</span><span class="s1">ts </span><span class="s4">= </span><span class="s1">size</span>
+
+    <span class="s0"># NOTE: data is truncated automatically when applying the delta</span>
+    <span class="s0"># MUST NOT DO THIS HERE</span>
+    <span class="s3">return </span><span class="s1">d</span>
+
+
+<span class="s3">def </span><span class="s1">_move_delta_lbound</span><span class="s4">(</span><span class="s1">d</span><span class="s4">, </span><span class="s1">bytes</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Move the delta by the given amount of bytes, reducing its size so that its 
+    right bound stays static 
+    :param bytes: amount of bytes to move, must be smaller than delta size 
+    :return: d&quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">bytes </span><span class="s4">== </span><span class="s5">0</span><span class="s4">:</span>
+        <span class="s3">return</span>
+
+    <span class="s1">d</span><span class="s4">.</span><span class="s1">to </span><span class="s4">+= </span><span class="s1">bytes</span>
+    <span class="s1">d</span><span class="s4">.</span><span class="s1">so </span><span class="s4">+= </span><span class="s1">bytes</span>
+    <span class="s1">d</span><span class="s4">.</span><span class="s1">ts </span><span class="s4">-= </span><span class="s1">bytes</span>
+    <span class="s3">if </span><span class="s1">d</span><span class="s4">.</span><span class="s1">data </span><span class="s3">is not None</span><span class="s4">:</span>
+        <span class="s1">d</span><span class="s4">.</span><span class="s1">data </span><span class="s4">= </span><span class="s1">d</span><span class="s4">.</span><span class="s1">data</span><span class="s4">[</span><span class="s1">bytes</span><span class="s4">:]</span>
+    <span class="s0"># END handle data</span>
+
+    <span class="s3">return </span><span class="s1">d</span>
+
+
+<span class="s3">def </span><span class="s1">delta_duplicate</span><span class="s4">(</span><span class="s1">src</span><span class="s4">):</span>
+    <span class="s3">return </span><span class="s1">DeltaChunk</span><span class="s4">(</span><span class="s1">src</span><span class="s4">.</span><span class="s1">to</span><span class="s4">, </span><span class="s1">src</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">, </span><span class="s1">src</span><span class="s4">.</span><span class="s1">so</span><span class="s4">, </span><span class="s1">src</span><span class="s4">.</span><span class="s1">data</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">delta_chunk_apply</span><span class="s4">(</span><span class="s1">dc</span><span class="s4">, </span><span class="s1">bbuf</span><span class="s4">, </span><span class="s1">write</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Apply own data to the target buffer 
+    :param bbuf: buffer providing source bytes for copy operations 
+    :param write: write method to call with data to write&quot;&quot;&quot;</span>
+    <span class="s3">if </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">data </span><span class="s3">is None</span><span class="s4">:</span>
+        <span class="s0"># COPY DATA FROM SOURCE</span>
+        <span class="s1">write</span><span class="s4">(</span><span class="s1">bbuf</span><span class="s4">[</span><span class="s1">dc</span><span class="s4">.</span><span class="s1">so</span><span class="s4">:</span><span class="s1">dc</span><span class="s4">.</span><span class="s1">so </span><span class="s4">+ </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">])</span>
+    <span class="s3">else</span><span class="s4">:</span>
+        <span class="s0"># APPEND DATA</span>
+        <span class="s0"># what's faster: if + 4 function calls or just a write with a slice ?</span>
+        <span class="s0"># Considering data can be larger than 127 bytes now, it should be worth it</span>
+        <span class="s3">if </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">ts </span><span class="s4">&lt; </span><span class="s1">len</span><span class="s4">(</span><span class="s1">dc</span><span class="s4">.</span><span class="s1">data</span><span class="s4">):</span>
+            <span class="s1">write</span><span class="s4">(</span><span class="s1">dc</span><span class="s4">.</span><span class="s1">data</span><span class="s4">[:</span><span class="s1">dc</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">])</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">write</span><span class="s4">(</span><span class="s1">dc</span><span class="s4">.</span><span class="s1">data</span><span class="s4">)</span>
+        <span class="s0"># END handle truncation</span>
+    <span class="s0"># END handle chunk mode</span>
+
+
+<span class="s3">class </span><span class="s1">DeltaChunk</span><span class="s4">:</span>
+
+    <span class="s2">&quot;&quot;&quot;Represents a piece of a delta, it can either add new data, or copy existing 
+    one from a source buffer&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s4">= (</span>
+        <span class="s7">'to'</span><span class="s4">,       </span><span class="s0"># start offset in the target buffer in bytes</span>
+                    <span class="s7">'ts'</span><span class="s4">,       </span><span class="s0"># size of this chunk in the target buffer in bytes</span>
+                    <span class="s7">'so'</span><span class="s4">,       </span><span class="s0"># start offset in the source buffer in bytes or None</span>
+                    <span class="s7">'data'</span><span class="s4">,     </span><span class="s0"># chunk of bytes to be added to the target buffer,</span>
+                                <span class="s0"># DeltaChunkList to use as base, or None</span>
+    <span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">to</span><span class="s4">, </span><span class="s1">ts</span><span class="s4">, </span><span class="s1">so</span><span class="s4">, </span><span class="s1">data</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">to </span><span class="s4">= </span><span class="s1">to</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">ts </span><span class="s4">= </span><span class="s1">ts</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">so </span><span class="s4">= </span><span class="s1">so</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">data </span><span class="s4">= </span><span class="s1">data</span>
+
+    <span class="s3">def </span><span class="s1">__repr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s7">&quot;DeltaChunk(%i, %i, %s, %s)&quot; </span><span class="s4">% (</span><span class="s1">self</span><span class="s4">.</span><span class="s1">to</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">so</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">data </span><span class="s3">or </span><span class="s7">&quot;&quot;</span><span class="s4">)</span>
+
+    <span class="s0">#{ Interface</span>
+
+    <span class="s3">def </span><span class="s1">rbound</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">to </span><span class="s4">+ </span><span class="s1">self</span><span class="s4">.</span><span class="s1">ts</span>
+
+    <span class="s3">def </span><span class="s1">has_data</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;:return: True if the instance has data to add to the target stream&quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">data </span><span class="s3">is not None</span>
+
+    <span class="s0">#} END interface</span>
+
+
+<span class="s3">def </span><span class="s1">_closest_index</span><span class="s4">(</span><span class="s1">dcl</span><span class="s4">, </span><span class="s1">absofs</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;:return: index at which the given absofs should be inserted. The index points 
+    to the DeltaChunk with a target buffer absofs that equals or is greater than 
+    absofs. 
+    **Note:** global method for performance only, it belongs to DeltaChunkList&quot;&quot;&quot;</span>
+    <span class="s1">lo </span><span class="s4">= </span><span class="s5">0</span>
+    <span class="s1">hi </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">dcl</span><span class="s4">)</span>
+    <span class="s3">while </span><span class="s1">lo </span><span class="s4">&lt; </span><span class="s1">hi</span><span class="s4">:</span>
+        <span class="s1">mid </span><span class="s4">= (</span><span class="s1">lo </span><span class="s4">+ </span><span class="s1">hi</span><span class="s4">) / </span><span class="s5">2</span>
+        <span class="s1">dc </span><span class="s4">= </span><span class="s1">dcl</span><span class="s4">[</span><span class="s1">mid</span><span class="s4">]</span>
+        <span class="s3">if </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">to </span><span class="s4">&gt; </span><span class="s1">absofs</span><span class="s4">:</span>
+            <span class="s1">hi </span><span class="s4">= </span><span class="s1">mid</span>
+        <span class="s3">elif </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">rbound</span><span class="s4">() &gt; </span><span class="s1">absofs </span><span class="s3">or </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">to </span><span class="s4">== </span><span class="s1">absofs</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">mid</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">lo </span><span class="s4">= </span><span class="s1">mid </span><span class="s4">+ </span><span class="s5">1</span>
+        <span class="s0"># END handle bound</span>
+    <span class="s0"># END for each delta absofs</span>
+    <span class="s3">return </span><span class="s1">len</span><span class="s4">(</span><span class="s1">dcl</span><span class="s4">) - </span><span class="s5">1</span>
+
+
+<span class="s3">def </span><span class="s1">delta_list_apply</span><span class="s4">(</span><span class="s1">dcl</span><span class="s4">, </span><span class="s1">bbuf</span><span class="s4">, </span><span class="s1">write</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;Apply the chain's changes and write the final result using the passed 
+    write function. 
+    :param bbuf: base buffer containing the base of all deltas contained in this 
+        list. It will only be used if the chunk in question does not have a base 
+        chain. 
+    :param write: function taking a string of bytes to write to the output&quot;&quot;&quot;</span>
+    <span class="s3">for </span><span class="s1">dc </span><span class="s3">in </span><span class="s1">dcl</span><span class="s4">:</span>
+        <span class="s1">delta_chunk_apply</span><span class="s4">(</span><span class="s1">dc</span><span class="s4">, </span><span class="s1">bbuf</span><span class="s4">, </span><span class="s1">write</span><span class="s4">)</span>
+    <span class="s0"># END for each dc</span>
+
+
+<span class="s3">def </span><span class="s1">delta_list_slice</span><span class="s4">(</span><span class="s1">dcl</span><span class="s4">, </span><span class="s1">absofs</span><span class="s4">, </span><span class="s1">size</span><span class="s4">, </span><span class="s1">ndcl</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot;:return: Subsection of this  list at the given absolute  offset, with the given 
+        size in bytes. 
+    :return: None&quot;&quot;&quot;</span>
+    <span class="s1">cdi </span><span class="s4">= </span><span class="s1">_closest_index</span><span class="s4">(</span><span class="s1">dcl</span><span class="s4">, </span><span class="s1">absofs</span><span class="s4">)   </span><span class="s0"># delta start index</span>
+    <span class="s1">cd </span><span class="s4">= </span><span class="s1">dcl</span><span class="s4">[</span><span class="s1">cdi</span><span class="s4">]</span>
+    <span class="s1">slen </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">dcl</span><span class="s4">)</span>
+    <span class="s1">lappend </span><span class="s4">= </span><span class="s1">ndcl</span><span class="s4">.</span><span class="s1">append</span>
+
+    <span class="s3">if </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">to </span><span class="s4">!= </span><span class="s1">absofs</span><span class="s4">:</span>
+        <span class="s1">tcd </span><span class="s4">= </span><span class="s1">DeltaChunk</span><span class="s4">(</span><span class="s1">cd</span><span class="s4">.</span><span class="s1">to</span><span class="s4">, </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">, </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">so</span><span class="s4">, </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">data</span><span class="s4">)</span>
+        <span class="s1">_move_delta_lbound</span><span class="s4">(</span><span class="s1">tcd</span><span class="s4">, </span><span class="s1">absofs </span><span class="s4">- </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">to</span><span class="s4">)</span>
+        <span class="s1">tcd</span><span class="s4">.</span><span class="s1">ts </span><span class="s4">= </span><span class="s1">min</span><span class="s4">(</span><span class="s1">tcd</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">, </span><span class="s1">size</span><span class="s4">)</span>
+        <span class="s1">lappend</span><span class="s4">(</span><span class="s1">tcd</span><span class="s4">)</span>
+        <span class="s1">size </span><span class="s4">-= </span><span class="s1">tcd</span><span class="s4">.</span><span class="s1">ts</span>
+        <span class="s1">cdi </span><span class="s4">+= </span><span class="s5">1</span>
+    <span class="s0"># END lbound overlap handling</span>
+
+    <span class="s3">while </span><span class="s1">cdi </span><span class="s4">&lt; </span><span class="s1">slen </span><span class="s3">and </span><span class="s1">size</span><span class="s4">:</span>
+        <span class="s0"># are we larger than the current block</span>
+        <span class="s1">cd </span><span class="s4">= </span><span class="s1">dcl</span><span class="s4">[</span><span class="s1">cdi</span><span class="s4">]</span>
+        <span class="s3">if </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">ts </span><span class="s4">&lt;= </span><span class="s1">size</span><span class="s4">:</span>
+            <span class="s1">lappend</span><span class="s4">(</span><span class="s1">DeltaChunk</span><span class="s4">(</span><span class="s1">cd</span><span class="s4">.</span><span class="s1">to</span><span class="s4">, </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">, </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">so</span><span class="s4">, </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">data</span><span class="s4">))</span>
+            <span class="s1">size </span><span class="s4">-= </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">ts</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">tcd </span><span class="s4">= </span><span class="s1">DeltaChunk</span><span class="s4">(</span><span class="s1">cd</span><span class="s4">.</span><span class="s1">to</span><span class="s4">, </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">, </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">so</span><span class="s4">, </span><span class="s1">cd</span><span class="s4">.</span><span class="s1">data</span><span class="s4">)</span>
+            <span class="s1">tcd</span><span class="s4">.</span><span class="s1">ts </span><span class="s4">= </span><span class="s1">size</span>
+            <span class="s1">lappend</span><span class="s4">(</span><span class="s1">tcd</span><span class="s4">)</span>
+            <span class="s1">size </span><span class="s4">-= </span><span class="s1">tcd</span><span class="s4">.</span><span class="s1">ts</span>
+            <span class="s3">break</span>
+        <span class="s0"># END hadle size</span>
+        <span class="s1">cdi </span><span class="s4">+= </span><span class="s5">1</span>
+    <span class="s0"># END for each chunk</span>
+
+
+<span class="s3">class </span><span class="s1">DeltaChunkList</span><span class="s4">(</span><span class="s1">list</span><span class="s4">):</span>
+
+    <span class="s2">&quot;&quot;&quot;List with special functionality to deal with DeltaChunks. 
+    There are two types of lists we represent. The one was created bottom-up, working 
+    towards the latest delta, the other kind was created top-down, working from the 
+    latest delta down to the earliest ancestor. This attribute is queryable 
+    after all processing with is_reversed.&quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">rbound</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;:return: rightmost extend in bytes, absolute&quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) == </span><span class="s5">0</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s5">0</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">].</span><span class="s1">rbound</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">lbound</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;:return: leftmost byte at which this chunklist starts&quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) == </span><span class="s5">0</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s5">0</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">[</span><span class="s5">0</span><span class="s4">].</span><span class="s1">to</span>
+
+    <span class="s3">def </span><span class="s1">size</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;:return: size of bytes as measured by our delta chunks&quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">rbound</span><span class="s4">() - </span><span class="s1">self</span><span class="s4">.</span><span class="s1">lbound</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">bbuf</span><span class="s4">, </span><span class="s1">write</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Only used by public clients, internally we only use the global routines 
+        for performance&quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">delta_list_apply</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">bbuf</span><span class="s4">, </span><span class="s1">write</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">compress</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Alter the list to reduce the amount of nodes. Currently we concatenate 
+        add-chunks 
+        :return: self&quot;&quot;&quot;</span>
+        <span class="s1">slen </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">slen </span><span class="s4">&lt; </span><span class="s5">2</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">self</span>
+        <span class="s1">i </span><span class="s4">= </span><span class="s5">0</span>
+
+        <span class="s1">first_data_index </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s3">while </span><span class="s1">i </span><span class="s4">&lt; </span><span class="s1">slen</span><span class="s4">:</span>
+            <span class="s1">dc </span><span class="s4">= </span><span class="s1">self</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]</span>
+            <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">if </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">data </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s3">if </span><span class="s1">first_data_index </span><span class="s3">is not None and </span><span class="s1">i </span><span class="s4">- </span><span class="s5">2 </span><span class="s4">- </span><span class="s1">first_data_index </span><span class="s4">&gt; </span><span class="s5">1</span><span class="s4">:</span>
+                    <span class="s0"># if first_data_index is not None:</span>
+                    <span class="s1">nd </span><span class="s4">= </span><span class="s1">StringIO</span><span class="s4">()                     </span><span class="s0"># new data</span>
+                    <span class="s1">so </span><span class="s4">= </span><span class="s1">self</span><span class="s4">[</span><span class="s1">first_data_index</span><span class="s4">].</span><span class="s1">to      </span><span class="s0"># start offset in target buffer</span>
+                    <span class="s3">for </span><span class="s1">x </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">first_data_index</span><span class="s4">, </span><span class="s1">i </span><span class="s4">- </span><span class="s5">1</span><span class="s4">):</span>
+                        <span class="s1">xdc </span><span class="s4">= </span><span class="s1">self</span><span class="s4">[</span><span class="s1">x</span><span class="s4">]</span>
+                        <span class="s1">nd</span><span class="s4">.</span><span class="s1">write</span><span class="s4">(</span><span class="s1">xdc</span><span class="s4">.</span><span class="s1">data</span><span class="s4">[:</span><span class="s1">xdc</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">])</span>
+                    <span class="s0"># END collect data</span>
+
+                    <span class="s3">del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">[</span><span class="s1">first_data_index</span><span class="s4">:</span><span class="s1">i </span><span class="s4">- </span><span class="s5">1</span><span class="s4">])</span>
+                    <span class="s1">buf </span><span class="s4">= </span><span class="s1">nd</span><span class="s4">.</span><span class="s1">getvalue</span><span class="s4">()</span>
+                    <span class="s1">self</span><span class="s4">.</span><span class="s1">insert</span><span class="s4">(</span><span class="s1">first_data_index</span><span class="s4">, </span><span class="s1">DeltaChunk</span><span class="s4">(</span><span class="s1">so</span><span class="s4">, </span><span class="s1">len</span><span class="s4">(</span><span class="s1">buf</span><span class="s4">), </span><span class="s5">0</span><span class="s4">, </span><span class="s1">buf</span><span class="s4">))</span>
+
+                    <span class="s1">slen </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+                    <span class="s1">i </span><span class="s4">= </span><span class="s1">first_data_index </span><span class="s4">+ </span><span class="s5">1</span>
+
+                <span class="s0"># END concatenate data</span>
+                <span class="s1">first_data_index </span><span class="s4">= </span><span class="s3">None</span>
+                <span class="s3">continue</span>
+            <span class="s0"># END skip non-data chunks</span>
+
+            <span class="s3">if </span><span class="s1">first_data_index </span><span class="s3">is None</span><span class="s4">:</span>
+                <span class="s1">first_data_index </span><span class="s4">= </span><span class="s1">i </span><span class="s4">- </span><span class="s5">1</span>
+        <span class="s0"># END iterate list</span>
+
+        <span class="s0"># if slen_orig != len(self):</span>
+        <span class="s0">#   print &quot;INFO: Reduced delta list len to %f %% of former size&quot; % ((float(len(self)) / slen_orig) * 100)</span>
+        <span class="s3">return </span><span class="s1">self</span>
+
+    <span class="s3">def </span><span class="s1">check_integrity</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">target_size</span><span class="s4">=-</span><span class="s5">1</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Verify the list has non-overlapping chunks only, and the total size matches 
+        target_size 
+        :param target_size: if not -1, the total size of the chain must be target_size 
+        :raise AssertionError: if the size doesn't match&quot;&quot;&quot;</span>
+        <span class="s3">if </span><span class="s1">target_size </span><span class="s4">&gt; -</span><span class="s5">1</span><span class="s4">:</span>
+            <span class="s3">assert </span><span class="s1">self</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">].</span><span class="s1">rbound</span><span class="s4">() == </span><span class="s1">target_size</span>
+            <span class="s3">assert </span><span class="s1">reduce</span><span class="s4">(</span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">+ </span><span class="s1">y</span><span class="s4">, (</span><span class="s1">d</span><span class="s4">.</span><span class="s1">ts </span><span class="s3">for </span><span class="s1">d </span><span class="s3">in </span><span class="s1">self</span><span class="s4">), </span><span class="s5">0</span><span class="s4">) == </span><span class="s1">target_size</span>
+        <span class="s0"># END target size verification</span>
+
+        <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) &lt; </span><span class="s5">2</span><span class="s4">:</span>
+            <span class="s3">return</span>
+
+        <span class="s0"># check data</span>
+        <span class="s3">for </span><span class="s1">dc </span><span class="s3">in </span><span class="s1">self</span><span class="s4">:</span>
+            <span class="s3">assert </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">ts </span><span class="s4">&gt; </span><span class="s5">0</span>
+            <span class="s3">if </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">has_data</span><span class="s4">():</span>
+                <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">dc</span><span class="s4">.</span><span class="s1">data</span><span class="s4">) &gt;= </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">ts</span>
+        <span class="s0"># END for each dc</span>
+
+        <span class="s1">left </span><span class="s4">= </span><span class="s1">islice</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s5">0</span><span class="s4">, </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) - </span><span class="s5">1</span><span class="s4">)</span>
+        <span class="s1">right </span><span class="s4">= </span><span class="s1">iter</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+        <span class="s1">right</span><span class="s4">.</span><span class="s1">next</span><span class="s4">()</span>
+        <span class="s0"># this is very pythonic - we might have just use index based access here,</span>
+        <span class="s0"># but this could actually be faster</span>
+        <span class="s3">for </span><span class="s1">lft</span><span class="s4">, </span><span class="s1">rgt </span><span class="s3">in </span><span class="s1">zip</span><span class="s4">(</span><span class="s1">left</span><span class="s4">, </span><span class="s1">right</span><span class="s4">):</span>
+            <span class="s3">assert </span><span class="s1">lft</span><span class="s4">.</span><span class="s1">rbound</span><span class="s4">() == </span><span class="s1">rgt</span><span class="s4">.</span><span class="s1">to</span>
+            <span class="s3">assert </span><span class="s1">lft</span><span class="s4">.</span><span class="s1">to </span><span class="s4">+ </span><span class="s1">lft</span><span class="s4">.</span><span class="s1">ts </span><span class="s4">== </span><span class="s1">rgt</span><span class="s4">.</span><span class="s1">to</span>
+        <span class="s0"># END for each pair</span>
+
+
+<span class="s3">class </span><span class="s1">TopdownDeltaChunkList</span><span class="s4">(</span><span class="s1">DeltaChunkList</span><span class="s4">):</span>
+
+    <span class="s2">&quot;&quot;&quot;Represents a list which is generated by feeding its ancestor streams one by 
+    one&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s4">= </span><span class="s1">tuple</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">connect_with_next_base</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">bdcl</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Connect this chain with the next level of our base delta chunklist. 
+        The goal in this game is to mark as many of our chunks rigid, hence they 
+        cannot be changed by any of the upcoming bases anymore. Once all our 
+        chunks are marked like that, we can stop all processing 
+        :param bdcl: data chunk list being one of our bases. They must be fed in 
+            consecutively and in order, towards the earliest ancestor delta 
+        :return: True if processing was done. Use it to abort processing of 
+            remaining streams if False is returned&quot;&quot;&quot;</span>
+        <span class="s1">nfc </span><span class="s4">= </span><span class="s5">0                             </span><span class="s0"># number of frozen chunks</span>
+        <span class="s1">dci </span><span class="s4">= </span><span class="s5">0                             </span><span class="s0"># delta chunk index</span>
+        <span class="s1">slen </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)                    </span><span class="s0"># len of self</span>
+        <span class="s1">ccl </span><span class="s4">= </span><span class="s1">list</span><span class="s4">()                        </span><span class="s0"># temporary list</span>
+        <span class="s3">while </span><span class="s1">dci </span><span class="s4">&lt; </span><span class="s1">slen</span><span class="s4">:</span>
+            <span class="s1">dc </span><span class="s4">= </span><span class="s1">self</span><span class="s4">[</span><span class="s1">dci</span><span class="s4">]</span>
+            <span class="s1">dci </span><span class="s4">+= </span><span class="s5">1</span>
+
+            <span class="s0"># all add-chunks which are already topmost don't need additional processing</span>
+            <span class="s3">if </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">data </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s1">nfc </span><span class="s4">+= </span><span class="s5">1</span>
+                <span class="s3">continue</span>
+            <span class="s0"># END skip add chunks</span>
+
+            <span class="s0"># copy chunks</span>
+            <span class="s0"># integrate the portion of the base list into ourselves. Lists</span>
+            <span class="s0"># dont support efficient insertion ( just one at a time ), but for now</span>
+            <span class="s0"># we live with it. Internally, its all just a 32/64bit pointer, and</span>
+            <span class="s0"># the portions of moved memory should be smallish. Maybe we just rebuild</span>
+            <span class="s0"># ourselves in order to reduce the amount of insertions ...</span>
+            <span class="s3">del</span><span class="s4">(</span><span class="s1">ccl</span><span class="s4">[:])</span>
+            <span class="s1">delta_list_slice</span><span class="s4">(</span><span class="s1">bdcl</span><span class="s4">, </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">so</span><span class="s4">, </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">ts</span><span class="s4">, </span><span class="s1">ccl</span><span class="s4">)</span>
+
+            <span class="s0"># move the target bounds into place to match with our chunk</span>
+            <span class="s1">ofs </span><span class="s4">= </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">to </span><span class="s4">- </span><span class="s1">dc</span><span class="s4">.</span><span class="s1">so</span>
+            <span class="s3">for </span><span class="s1">cdc </span><span class="s3">in </span><span class="s1">ccl</span><span class="s4">:</span>
+                <span class="s1">cdc</span><span class="s4">.</span><span class="s1">to </span><span class="s4">+= </span><span class="s1">ofs</span>
+            <span class="s0"># END update target bounds</span>
+
+            <span class="s3">if </span><span class="s1">len</span><span class="s4">(</span><span class="s1">ccl</span><span class="s4">) == </span><span class="s5">1</span><span class="s4">:</span>
+                <span class="s1">self</span><span class="s4">[</span><span class="s1">dci </span><span class="s4">- </span><span class="s5">1</span><span class="s4">] = </span><span class="s1">ccl</span><span class="s4">[</span><span class="s5">0</span><span class="s4">]</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s0"># maybe try to compute the expenses here, and pick the right algorithm</span>
+                <span class="s0"># It would normally be faster than copying everything physically though</span>
+                <span class="s0"># TODO: Use a deque here, and decide by the index whether to extend</span>
+                <span class="s0"># or extend left !</span>
+                <span class="s1">post_dci </span><span class="s4">= </span><span class="s1">self</span><span class="s4">[</span><span class="s1">dci</span><span class="s4">:]</span>
+                <span class="s3">del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">[</span><span class="s1">dci </span><span class="s4">- </span><span class="s5">1</span><span class="s4">:])           </span><span class="s0"># include deletion of dc</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">extend</span><span class="s4">(</span><span class="s1">ccl</span><span class="s4">)</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">extend</span><span class="s4">(</span><span class="s1">post_dci</span><span class="s4">)</span>
+
+                <span class="s1">slen </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">self</span><span class="s4">)</span>
+                <span class="s1">dci </span><span class="s4">+= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">ccl</span><span class="s4">) - </span><span class="s5">1           </span><span class="s0"># deleted dc, added rest</span>
+
+            <span class="s0"># END handle chunk replacement</span>
+        <span class="s0"># END for each chunk</span>
+
+        <span class="s3">if </span><span class="s1">nfc </span><span class="s4">== </span><span class="s1">slen</span><span class="s4">:</span>
+            <span class="s3">return False</span>
+        <span class="s0"># END handle completeness</span>
+        <span class="s3">return True</span>
+
+
+<span class="s0">#} END structures</span>
+
+<span class="s0">#{ Routines</span>
+
+<span class="s3">def </span><span class="s1">is_loose_object</span><span class="s4">(</span><span class="s1">m</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :return: True the file contained in memory map m appears to be a loose object. 
+        Only the first two bytes are needed&quot;&quot;&quot;</span>
+    <span class="s1">b0</span><span class="s4">, </span><span class="s1">b1 </span><span class="s4">= </span><span class="s1">map</span><span class="s4">(</span><span class="s1">ord</span><span class="s4">, </span><span class="s1">m</span><span class="s4">[:</span><span class="s5">2</span><span class="s4">])</span>
+    <span class="s1">word </span><span class="s4">= (</span><span class="s1">b0 </span><span class="s4">&lt;&lt; </span><span class="s5">8</span><span class="s4">) + </span><span class="s1">b1</span>
+    <span class="s3">return </span><span class="s1">b0 </span><span class="s4">== </span><span class="s5">0x78 </span><span class="s3">and </span><span class="s4">(</span><span class="s1">word </span><span class="s4">% </span><span class="s5">31</span><span class="s4">) == </span><span class="s5">0</span>
+
+
+<span class="s3">def </span><span class="s1">loose_object_header_info</span><span class="s4">(</span><span class="s1">m</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :return: tuple(type_string, uncompressed_size_in_bytes) the type string of the 
+        object as well as its uncompressed size in bytes. 
+    :param m: memory map from which to read the compressed object data&quot;&quot;&quot;</span>
+    <span class="s1">decompress_size </span><span class="s4">= </span><span class="s5">8192      </span><span class="s0"># is used in cgit as well</span>
+    <span class="s1">hdr </span><span class="s4">= </span><span class="s1">decompressobj</span><span class="s4">().</span><span class="s1">decompress</span><span class="s4">(</span><span class="s1">m</span><span class="s4">, </span><span class="s1">decompress_size</span><span class="s4">)</span>
+    <span class="s1">type_name</span><span class="s4">, </span><span class="s1">size </span><span class="s4">= </span><span class="s1">hdr</span><span class="s4">[:</span><span class="s1">hdr</span><span class="s4">.</span><span class="s1">find</span><span class="s4">(</span><span class="s1">NULL_BYTE</span><span class="s4">)].</span><span class="s1">split</span><span class="s4">(</span><span class="s1">BYTE_SPACE</span><span class="s4">)</span>
+
+    <span class="s3">return </span><span class="s1">type_name</span><span class="s4">, </span><span class="s1">int</span><span class="s4">(</span><span class="s1">size</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">pack_object_header_info</span><span class="s4">(</span><span class="s1">data</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :return: tuple(type_id, uncompressed_size_in_bytes, byte_offset) 
+        The type_id should be interpreted according to the ``type_id_to_type_map`` map 
+        The byte-offset specifies the start of the actual zlib compressed datastream 
+    :param m: random-access memory, like a string or memory map&quot;&quot;&quot;</span>
+    <span class="s1">c </span><span class="s4">= </span><span class="s1">byte_ord</span><span class="s4">(</span><span class="s1">data</span><span class="s4">[</span><span class="s5">0</span><span class="s4">])           </span><span class="s0"># first byte</span>
+    <span class="s1">i </span><span class="s4">= </span><span class="s5">1                           </span><span class="s0"># next char to read</span>
+    <span class="s1">type_id </span><span class="s4">= (</span><span class="s1">c </span><span class="s4">&gt;&gt; </span><span class="s5">4</span><span class="s4">) &amp; </span><span class="s5">7          </span><span class="s0"># numeric type</span>
+    <span class="s1">size </span><span class="s4">= </span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">15                   </span><span class="s0"># starting size</span>
+    <span class="s1">s </span><span class="s4">= </span><span class="s5">4                           </span><span class="s0"># starting bit-shift size</span>
+    <span class="s3">while </span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x80</span><span class="s4">:</span>
+        <span class="s1">c </span><span class="s4">= </span><span class="s1">byte_ord</span><span class="s4">(</span><span class="s1">data</span><span class="s4">[</span><span class="s1">i</span><span class="s4">])</span>
+        <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+        <span class="s1">size </span><span class="s4">+= (</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x7f</span><span class="s4">) &lt;&lt; </span><span class="s1">s</span>
+        <span class="s1">s </span><span class="s4">+= </span><span class="s5">7</span>
+    <span class="s0"># END character loop</span>
+    <span class="s0"># end performance at expense of maintenance ...</span>
+    <span class="s3">return </span><span class="s4">(</span><span class="s1">type_id</span><span class="s4">, </span><span class="s1">size</span><span class="s4">, </span><span class="s1">i</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">create_pack_object_header</span><span class="s4">(</span><span class="s1">obj_type</span><span class="s4">, </span><span class="s1">obj_size</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :return: string defining the pack header comprised of the object type 
+        and its incompressed size in bytes 
+ 
+    :param obj_type: pack type_id of the object 
+    :param obj_size: uncompressed size in bytes of the following object stream&quot;&quot;&quot;</span>
+    <span class="s1">c </span><span class="s4">= </span><span class="s5">0       </span><span class="s0"># 1 byte</span>
+    <span class="s1">hdr </span><span class="s4">= </span><span class="s1">bytearray</span><span class="s4">()  </span><span class="s0"># output string</span>
+
+    <span class="s1">c </span><span class="s4">= (</span><span class="s1">obj_type </span><span class="s4">&lt;&lt; </span><span class="s5">4</span><span class="s4">) | (</span><span class="s1">obj_size </span><span class="s4">&amp; </span><span class="s5">0xf</span><span class="s4">)</span>
+    <span class="s1">obj_size </span><span class="s4">&gt;&gt;= </span><span class="s5">4</span>
+    <span class="s3">while </span><span class="s1">obj_size</span><span class="s4">:</span>
+        <span class="s1">hdr</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">c </span><span class="s4">| </span><span class="s5">0x80</span><span class="s4">)</span>
+        <span class="s1">c </span><span class="s4">= </span><span class="s1">obj_size </span><span class="s4">&amp; </span><span class="s5">0x7f</span>
+        <span class="s1">obj_size </span><span class="s4">&gt;&gt;= </span><span class="s5">7</span>
+    <span class="s0"># END until size is consumed</span>
+    <span class="s1">hdr</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">c</span><span class="s4">)</span>
+    <span class="s0"># end handle interpreter</span>
+    <span class="s3">return </span><span class="s1">hdr</span>
+
+
+<span class="s3">def </span><span class="s1">msb_size</span><span class="s4">(</span><span class="s1">data</span><span class="s4">, </span><span class="s1">offset</span><span class="s4">=</span><span class="s5">0</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :return: tuple(read_bytes, size) read the msb size from the given random 
+        access data starting at the given byte offset&quot;&quot;&quot;</span>
+    <span class="s1">size </span><span class="s4">= </span><span class="s5">0</span>
+    <span class="s1">i </span><span class="s4">= </span><span class="s5">0</span>
+    <span class="s1">l </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)</span>
+    <span class="s1">hit_msb </span><span class="s4">= </span><span class="s3">False</span>
+    <span class="s3">while </span><span class="s1">i </span><span class="s4">&lt; </span><span class="s1">l</span><span class="s4">:</span>
+        <span class="s1">c </span><span class="s4">= </span><span class="s1">data</span><span class="s4">[</span><span class="s1">i </span><span class="s4">+ </span><span class="s1">offset</span><span class="s4">]</span>
+        <span class="s1">size </span><span class="s4">|= (</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x7f</span><span class="s4">) &lt;&lt; </span><span class="s1">i </span><span class="s4">* </span><span class="s5">7</span>
+        <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+        <span class="s3">if not </span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x80</span><span class="s4">:</span>
+            <span class="s1">hit_msb </span><span class="s4">= </span><span class="s3">True</span>
+            <span class="s3">break</span>
+        <span class="s0"># END check msb bit</span>
+    <span class="s0"># END while in range</span>
+    <span class="s0"># end performance ...</span>
+    <span class="s3">if not </span><span class="s1">hit_msb</span><span class="s4">:</span>
+        <span class="s3">raise </span><span class="s1">AssertionError</span><span class="s4">(</span><span class="s7">&quot;Could not find terminating MSB byte in data stream&quot;</span><span class="s4">)</span>
+    <span class="s3">return </span><span class="s1">i </span><span class="s4">+ </span><span class="s1">offset</span><span class="s4">, </span><span class="s1">size</span>
+
+
+<span class="s3">def </span><span class="s1">loose_object_header</span><span class="s4">(</span><span class="s1">type</span><span class="s4">, </span><span class="s1">size</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :return: bytes representing the loose object header, which is immediately 
+        followed by the content stream of size 'size'&quot;&quot;&quot;</span>
+    <span class="s3">return </span><span class="s4">(</span><span class="s7">'%s %i</span><span class="s3">\0</span><span class="s7">' </span><span class="s4">% (</span><span class="s1">force_text</span><span class="s4">(</span><span class="s1">type</span><span class="s4">), </span><span class="s1">size</span><span class="s4">)).</span><span class="s1">encode</span><span class="s4">(</span><span class="s7">'ascii'</span><span class="s4">)</span>
+
+
+<span class="s3">def </span><span class="s1">write_object</span><span class="s4">(</span><span class="s1">type</span><span class="s4">, </span><span class="s1">size</span><span class="s4">, </span><span class="s1">read</span><span class="s4">, </span><span class="s1">write</span><span class="s4">, </span><span class="s1">chunk_size</span><span class="s4">=</span><span class="s1">chunk_size</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Write the object as identified by type, size and source_stream into the 
+    target_stream 
+ 
+    :param type: type string of the object 
+    :param size: amount of bytes to write from source_stream 
+    :param read: read method of a stream providing the content data 
+    :param write: write method of the output stream 
+    :param close_target_stream: if True, the target stream will be closed when 
+        the routine exits, even if an error is thrown 
+    :return: The actual amount of bytes written to stream, which includes the header and a trailing newline&quot;&quot;&quot;</span>
+    <span class="s1">tbw </span><span class="s4">= </span><span class="s5">0                                             </span><span class="s0"># total num bytes written</span>
+
+    <span class="s0"># WRITE HEADER: type SP size NULL</span>
+    <span class="s1">tbw </span><span class="s4">+= </span><span class="s1">write</span><span class="s4">(</span><span class="s1">loose_object_header</span><span class="s4">(</span><span class="s1">type</span><span class="s4">, </span><span class="s1">size</span><span class="s4">))</span>
+    <span class="s1">tbw </span><span class="s4">+= </span><span class="s1">stream_copy</span><span class="s4">(</span><span class="s1">read</span><span class="s4">, </span><span class="s1">write</span><span class="s4">, </span><span class="s1">size</span><span class="s4">, </span><span class="s1">chunk_size</span><span class="s4">)</span>
+
+    <span class="s3">return </span><span class="s1">tbw</span>
+
+
+<span class="s3">def </span><span class="s1">stream_copy</span><span class="s4">(</span><span class="s1">read</span><span class="s4">, </span><span class="s1">write</span><span class="s4">, </span><span class="s1">size</span><span class="s4">, </span><span class="s1">chunk_size</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Copy a stream up to size bytes using the provided read and write methods, 
+    in chunks of chunk_size 
+ 
+    **Note:** its much like stream_copy utility, but operates just using methods&quot;&quot;&quot;</span>
+    <span class="s1">dbw </span><span class="s4">= </span><span class="s5">0                                             </span><span class="s0"># num data bytes written</span>
+
+    <span class="s0"># WRITE ALL DATA UP TO SIZE</span>
+    <span class="s3">while True</span><span class="s4">:</span>
+        <span class="s1">cs </span><span class="s4">= </span><span class="s1">min</span><span class="s4">(</span><span class="s1">chunk_size</span><span class="s4">, </span><span class="s1">size </span><span class="s4">- </span><span class="s1">dbw</span><span class="s4">)</span>
+        <span class="s0"># NOTE: not all write methods return the amount of written bytes, like</span>
+        <span class="s0"># mmap.write. Its bad, but we just deal with it ... perhaps its not</span>
+        <span class="s0"># even less efficient</span>
+        <span class="s0"># data_len = write(read(cs))</span>
+        <span class="s0"># dbw += data_len</span>
+        <span class="s1">data </span><span class="s4">= </span><span class="s1">read</span><span class="s4">(</span><span class="s1">cs</span><span class="s4">)</span>
+        <span class="s1">data_len </span><span class="s4">= </span><span class="s1">len</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)</span>
+        <span class="s1">dbw </span><span class="s4">+= </span><span class="s1">data_len</span>
+        <span class="s1">write</span><span class="s4">(</span><span class="s1">data</span><span class="s4">)</span>
+        <span class="s3">if </span><span class="s1">data_len </span><span class="s4">&lt; </span><span class="s1">cs </span><span class="s3">or </span><span class="s1">dbw </span><span class="s4">== </span><span class="s1">size</span><span class="s4">:</span>
+            <span class="s3">break</span>
+        <span class="s0"># END check for stream end</span>
+    <span class="s0"># END duplicate data</span>
+    <span class="s3">return </span><span class="s1">dbw</span>
+
+
+<span class="s3">def </span><span class="s1">connect_deltas</span><span class="s4">(</span><span class="s1">dstreams</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Read the condensed delta chunk information from dstream and merge its information 
+        into a list of existing delta chunks 
+ 
+    :param dstreams: iterable of delta stream objects, the delta to be applied last 
+        comes first, then all its ancestors in order 
+    :return: DeltaChunkList, containing all operations to apply&quot;&quot;&quot;</span>
+    <span class="s1">tdcl </span><span class="s4">= </span><span class="s3">None                         </span><span class="s0"># topmost dcl</span>
+
+    <span class="s1">dcl </span><span class="s4">= </span><span class="s1">tdcl </span><span class="s4">= </span><span class="s1">TopdownDeltaChunkList</span><span class="s4">()</span>
+    <span class="s3">for </span><span class="s1">dsi</span><span class="s4">, </span><span class="s1">ds </span><span class="s3">in </span><span class="s1">enumerate</span><span class="s4">(</span><span class="s1">dstreams</span><span class="s4">):</span>
+        <span class="s0"># print &quot;Stream&quot;, dsi</span>
+        <span class="s1">db </span><span class="s4">= </span><span class="s1">ds</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()</span>
+        <span class="s1">delta_buf_size </span><span class="s4">= </span><span class="s1">ds</span><span class="s4">.</span><span class="s1">size</span>
+
+        <span class="s0"># read header</span>
+        <span class="s1">i</span><span class="s4">, </span><span class="s1">base_size </span><span class="s4">= </span><span class="s1">msb_size</span><span class="s4">(</span><span class="s1">db</span><span class="s4">)</span>
+        <span class="s1">i</span><span class="s4">, </span><span class="s1">target_size </span><span class="s4">= </span><span class="s1">msb_size</span><span class="s4">(</span><span class="s1">db</span><span class="s4">, </span><span class="s1">i</span><span class="s4">)</span>
+
+        <span class="s0"># interpret opcodes</span>
+        <span class="s1">tbw </span><span class="s4">= </span><span class="s5">0                     </span><span class="s0"># amount of target bytes written</span>
+        <span class="s3">while </span><span class="s1">i </span><span class="s4">&lt; </span><span class="s1">delta_buf_size</span><span class="s4">:</span>
+            <span class="s1">c </span><span class="s4">= </span><span class="s1">ord</span><span class="s4">(</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">])</span>
+            <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">if </span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x80</span><span class="s4">:</span>
+                <span class="s1">cp_off</span><span class="s4">, </span><span class="s1">cp_size </span><span class="s4">= </span><span class="s5">0</span><span class="s4">, </span><span class="s5">0</span>
+                <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x01</span><span class="s4">):</span>
+                    <span class="s1">cp_off </span><span class="s4">= </span><span class="s1">ord</span><span class="s4">(</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">])</span>
+                    <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+                <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x02</span><span class="s4">):</span>
+                    <span class="s1">cp_off </span><span class="s4">|= (</span><span class="s1">ord</span><span class="s4">(</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]) &lt;&lt; </span><span class="s5">8</span><span class="s4">)</span>
+                    <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+                <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x04</span><span class="s4">):</span>
+                    <span class="s1">cp_off </span><span class="s4">|= (</span><span class="s1">ord</span><span class="s4">(</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]) &lt;&lt; </span><span class="s5">16</span><span class="s4">)</span>
+                    <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+                <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x08</span><span class="s4">):</span>
+                    <span class="s1">cp_off </span><span class="s4">|= (</span><span class="s1">ord</span><span class="s4">(</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]) &lt;&lt; </span><span class="s5">24</span><span class="s4">)</span>
+                    <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+                <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x10</span><span class="s4">):</span>
+                    <span class="s1">cp_size </span><span class="s4">= </span><span class="s1">ord</span><span class="s4">(</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">])</span>
+                    <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+                <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x20</span><span class="s4">):</span>
+                    <span class="s1">cp_size </span><span class="s4">|= (</span><span class="s1">ord</span><span class="s4">(</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]) &lt;&lt; </span><span class="s5">8</span><span class="s4">)</span>
+                    <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+                <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x40</span><span class="s4">):</span>
+                    <span class="s1">cp_size </span><span class="s4">|= (</span><span class="s1">ord</span><span class="s4">(</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]) &lt;&lt; </span><span class="s5">16</span><span class="s4">)</span>
+                    <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+
+                <span class="s3">if not </span><span class="s1">cp_size</span><span class="s4">:</span>
+                    <span class="s1">cp_size </span><span class="s4">= </span><span class="s5">0x10000</span>
+
+                <span class="s1">rbound </span><span class="s4">= </span><span class="s1">cp_off </span><span class="s4">+ </span><span class="s1">cp_size</span>
+                <span class="s3">if </span><span class="s4">(</span><span class="s1">rbound </span><span class="s4">&lt; </span><span class="s1">cp_size </span><span class="s3">or</span>
+                        <span class="s1">rbound </span><span class="s4">&gt; </span><span class="s1">base_size</span><span class="s4">):</span>
+                    <span class="s3">break</span>
+
+                <span class="s1">dcl</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">DeltaChunk</span><span class="s4">(</span><span class="s1">tbw</span><span class="s4">, </span><span class="s1">cp_size</span><span class="s4">, </span><span class="s1">cp_off</span><span class="s4">, </span><span class="s3">None</span><span class="s4">))</span>
+                <span class="s1">tbw </span><span class="s4">+= </span><span class="s1">cp_size</span>
+            <span class="s3">elif </span><span class="s1">c</span><span class="s4">:</span>
+                <span class="s0"># NOTE: in C, the data chunks should probably be concatenated here.</span>
+                <span class="s0"># In python, we do it as a post-process</span>
+                <span class="s1">dcl</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">DeltaChunk</span><span class="s4">(</span><span class="s1">tbw</span><span class="s4">, </span><span class="s1">c</span><span class="s4">, </span><span class="s5">0</span><span class="s4">, </span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">:</span><span class="s1">i </span><span class="s4">+ </span><span class="s1">c</span><span class="s4">]))</span>
+                <span class="s1">i </span><span class="s4">+= </span><span class="s1">c</span>
+                <span class="s1">tbw </span><span class="s4">+= </span><span class="s1">c</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s7">&quot;unexpected delta opcode 0&quot;</span><span class="s4">)</span>
+            <span class="s0"># END handle command byte</span>
+        <span class="s0"># END while processing delta data</span>
+
+        <span class="s1">dcl</span><span class="s4">.</span><span class="s1">compress</span><span class="s4">()</span>
+
+        <span class="s0"># merge the lists !</span>
+        <span class="s3">if </span><span class="s1">dsi </span><span class="s4">&gt; </span><span class="s5">0</span><span class="s4">:</span>
+            <span class="s3">if not </span><span class="s1">tdcl</span><span class="s4">.</span><span class="s1">connect_with_next_base</span><span class="s4">(</span><span class="s1">dcl</span><span class="s4">):</span>
+                <span class="s3">break</span>
+        <span class="s0"># END handle merge</span>
+
+        <span class="s0"># prepare next base</span>
+        <span class="s1">dcl </span><span class="s4">= </span><span class="s1">DeltaChunkList</span><span class="s4">()</span>
+    <span class="s0"># END for each delta stream</span>
+
+    <span class="s3">return </span><span class="s1">tdcl</span>
+
+
+<span class="s3">def </span><span class="s1">apply_delta_data</span><span class="s4">(</span><span class="s1">src_buf</span><span class="s4">, </span><span class="s1">src_buf_size</span><span class="s4">, </span><span class="s1">delta_buf</span><span class="s4">, </span><span class="s1">delta_buf_size</span><span class="s4">, </span><span class="s1">write</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Apply data from a delta buffer using a source buffer to the target file 
+ 
+    :param src_buf: random access data from which the delta was created 
+    :param src_buf_size: size of the source buffer in bytes 
+    :param delta_buf_size: size for the delta buffer in bytes 
+    :param delta_buf: random access delta data 
+    :param write: write method taking a chunk of bytes 
+ 
+    **Note:** transcribed to python from the similar routine in patch-delta.c&quot;&quot;&quot;</span>
+    <span class="s1">i </span><span class="s4">= </span><span class="s5">0</span>
+    <span class="s1">db </span><span class="s4">= </span><span class="s1">delta_buf</span>
+    <span class="s3">while </span><span class="s1">i </span><span class="s4">&lt; </span><span class="s1">delta_buf_size</span><span class="s4">:</span>
+        <span class="s1">c </span><span class="s4">= </span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]</span>
+        <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+        <span class="s3">if </span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x80</span><span class="s4">:</span>
+            <span class="s1">cp_off</span><span class="s4">, </span><span class="s1">cp_size </span><span class="s4">= </span><span class="s5">0</span><span class="s4">, </span><span class="s5">0</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x01</span><span class="s4">):</span>
+                <span class="s1">cp_off </span><span class="s4">= </span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]</span>
+                <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x02</span><span class="s4">):</span>
+                <span class="s1">cp_off </span><span class="s4">|= (</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">] &lt;&lt; </span><span class="s5">8</span><span class="s4">)</span>
+                <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x04</span><span class="s4">):</span>
+                <span class="s1">cp_off </span><span class="s4">|= (</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">] &lt;&lt; </span><span class="s5">16</span><span class="s4">)</span>
+                <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x08</span><span class="s4">):</span>
+                <span class="s1">cp_off </span><span class="s4">|= (</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">] &lt;&lt; </span><span class="s5">24</span><span class="s4">)</span>
+                <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x10</span><span class="s4">):</span>
+                <span class="s1">cp_size </span><span class="s4">= </span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">]</span>
+                <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x20</span><span class="s4">):</span>
+                <span class="s1">cp_size </span><span class="s4">|= (</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">] &lt;&lt; </span><span class="s5">8</span><span class="s4">)</span>
+                <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">c </span><span class="s4">&amp; </span><span class="s5">0x40</span><span class="s4">):</span>
+                <span class="s1">cp_size </span><span class="s4">|= (</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">] &lt;&lt; </span><span class="s5">16</span><span class="s4">)</span>
+                <span class="s1">i </span><span class="s4">+= </span><span class="s5">1</span>
+
+            <span class="s3">if not </span><span class="s1">cp_size</span><span class="s4">:</span>
+                <span class="s1">cp_size </span><span class="s4">= </span><span class="s5">0x10000</span>
+
+            <span class="s1">rbound </span><span class="s4">= </span><span class="s1">cp_off </span><span class="s4">+ </span><span class="s1">cp_size</span>
+            <span class="s3">if </span><span class="s4">(</span><span class="s1">rbound </span><span class="s4">&lt; </span><span class="s1">cp_size </span><span class="s3">or</span>
+                    <span class="s1">rbound </span><span class="s4">&gt; </span><span class="s1">src_buf_size</span><span class="s4">):</span>
+                <span class="s3">break</span>
+            <span class="s1">write</span><span class="s4">(</span><span class="s1">src_buf</span><span class="s4">[</span><span class="s1">cp_off</span><span class="s4">:</span><span class="s1">cp_off </span><span class="s4">+ </span><span class="s1">cp_size</span><span class="s4">])</span>
+        <span class="s3">elif </span><span class="s1">c</span><span class="s4">:</span>
+            <span class="s1">write</span><span class="s4">(</span><span class="s1">db</span><span class="s4">[</span><span class="s1">i</span><span class="s4">:</span><span class="s1">i </span><span class="s4">+ </span><span class="s1">c</span><span class="s4">])</span>
+            <span class="s1">i </span><span class="s4">+= </span><span class="s1">c</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">ValueError</span><span class="s4">(</span><span class="s7">&quot;unexpected delta opcode 0&quot;</span><span class="s4">)</span>
+        <span class="s0"># END handle command byte</span>
+    <span class="s0"># END while processing delta data</span>
+
+    <span class="s0"># yes, lets use the exact same error message that git uses :)</span>
+    <span class="s3">assert </span><span class="s1">i </span><span class="s4">== </span><span class="s1">delta_buf_size</span><span class="s4">, </span><span class="s7">&quot;delta replay has gone wild&quot;</span>
+
+
+<span class="s3">def </span><span class="s1">is_equal_canonical_sha</span><span class="s4">(</span><span class="s1">canonical_length</span><span class="s4">, </span><span class="s1">match</span><span class="s4">, </span><span class="s1">sha1</span><span class="s4">):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    :return: True if the given lhs and rhs 20 byte binary shas 
+        The comparison will take the canonical_length of the match sha into account, 
+        hence the comparison will only use the last 4 bytes for uneven canonical representations 
+    :param match: less than 20 byte sha 
+    :param sha1: 20 byte sha&quot;&quot;&quot;</span>
+    <span class="s1">binary_length </span><span class="s4">= </span><span class="s1">canonical_length </span><span class="s4">// </span><span class="s5">2</span>
+    <span class="s3">if </span><span class="s1">match</span><span class="s4">[:</span><span class="s1">binary_length</span><span class="s4">] != </span><span class="s1">sha1</span><span class="s4">[:</span><span class="s1">binary_length</span><span class="s4">]:</span>
+        <span class="s3">return False</span>
+
+    <span class="s3">if </span><span class="s1">canonical_length </span><span class="s4">- </span><span class="s1">binary_length </span><span class="s3">and </span><span class="s1">\</span>
+            <span class="s4">(</span><span class="s1">byte_ord</span><span class="s4">(</span><span class="s1">match</span><span class="s4">[-</span><span class="s5">1</span><span class="s4">]) ^ </span><span class="s1">byte_ord</span><span class="s4">(</span><span class="s1">sha1</span><span class="s4">[</span><span class="s1">len</span><span class="s4">(</span><span class="s1">match</span><span class="s4">) - </span><span class="s5">1</span><span class="s4">])) &amp; </span><span class="s5">0xf0</span><span class="s4">:</span>
+        <span class="s3">return False</span>
+    <span class="s0"># END handle uneven canonnical length</span>
+    <span class="s3">return True</span>
+
+<span class="s0">#} END routines</span>
+
+
+<span class="s3">try</span><span class="s4">:</span>
+    <span class="s3">from </span><span class="s1">gitdb_speedups</span><span class="s4">.</span><span class="s1">_perf </span><span class="s3">import </span><span class="s1">connect_deltas</span>
+<span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+    <span class="s3">pass</span>
+</pre>
+</body>
+</html>

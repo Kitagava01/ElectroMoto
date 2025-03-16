@@ -1,0 +1,197 @@
+<html>
+<head>
+<title>via_disk_folder.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #6aab73;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+via_disk_folder.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+A rough layout of the current storage goes as: 
+ 
+virtualenv-app-data 
+├── py - &lt;version&gt; &lt;cache information about python interpreters&gt; 
+│  └── *.json/lock 
+├── wheel &lt;cache wheels used for seeding&gt; 
+│   ├── house 
+│   │   └── *.whl &lt;wheels downloaded go here&gt; 
+│   └── &lt;python major.minor&gt; -&gt; 3.9 
+│       ├── img-&lt;version&gt; 
+│       │   └── image 
+│       │           └── &lt;install class&gt; -&gt; CopyPipInstall / SymlinkPipInstall 
+│       │               └── &lt;wheel name&gt; -&gt; pip-20.1.1-py2.py3-none-any 
+│       └── embed 
+│           └── 3 -&gt; json format versioning 
+│               └── *.json -&gt; for every distribution contains data about newer embed versions and releases 
+└─── unzip &lt;in zip app we cannot refer to some internal files, so first extract them&gt; 
+     └── &lt;virtualenv version&gt; 
+         ├── py_info.py 
+         ├── debug.py 
+         └── _virtualenv.py 
+&quot;&quot;&quot;  </span><span class="s2"># noqa: D415</span>
+
+<span class="s3">from </span><span class="s1">__future__ </span><span class="s3">import </span><span class="s1">annotations</span>
+
+<span class="s3">import </span><span class="s1">json</span>
+<span class="s3">import </span><span class="s1">logging</span>
+<span class="s3">from </span><span class="s1">abc </span><span class="s3">import </span><span class="s1">ABC</span>
+<span class="s3">from </span><span class="s1">contextlib </span><span class="s3">import </span><span class="s1">contextmanager</span><span class="s4">, </span><span class="s1">suppress</span>
+<span class="s3">from </span><span class="s1">hashlib </span><span class="s3">import </span><span class="s1">sha256</span>
+
+<span class="s3">from </span><span class="s1">virtualenv</span><span class="s4">.</span><span class="s1">util</span><span class="s4">.</span><span class="s1">lock </span><span class="s3">import </span><span class="s1">ReentrantFileLock</span>
+<span class="s3">from </span><span class="s1">virtualenv</span><span class="s4">.</span><span class="s1">util</span><span class="s4">.</span><span class="s1">path </span><span class="s3">import </span><span class="s1">safe_delete</span>
+<span class="s3">from </span><span class="s1">virtualenv</span><span class="s4">.</span><span class="s1">util</span><span class="s4">.</span><span class="s1">zipapp </span><span class="s3">import </span><span class="s1">extract</span>
+<span class="s3">from </span><span class="s1">virtualenv</span><span class="s4">.</span><span class="s1">version </span><span class="s3">import </span><span class="s1">__version__</span>
+
+<span class="s3">from </span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s1">AppData</span><span class="s4">, </span><span class="s1">ContentStore</span>
+
+
+<span class="s3">class </span><span class="s1">AppDataDiskFolder</span><span class="s4">(</span><span class="s1">AppData</span><span class="s4">):</span>
+    <span class="s5">&quot;&quot;&quot;Store the application data on the disk within a folder layout.&quot;&quot;&quot;</span>
+
+    <span class="s1">transient </span><span class="s4">= </span><span class="s3">False</span>
+    <span class="s1">can_update </span><span class="s4">= </span><span class="s3">True</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">folder</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">lock </span><span class="s4">= </span><span class="s1">ReentrantFileLock</span><span class="s4">(</span><span class="s1">folder</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">__repr__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; str</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s0">f&quot;</span><span class="s3">{</span><span class="s1">type</span><span class="s4">(</span><span class="s1">self</span><span class="s4">).</span><span class="s1">__name__</span><span class="s3">}</span><span class="s0">(</span><span class="s3">{</span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock</span><span class="s4">.</span><span class="s1">path</span><span class="s3">}</span><span class="s0">)&quot;</span>
+
+    <span class="s3">def </span><span class="s1">__str__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">) </span><span class="s1">-&gt; str</span><span class="s4">:</span>
+        <span class="s3">return </span><span class="s1">str</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock</span><span class="s4">.</span><span class="s1">path</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">reset</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">logging</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s0">&quot;reset app data folder %s&quot;</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock</span><span class="s4">.</span><span class="s1">path</span><span class="s4">)</span>
+        <span class="s1">safe_delete</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock</span><span class="s4">.</span><span class="s1">path</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">close</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s5">&quot;&quot;&quot;Do nothing.&quot;&quot;&quot;</span>
+
+    <span class="s4">@</span><span class="s1">contextmanager</span>
+    <span class="s3">def </span><span class="s1">locked</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">):</span>
+        <span class="s1">path_lock </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock </span><span class="s4">/ </span><span class="s1">path</span>
+        <span class="s3">with </span><span class="s1">path_lock</span><span class="s4">:</span>
+            <span class="s3">yield </span><span class="s1">path_lock</span><span class="s4">.</span><span class="s1">path</span>
+
+    <span class="s4">@</span><span class="s1">contextmanager</span>
+    <span class="s3">def </span><span class="s1">extract</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">, </span><span class="s1">to_folder</span><span class="s4">):</span>
+        <span class="s1">root </span><span class="s4">= </span><span class="s1">ReentrantFileLock</span><span class="s4">(</span><span class="s1">to_folder</span><span class="s4">()) </span><span class="s3">if </span><span class="s1">to_folder </span><span class="s3">is not None else </span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock </span><span class="s4">/ </span><span class="s0">&quot;unzip&quot; </span><span class="s4">/ </span><span class="s1">__version__</span>
+        <span class="s3">with </span><span class="s1">root</span><span class="s4">.</span><span class="s1">lock_for_key</span><span class="s4">(</span><span class="s1">path</span><span class="s4">.</span><span class="s1">name</span><span class="s4">):</span>
+            <span class="s1">dest </span><span class="s4">= </span><span class="s1">root</span><span class="s4">.</span><span class="s1">path </span><span class="s4">/ </span><span class="s1">path</span><span class="s4">.</span><span class="s1">name</span>
+            <span class="s3">if not </span><span class="s1">dest</span><span class="s4">.</span><span class="s1">exists</span><span class="s4">():</span>
+                <span class="s1">extract</span><span class="s4">(</span><span class="s1">path</span><span class="s4">, </span><span class="s1">dest</span><span class="s4">)</span>
+            <span class="s3">yield </span><span class="s1">dest</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">py_info_at</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock </span><span class="s4">/ </span><span class="s0">&quot;py_info&quot; </span><span class="s4">/ </span><span class="s0">&quot;1&quot;</span>
+
+    <span class="s3">def </span><span class="s1">py_info</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">path</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">PyInfoStoreDisk</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">py_info_at</span><span class="s4">, </span><span class="s1">path</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">py_info_clear</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s5">&quot;&quot;&quot;clear py info.&quot;&quot;&quot;</span>
+        <span class="s1">py_info_folder </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">py_info_at</span>
+        <span class="s3">with </span><span class="s1">py_info_folder</span><span class="s4">:</span>
+            <span class="s3">for </span><span class="s1">filename </span><span class="s3">in </span><span class="s1">py_info_folder</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">iterdir</span><span class="s4">():</span>
+                <span class="s3">if </span><span class="s1">filename</span><span class="s4">.</span><span class="s1">suffix </span><span class="s4">== </span><span class="s0">&quot;.json&quot;</span><span class="s4">:</span>
+                    <span class="s3">with </span><span class="s1">py_info_folder</span><span class="s4">.</span><span class="s1">lock_for_key</span><span class="s4">(</span><span class="s1">filename</span><span class="s4">.</span><span class="s1">stem</span><span class="s4">):</span>
+                        <span class="s3">if </span><span class="s1">filename</span><span class="s4">.</span><span class="s1">exists</span><span class="s4">():</span>
+                            <span class="s1">filename</span><span class="s4">.</span><span class="s1">unlink</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">embed_update_log</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">distribution</span><span class="s4">, </span><span class="s1">for_py_version</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">EmbedDistributionUpdateStoreDisk</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock </span><span class="s4">/ </span><span class="s0">&quot;wheel&quot; </span><span class="s4">/ </span><span class="s1">for_py_version </span><span class="s4">/ </span><span class="s0">&quot;embed&quot; </span><span class="s4">/ </span><span class="s0">&quot;3&quot;</span><span class="s4">, </span><span class="s1">distribution</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">house</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">path </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock</span><span class="s4">.</span><span class="s1">path </span><span class="s4">/ </span><span class="s0">&quot;wheel&quot; </span><span class="s4">/ </span><span class="s0">&quot;house&quot;</span>
+        <span class="s1">path</span><span class="s4">.</span><span class="s1">mkdir</span><span class="s4">(</span><span class="s1">parents</span><span class="s4">=</span><span class="s3">True</span><span class="s4">, </span><span class="s1">exist_ok</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">path</span>
+
+    <span class="s3">def </span><span class="s1">wheel_image</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">for_py_version</span><span class="s4">, </span><span class="s1">name</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">lock</span><span class="s4">.</span><span class="s1">path </span><span class="s4">/ </span><span class="s0">&quot;wheel&quot; </span><span class="s4">/ </span><span class="s1">for_py_version </span><span class="s4">/ </span><span class="s0">&quot;image&quot; </span><span class="s4">/ </span><span class="s0">&quot;1&quot; </span><span class="s4">/ </span><span class="s1">name</span>
+
+
+<span class="s3">class </span><span class="s1">JSONStoreDisk</span><span class="s4">(</span><span class="s1">ContentStore</span><span class="s4">, </span><span class="s1">ABC</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">in_folder</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s1">msg</span><span class="s4">, </span><span class="s1">msg_args</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">in_folder </span><span class="s4">= </span><span class="s1">in_folder</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">key </span><span class="s4">= </span><span class="s1">key</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">msg </span><span class="s4">= </span><span class="s1">msg</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">msg_args </span><span class="s4">= (*</span><span class="s1">msg_args</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">file</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">property</span>
+    <span class="s3">def </span><span class="s1">file</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">in_folder</span><span class="s4">.</span><span class="s1">path </span><span class="s4">/ </span><span class="s0">f&quot;</span><span class="s3">{</span><span class="s1">self</span><span class="s4">.</span><span class="s1">key</span><span class="s3">}</span><span class="s0">.json&quot;</span>
+
+    <span class="s3">def </span><span class="s1">exists</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">return </span><span class="s1">self</span><span class="s4">.</span><span class="s1">file</span><span class="s4">.</span><span class="s1">exists</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">read</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">data</span><span class="s4">, </span><span class="s1">bad_format </span><span class="s4">= </span><span class="s3">None</span><span class="s4">, </span><span class="s3">False</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">data </span><span class="s4">= </span><span class="s1">json</span><span class="s4">.</span><span class="s1">loads</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">file</span><span class="s4">.</span><span class="s1">read_text</span><span class="s4">(</span><span class="s1">encoding</span><span class="s4">=</span><span class="s0">&quot;utf-8&quot;</span><span class="s4">))</span>
+        <span class="s3">except </span><span class="s1">ValueError</span><span class="s4">:</span>
+            <span class="s1">bad_format </span><span class="s4">= </span><span class="s3">True</span>
+        <span class="s3">except </span><span class="s1">Exception</span><span class="s4">:  </span><span class="s2"># noqa: BLE001, S110</span>
+            <span class="s3">pass</span>
+        <span class="s3">else</span><span class="s4">:</span>
+            <span class="s1">logging</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s0">&quot;got %s from %s&quot;</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">msg</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">msg_args</span><span class="s4">)</span>
+            <span class="s3">return </span><span class="s1">data</span>
+        <span class="s3">if </span><span class="s1">bad_format</span><span class="s4">:</span>
+            <span class="s3">with </span><span class="s1">suppress</span><span class="s4">(</span><span class="s1">OSError</span><span class="s4">):  </span><span class="s2"># reading and writing on the same file may cause race on multiple processes</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">()</span>
+        <span class="s3">return None</span>
+
+    <span class="s3">def </span><span class="s1">remove</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">file</span><span class="s4">.</span><span class="s1">unlink</span><span class="s4">()</span>
+        <span class="s1">logging</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s0">&quot;removed %s at %s&quot;</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">msg</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">msg_args</span><span class="s4">)</span>
+
+    <span class="s4">@</span><span class="s1">contextmanager</span>
+    <span class="s3">def </span><span class="s1">locked</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">with </span><span class="s1">self</span><span class="s4">.</span><span class="s1">in_folder</span><span class="s4">.</span><span class="s1">lock_for_key</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">key</span><span class="s4">):</span>
+            <span class="s3">yield</span>
+
+    <span class="s3">def </span><span class="s1">write</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">content</span><span class="s4">):</span>
+        <span class="s1">folder </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">file</span><span class="s4">.</span><span class="s1">parent</span>
+        <span class="s1">folder</span><span class="s4">.</span><span class="s1">mkdir</span><span class="s4">(</span><span class="s1">parents</span><span class="s4">=</span><span class="s3">True</span><span class="s4">, </span><span class="s1">exist_ok</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">file</span><span class="s4">.</span><span class="s1">write_text</span><span class="s4">(</span><span class="s1">json</span><span class="s4">.</span><span class="s1">dumps</span><span class="s4">(</span><span class="s1">content</span><span class="s4">, </span><span class="s1">sort_keys</span><span class="s4">=</span><span class="s3">True</span><span class="s4">, </span><span class="s1">indent</span><span class="s4">=</span><span class="s6">2</span><span class="s4">), </span><span class="s1">encoding</span><span class="s4">=</span><span class="s0">&quot;utf-8&quot;</span><span class="s4">)</span>
+        <span class="s1">logging</span><span class="s4">.</span><span class="s1">debug</span><span class="s4">(</span><span class="s0">&quot;wrote %s at %s&quot;</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">msg</span><span class="s4">, </span><span class="s1">self</span><span class="s4">.</span><span class="s1">msg_args</span><span class="s4">)</span>
+
+
+<span class="s3">class </span><span class="s1">PyInfoStoreDisk</span><span class="s4">(</span><span class="s1">JSONStoreDisk</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">in_folder</span><span class="s4">, </span><span class="s1">path</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">key </span><span class="s4">= </span><span class="s1">sha256</span><span class="s4">(</span><span class="s1">str</span><span class="s4">(</span><span class="s1">path</span><span class="s4">).</span><span class="s1">encode</span><span class="s4">(</span><span class="s0">&quot;utf-8&quot;</span><span class="s4">)).</span><span class="s1">hexdigest</span><span class="s4">()</span>
+        <span class="s1">super</span><span class="s4">().</span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">in_folder</span><span class="s4">, </span><span class="s1">key</span><span class="s4">, </span><span class="s0">&quot;python info of %s&quot;</span><span class="s4">, (</span><span class="s1">path</span><span class="s4">,))</span>
+
+
+<span class="s3">class </span><span class="s1">EmbedDistributionUpdateStoreDisk</span><span class="s4">(</span><span class="s1">JSONStoreDisk</span><span class="s4">):</span>
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">in_folder</span><span class="s4">, </span><span class="s1">distribution</span><span class="s4">) </span><span class="s1">-&gt; </span><span class="s3">None</span><span class="s4">:</span>
+        <span class="s1">super</span><span class="s4">().</span><span class="s1">__init__</span><span class="s4">(</span>
+            <span class="s1">in_folder</span><span class="s4">,</span>
+            <span class="s1">distribution</span><span class="s4">,</span>
+            <span class="s0">&quot;embed update of distribution %s&quot;</span><span class="s4">,</span>
+            <span class="s4">(</span><span class="s1">distribution</span><span class="s4">,),</span>
+        <span class="s4">)</span>
+
+
+<span class="s1">__all__ </span><span class="s4">= [</span>
+    <span class="s0">&quot;AppDataDiskFolder&quot;</span><span class="s4">,</span>
+    <span class="s0">&quot;JSONStoreDisk&quot;</span><span class="s4">,</span>
+    <span class="s0">&quot;PyInfoStoreDisk&quot;</span><span class="s4">,</span>
+<span class="s4">]</span>
+</pre>
+</body>
+</html>

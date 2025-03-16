@@ -1,0 +1,97 @@
+<html>
+<head>
+<title>validators.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+validators.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">json</span>
+<span class="s0">from </span><span class="s1">urllib </span><span class="s0">import </span><span class="s1">request </span><span class="s0">as </span><span class="s1">http</span>
+<span class="s0">from </span><span class="s1">urllib</span><span class="s2">.</span><span class="s1">parse </span><span class="s0">import </span><span class="s1">urlencode</span>
+
+<span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">current_app</span>
+<span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">request</span>
+<span class="s0">from </span><span class="s1">wtforms </span><span class="s0">import </span><span class="s1">ValidationError</span>
+
+<span class="s1">RECAPTCHA_VERIFY_SERVER_DEFAULT </span><span class="s2">= </span><span class="s3">&quot;https://www.google.com/recaptcha/api/siteverify&quot;</span>
+<span class="s1">RECAPTCHA_ERROR_CODES </span><span class="s2">= {</span>
+    <span class="s3">&quot;missing-input-secret&quot;</span><span class="s2">: </span><span class="s3">&quot;The secret parameter is missing.&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;invalid-input-secret&quot;</span><span class="s2">: </span><span class="s3">&quot;The secret parameter is invalid or malformed.&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;missing-input-response&quot;</span><span class="s2">: </span><span class="s3">&quot;The response parameter is missing.&quot;</span><span class="s2">,</span>
+    <span class="s3">&quot;invalid-input-response&quot;</span><span class="s2">: </span><span class="s3">&quot;The response parameter is invalid or malformed.&quot;</span><span class="s2">,</span>
+<span class="s2">}</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s3">&quot;Recaptcha&quot;</span><span class="s2">]</span>
+
+
+<span class="s0">class </span><span class="s1">Recaptcha</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot;Validates a ReCaptcha.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">message</span><span class="s2">=</span><span class="s0">None</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">message </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">message </span><span class="s2">= </span><span class="s1">RECAPTCHA_ERROR_CODES</span><span class="s2">[</span><span class="s3">&quot;missing-input-response&quot;</span><span class="s2">]</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">message </span><span class="s2">= </span><span class="s1">message</span>
+
+    <span class="s0">def </span><span class="s1">__call__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">form</span><span class="s2">, </span><span class="s1">field</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">testing</span><span class="s2">:</span>
+            <span class="s0">return True</span>
+
+        <span class="s0">if </span><span class="s1">request</span><span class="s2">.</span><span class="s1">is_json</span><span class="s2">:</span>
+            <span class="s1">response </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">json</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;g-recaptcha-response&quot;</span><span class="s2">, </span><span class="s3">&quot;&quot;</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">response </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">form</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;g-recaptcha-response&quot;</span><span class="s2">, </span><span class="s3">&quot;&quot;</span><span class="s2">)</span>
+        <span class="s1">remote_ip </span><span class="s2">= </span><span class="s1">request</span><span class="s2">.</span><span class="s1">remote_addr</span>
+
+        <span class="s0">if not </span><span class="s1">response</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ValidationError</span><span class="s2">(</span><span class="s1">field</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">))</span>
+
+        <span class="s0">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_validate_recaptcha</span><span class="s2">(</span><span class="s1">response</span><span class="s2">, </span><span class="s1">remote_ip</span><span class="s2">):</span>
+            <span class="s1">field</span><span class="s2">.</span><span class="s1">recaptcha_error </span><span class="s2">= </span><span class="s3">&quot;incorrect-captcha-sol&quot;</span>
+            <span class="s0">raise </span><span class="s1">ValidationError</span><span class="s2">(</span><span class="s1">field</span><span class="s2">.</span><span class="s1">gettext</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">_validate_recaptcha</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">response</span><span class="s2">, </span><span class="s1">remote_addr</span><span class="s2">):</span>
+        <span class="s4">&quot;&quot;&quot;Performs the actual validation.&quot;&quot;&quot;</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">private_key </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">[</span><span class="s3">&quot;RECAPTCHA_PRIVATE_KEY&quot;</span><span class="s2">]</span>
+        <span class="s0">except </span><span class="s1">KeyError</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">RuntimeError</span><span class="s2">(</span><span class="s3">&quot;No RECAPTCHA_PRIVATE_KEY config set&quot;</span><span class="s2">) </span><span class="s0">from None</span>
+
+        <span class="s1">verify_server </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;RECAPTCHA_VERIFY_SERVER&quot;</span><span class="s2">)</span>
+        <span class="s0">if not </span><span class="s1">verify_server</span><span class="s2">:</span>
+            <span class="s1">verify_server </span><span class="s2">= </span><span class="s1">RECAPTCHA_VERIFY_SERVER_DEFAULT</span>
+
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">urlencode</span><span class="s2">(</span>
+            <span class="s2">{</span><span class="s3">&quot;secret&quot;</span><span class="s2">: </span><span class="s1">private_key</span><span class="s2">, </span><span class="s3">&quot;remoteip&quot;</span><span class="s2">: </span><span class="s1">remote_addr</span><span class="s2">, </span><span class="s3">&quot;response&quot;</span><span class="s2">: </span><span class="s1">response</span><span class="s2">}</span>
+        <span class="s2">)</span>
+
+        <span class="s1">http_response </span><span class="s2">= </span><span class="s1">http</span><span class="s2">.</span><span class="s1">urlopen</span><span class="s2">(</span><span class="s1">verify_server</span><span class="s2">, </span><span class="s1">data</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s3">&quot;utf-8&quot;</span><span class="s2">))</span>
+
+        <span class="s0">if </span><span class="s1">http_response</span><span class="s2">.</span><span class="s1">code </span><span class="s2">!= </span><span class="s5">200</span><span class="s2">:</span>
+            <span class="s0">return False</span>
+
+        <span class="s1">json_resp </span><span class="s2">= </span><span class="s1">json</span><span class="s2">.</span><span class="s1">loads</span><span class="s2">(</span><span class="s1">http_response</span><span class="s2">.</span><span class="s1">read</span><span class="s2">())</span>
+
+        <span class="s0">if </span><span class="s1">json_resp</span><span class="s2">[</span><span class="s3">&quot;success&quot;</span><span class="s2">]:</span>
+            <span class="s0">return True</span>
+
+        <span class="s0">for </span><span class="s1">error </span><span class="s0">in </span><span class="s1">json_resp</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;error-codes&quot;</span><span class="s2">, []):</span>
+            <span class="s0">if </span><span class="s1">error </span><span class="s0">in </span><span class="s1">RECAPTCHA_ERROR_CODES</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">ValidationError</span><span class="s2">(</span><span class="s1">RECAPTCHA_ERROR_CODES</span><span class="s2">[</span><span class="s1">error</span><span class="s2">])</span>
+
+        <span class="s0">return False</span>
+</pre>
+</body>
+</html>

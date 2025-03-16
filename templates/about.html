@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}О нас{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <h2 class="text-center mb-4">О нас</h2>
+        <p class="lead text-center">
+            Добро пожаловать в наш магазин электромотоциклов! Мы стремимся предоставить вам лучшие электромотоциклы на рынке.
+        </p>
+
+        <div class="row align-items-center mb-4">
+            <div class="col-md-6">
+                <img src="{{ url_for('static', filename='images/photo_5402128608878780748_x.jpeg') }}" alt="О нас"
+                     class="img-fluid rounded">
+            </div>
+            <div class="col-md-6">
+                <p>
+                    Наша команда состоит из энтузиастов и профессионалов, которые любят то, что делают. Мы постоянно работаем над улучшением наших продуктов и услуг, чтобы удовлетворить все ваши потребности.
+                </p>
+            </div>
+        </div>
+
+        <div class="row align-items-center">
+            <div class="col-md-6">
+                <p>
+                    Свяжитесь с нами, если у вас есть вопросы или предложения. Мы всегда рады помочь!
+                </p>
+            </div>
+            <div class="col-md-6">
+                <img src="{{ url_for('static', filename='images/photo_5402128608878780749_x.jpeg') }}" alt="Наша команда"
+                     class="img-fluid rounded">
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

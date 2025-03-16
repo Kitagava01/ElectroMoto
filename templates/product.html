@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% block title %}
+    {{ product.name }} - Магазин Электромотоциклов
+{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div id="carouselExample" class="carousel slide mb-4" data-bs-ride="carousel">
+            <div class="carousel-inner">
+                {% for image in product.images %}
+                <div class="carousel-item {% if loop.first %}active{% endif %}">
+                    <img src="{{ url_for('static', filename='images/' + image) }}" class="d-block w-100"
+                         alt="{{ product.name }}" style="height: 400px; object-fit: cover;">
+                </div>
+                {% endfor %}
+            </div>
+            <button class="carousel-control-prev" type="button" data-bs-target="#carouselExample" data-bs-slide="prev">
+                <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                <span class="visually-hidden">Previous</span>
+            </button>
+            <button class="carousel-control-next" type="button" data-bs-target="#carouselExample" data-bs-slide="next">
+                <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                <span class="visually-hidden">Next</span>
+            </button>
+        </div>
+
+        <h2>{{ product.name }}</h2>
+        <p>{{ product.description }}</p>
+        <p class="text-success fw-bold">Цена: {{ product.price }} руб.</p>
+        <p class="availability {{ product.availability }}">{{ product.availability }}</p>
+
+        <div class="mb-4">
+            <h5>Дополнительные опции:</h5>
+            <div class="form-check">
+                <input type="checkbox" class="form-check-input option" id="winterTires" data-price="50000">
+                <label class="form-check-label" for="winterTires">Комплект зимней резины (+50,000 руб.)</label>
+            </div>
+            <div class="form-check">
+                <input type="checkbox" class="form-check-input option" id="batteryUpgrade" data-price="40000">
+                <label class="form-check-label" for="batteryUpgrade">Увеличенный аккумулятор (+40,000 руб.)</label>
+            </div>
+            <div class="form-check">
+                <input type="checkbox" class="form-check-input option" id="extraBattery" data-price="30000">
+                <label class="form-check-label" for="extraBattery">Дополнительный аккумулятор (+30,000 руб.)</label>
+            </div>
+        </div>
+
+        <p>Итоговая цена: <span id="total-price" class="fw-bold">{{ product.price }}</span> руб.</p>
+        <button onclick="redirectToTelegram()" class="btn btn-success w-100">Купить</button>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary w-100 mt-2">Назад</a>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const options = document.querySelectorAll('.option');
+        const totalPriceElement = document.getElementById('total-price');
+        let basePrice = {{ product.price }};
+        let totalPrice = basePrice;
+
+        options.forEach(option => {
+            option.addEventListener('change', function () {
+                if (this.checked) {
+                    totalPrice += parseInt(this.dataset.price);
+                } else {
+                    totalPrice -= parseInt(this.dataset.price);
+                }
+                totalPriceElement.textContent = totalPrice;
+            });
+        });
+
+        // Инициализация карусели
+        const carousel = new bootstrap.Carousel(document.getElementById('carouselExample'), {
+            interval: 3000,
+            wrap: true
+        });
+    });
+    function redirectToTelegram() {
+        let userConfirmed = confirm("Для покупки товара вас перекинет в Telegram для связи с продавцом. Желаете подтвердить?");
+        if (userConfirmed) {
+            let productName = "{{ product.name }}";
+            let productPrice = document.getElementById('total-price').textContent;
+            let options = Array.from(document.querySelectorAll('.option:checked')).map(option => option.nextElementSibling.textContent.trim());
+            let message = encodeURIComponent(`Пользователь хочет заказать мотоцикл: ${productName}, цена: ${productPrice} руб. Дополнительные опции: ${options.join(', ')}.`);
+            window.location.href = `https://t.me/Hello_Kitty_001?start=${message}`;
+        }
+    }
+</script>
+{% endblock %}

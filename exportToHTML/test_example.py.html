@@ -1,0 +1,67 @@
+<html>
+<head>
+<title>test_example.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_example.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2010, 2011 Sebastian Thiel (byronimo@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitDB and is released under</span>
+<span class="s0"># the New BSD License: https://opensource.org/license/bsd-3-clause/</span>
+<span class="s2">&quot;&quot;&quot;Module with examples from the tutorial section of the docs&quot;&quot;&quot;</span>
+<span class="s3">import </span><span class="s1">os</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">test</span><span class="s4">.</span><span class="s1">lib </span><span class="s3">import </span><span class="s1">TestBase</span>
+<span class="s3">from </span><span class="s1">gitdb </span><span class="s3">import </span><span class="s1">IStream</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">db </span><span class="s3">import </span><span class="s1">LooseObjectDB</span>
+
+<span class="s3">from </span><span class="s1">io </span><span class="s3">import </span><span class="s1">BytesIO</span>
+
+
+<span class="s3">class </span><span class="s1">TestExamples</span><span class="s4">(</span><span class="s1">TestBase</span><span class="s4">):</span>
+
+    <span class="s3">def </span><span class="s1">test_base</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">ldb </span><span class="s4">= </span><span class="s1">LooseObjectDB</span><span class="s4">(</span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">gitrepopath</span><span class="s4">, </span><span class="s5">'objects'</span><span class="s4">))</span>
+
+        <span class="s3">for </span><span class="s1">sha1 </span><span class="s3">in </span><span class="s1">ldb</span><span class="s4">.</span><span class="s1">sha_iter</span><span class="s4">():</span>
+            <span class="s1">oinfo </span><span class="s4">= </span><span class="s1">ldb</span><span class="s4">.</span><span class="s1">info</span><span class="s4">(</span><span class="s1">sha1</span><span class="s4">)</span>
+            <span class="s1">ostream </span><span class="s4">= </span><span class="s1">ldb</span><span class="s4">.</span><span class="s1">stream</span><span class="s4">(</span><span class="s1">sha1</span><span class="s4">)</span>
+            <span class="s3">assert </span><span class="s1">oinfo</span><span class="s4">[:</span><span class="s6">3</span><span class="s4">] == </span><span class="s1">ostream</span><span class="s4">[:</span><span class="s6">3</span><span class="s4">]</span>
+
+            <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">ostream</span><span class="s4">.</span><span class="s1">read</span><span class="s4">()) == </span><span class="s1">ostream</span><span class="s4">.</span><span class="s1">size</span>
+            <span class="s3">assert </span><span class="s1">ldb</span><span class="s4">.</span><span class="s1">has_object</span><span class="s4">(</span><span class="s1">oinfo</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">)</span>
+        <span class="s0"># END for each sha in database</span>
+        <span class="s0"># assure we close all files</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s3">del</span><span class="s4">(</span><span class="s1">ostream</span><span class="s4">)</span>
+            <span class="s3">del</span><span class="s4">(</span><span class="s1">oinfo</span><span class="s4">)</span>
+        <span class="s3">except </span><span class="s1">UnboundLocalError</span><span class="s4">:</span>
+            <span class="s3">pass</span>
+        <span class="s0"># END ignore exception if there are no loose objects</span>
+
+        <span class="s1">data </span><span class="s4">= </span><span class="s7">b&quot;my data&quot;</span>
+        <span class="s1">istream </span><span class="s4">= </span><span class="s1">IStream</span><span class="s4">(</span><span class="s5">&quot;blob&quot;</span><span class="s4">, </span><span class="s1">len</span><span class="s4">(</span><span class="s1">data</span><span class="s4">), </span><span class="s1">BytesIO</span><span class="s4">(</span><span class="s1">data</span><span class="s4">))</span>
+
+        <span class="s0"># the object does not yet have a sha</span>
+        <span class="s3">assert </span><span class="s1">istream</span><span class="s4">.</span><span class="s1">binsha </span><span class="s3">is None</span>
+        <span class="s1">ldb</span><span class="s4">.</span><span class="s1">store</span><span class="s4">(</span><span class="s1">istream</span><span class="s4">)</span>
+        <span class="s0"># now the sha is set</span>
+        <span class="s3">assert </span><span class="s1">len</span><span class="s4">(</span><span class="s1">istream</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">) == </span><span class="s6">20</span>
+        <span class="s3">assert </span><span class="s1">ldb</span><span class="s4">.</span><span class="s1">has_object</span><span class="s4">(</span><span class="s1">istream</span><span class="s4">.</span><span class="s1">binsha</span><span class="s4">)</span>
+</pre>
+</body>
+</html>

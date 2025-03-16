@@ -1,0 +1,71 @@
+<html>
+<head>
+<title>blob.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #cf8e6d;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+blob.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2008, 2009 Michael Trier (mtrier@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitPython and is released under the</span>
+<span class="s0"># 3-Clause BSD License: https://opensource.org/license/bsd-3-clause/</span>
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s3">&quot;Blob&quot;</span><span class="s2">]</span>
+
+<span class="s4">from </span><span class="s1">mimetypes </span><span class="s4">import </span><span class="s1">guess_type</span>
+<span class="s4">import </span><span class="s1">sys</span>
+
+<span class="s4">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&gt;= (</span><span class="s5">3</span><span class="s2">, </span><span class="s5">8</span><span class="s2">):</span>
+    <span class="s4">from </span><span class="s1">typing </span><span class="s4">import </span><span class="s1">Literal</span>
+<span class="s4">else</span><span class="s2">:</span>
+    <span class="s4">from </span><span class="s1">typing_extensions </span><span class="s4">import </span><span class="s1">Literal</span>
+
+<span class="s4">from </span><span class="s2">. </span><span class="s4">import </span><span class="s1">base</span>
+
+
+<span class="s4">class </span><span class="s1">Blob</span><span class="s2">(</span><span class="s1">base</span><span class="s2">.</span><span class="s1">IndexObject</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;A Blob encapsulates a git blob object. 
+ 
+    See :manpage:`gitglossary(7)` on &quot;blob&quot;: 
+    https://git-scm.com/docs/gitglossary#def_blob_object 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">DEFAULT_MIME_TYPE </span><span class="s2">= </span><span class="s3">&quot;text/plain&quot;</span>
+    <span class="s1">type</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;blob&quot;</span><span class="s2">] = </span><span class="s3">&quot;blob&quot;</span>
+
+    <span class="s0"># Valid blob modes</span>
+    <span class="s1">executable_mode </span><span class="s2">= </span><span class="s5">0o100755</span>
+    <span class="s1">file_mode </span><span class="s2">= </span><span class="s5">0o100644</span>
+    <span class="s1">link_mode </span><span class="s2">= </span><span class="s5">0o120000</span>
+
+    <span class="s1">__slots__ </span><span class="s2">= ()</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">mime_type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        :return: 
+            String describing the mime type of this file (based on the filename) 
+ 
+        :note: 
+            Defaults to ``text/plain`` in case the actual file type is unknown. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">guesses </span><span class="s2">= </span><span class="s4">None</span>
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">:</span>
+            <span class="s1">guesses </span><span class="s2">= </span><span class="s1">guess_type</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">))</span>
+        <span class="s4">return </span><span class="s1">guesses </span><span class="s4">and </span><span class="s1">guesses</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] </span><span class="s4">or </span><span class="s1">self</span><span class="s2">.</span><span class="s1">DEFAULT_MIME_TYPE</span>
+</pre>
+</body>
+</html>

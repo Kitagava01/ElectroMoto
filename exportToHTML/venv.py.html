@@ -1,0 +1,124 @@
+<html>
+<head>
+<title>venv.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+venv.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations  </span><span class="s2"># noqa: A005</span>
+
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">from </span><span class="s1">copy </span><span class="s0">import </span><span class="s1">copy</span>
+
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">create</span><span class="s3">.</span><span class="s1">via_global_ref</span><span class="s3">.</span><span class="s1">store </span><span class="s0">import </span><span class="s1">handle_store_python</span>
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">discovery</span><span class="s3">.</span><span class="s1">py_info </span><span class="s0">import </span><span class="s1">PythonInfo</span>
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">error </span><span class="s0">import </span><span class="s1">ProcessCallFailedError</span>
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">path </span><span class="s0">import </span><span class="s1">ensure_dir</span>
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">subprocess </span><span class="s0">import </span><span class="s1">run_cmd</span>
+
+<span class="s0">from </span><span class="s3">.</span><span class="s1">api </span><span class="s0">import </span><span class="s1">ViaGlobalRefApi</span><span class="s3">, </span><span class="s1">ViaGlobalRefMeta</span>
+<span class="s0">from </span><span class="s3">.</span><span class="s1">builtin</span><span class="s3">.</span><span class="s1">cpython</span><span class="s3">.</span><span class="s1">mac_os </span><span class="s0">import </span><span class="s1">CPython3macOsBrew</span>
+<span class="s0">from </span><span class="s3">.</span><span class="s1">builtin</span><span class="s3">.</span><span class="s1">pypy</span><span class="s3">.</span><span class="s1">pypy3 </span><span class="s0">import </span><span class="s1">Pypy3Windows</span>
+
+
+<span class="s0">class </span><span class="s1">Venv</span><span class="s3">(</span><span class="s1">ViaGlobalRefApi</span><span class="s3">):</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">options</span><span class="s3">, </span><span class="s1">interpreter</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">describe </span><span class="s3">= </span><span class="s1">options</span><span class="s3">.</span><span class="s1">describe</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">options</span><span class="s3">, </span><span class="s1">interpreter</span><span class="s3">)</span>
+        <span class="s1">current </span><span class="s3">= </span><span class="s1">PythonInfo</span><span class="s3">.</span><span class="s1">current</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">can_be_inline </span><span class="s3">= </span><span class="s1">interpreter </span><span class="s0">is </span><span class="s1">current </span><span class="s0">and </span><span class="s1">interpreter</span><span class="s3">.</span><span class="s1">executable </span><span class="s3">== </span><span class="s1">interpreter</span><span class="s3">.</span><span class="s1">system_executable</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_context </span><span class="s3">= </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">_args</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">return </span><span class="s1">super</span><span class="s3">().</span><span class="s1">_args</span><span class="s3">() + ([(</span><span class="s4">&quot;describe&quot;</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">describe</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">)] </span><span class="s0">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">describe </span><span class="s0">else </span><span class="s3">[])</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">can_create</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">interpreter</span><span class="s3">):</span>
+        <span class="s0">if </span><span class="s1">interpreter</span><span class="s3">.</span><span class="s1">has_venv</span><span class="s3">:</span>
+            <span class="s0">if </span><span class="s1">CPython3macOsBrew</span><span class="s3">.</span><span class="s1">can_describe</span><span class="s3">(</span><span class="s1">interpreter</span><span class="s3">):</span>
+                <span class="s0">return </span><span class="s1">CPython3macOsBrew</span><span class="s3">.</span><span class="s1">setup_meta</span><span class="s3">(</span><span class="s1">interpreter</span><span class="s3">)</span>
+            <span class="s1">meta </span><span class="s3">= </span><span class="s1">ViaGlobalRefMeta</span><span class="s3">()</span>
+            <span class="s0">if </span><span class="s1">interpreter</span><span class="s3">.</span><span class="s1">platform </span><span class="s3">== </span><span class="s4">&quot;win32&quot;</span><span class="s3">:</span>
+                <span class="s1">meta </span><span class="s3">= </span><span class="s1">handle_store_python</span><span class="s3">(</span><span class="s1">meta</span><span class="s3">, </span><span class="s1">interpreter</span><span class="s3">)</span>
+            <span class="s0">return </span><span class="s1">meta</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">create</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">can_be_inline</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">create_inline</span><span class="s3">()</span>
+        <span class="s0">else</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">create_via_sub_process</span><span class="s3">()</span>
+        <span class="s0">for </span><span class="s1">lib </span><span class="s0">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">libs</span><span class="s3">:</span>
+            <span class="s1">ensure_dir</span><span class="s3">(</span><span class="s1">lib</span><span class="s3">)</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">create</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">executables_for_win_pypy_less_v37</span><span class="s3">()</span>
+
+    <span class="s0">def </span><span class="s1">executables_for_win_pypy_less_v37</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        PyPy &lt;= 3.6 (v7.3.3) for Windows contains only pypy3.exe and pypy3w.exe 
+        Venv does not handle non-existing exe sources, e.g. python.exe, so this 
+        patch does it. 
+        &quot;&quot;&quot;  </span><span class="s2"># noqa: D205</span>
+        <span class="s1">creator </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">describe</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">creator</span><span class="s3">, </span><span class="s1">Pypy3Windows</span><span class="s3">) </span><span class="s0">and </span><span class="s1">creator</span><span class="s3">.</span><span class="s1">less_v37</span><span class="s3">:</span>
+            <span class="s0">for </span><span class="s1">exe </span><span class="s0">in </span><span class="s1">creator</span><span class="s3">.</span><span class="s1">executables</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">interpreter</span><span class="s3">):</span>
+                <span class="s1">exe</span><span class="s3">.</span><span class="s1">run</span><span class="s3">(</span><span class="s1">creator</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">symlinks</span><span class="s3">)</span>
+
+    <span class="s0">def </span><span class="s1">create_inline</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">from </span><span class="s1">venv </span><span class="s0">import </span><span class="s1">EnvBuilder  </span><span class="s2"># noqa: PLC0415</span>
+
+        <span class="s1">builder </span><span class="s3">= </span><span class="s1">EnvBuilder</span><span class="s3">(</span>
+            <span class="s1">system_site_packages</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">enable_system_site_package</span><span class="s3">,</span>
+            <span class="s1">clear</span><span class="s3">=</span><span class="s0">False</span><span class="s3">,</span>
+            <span class="s1">symlinks</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">symlinks</span><span class="s3">,</span>
+            <span class="s1">with_pip</span><span class="s3">=</span><span class="s0">False</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">builder</span><span class="s3">.</span><span class="s1">create</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">dest</span><span class="s3">))</span>
+
+    <span class="s0">def </span><span class="s1">create_via_sub_process</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">cmd </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">get_host_create_cmd</span><span class="s3">()</span>
+        <span class="s1">logging</span><span class="s3">.</span><span class="s1">info</span><span class="s3">(</span><span class="s4">&quot;using host built-in venv to create via %s&quot;</span><span class="s3">, </span><span class="s4">&quot; &quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">cmd</span><span class="s3">))</span>
+        <span class="s1">code</span><span class="s3">, </span><span class="s1">out</span><span class="s3">, </span><span class="s1">err </span><span class="s3">= </span><span class="s1">run_cmd</span><span class="s3">(</span><span class="s1">cmd</span><span class="s3">)</span>
+        <span class="s0">if </span><span class="s1">code </span><span class="s3">!= </span><span class="s5">0</span><span class="s3">:</span>
+            <span class="s0">raise </span><span class="s1">ProcessCallFailedError</span><span class="s3">(</span><span class="s1">code</span><span class="s3">, </span><span class="s1">out</span><span class="s3">, </span><span class="s1">err</span><span class="s3">, </span><span class="s1">cmd</span><span class="s3">)</span>
+
+    <span class="s0">def </span><span class="s1">get_host_create_cmd</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">cmd </span><span class="s3">= [</span><span class="s1">self</span><span class="s3">.</span><span class="s1">interpreter</span><span class="s3">.</span><span class="s1">system_executable</span><span class="s3">, </span><span class="s4">&quot;-m&quot;</span><span class="s3">, </span><span class="s4">&quot;venv&quot;</span><span class="s3">, </span><span class="s4">&quot;--without-pip&quot;</span><span class="s3">]</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">enable_system_site_package</span><span class="s3">:</span>
+            <span class="s1">cmd</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s4">&quot;--system-site-packages&quot;</span><span class="s3">)</span>
+        <span class="s1">cmd</span><span class="s3">.</span><span class="s1">extend</span><span class="s3">((</span><span class="s4">&quot;--symlinks&quot; </span><span class="s0">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">symlinks </span><span class="s0">else </span><span class="s4">&quot;--copies&quot;</span><span class="s3">, </span><span class="s1">str</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">dest</span><span class="s3">)))</span>
+        <span class="s0">return </span><span class="s1">cmd</span>
+
+    <span class="s0">def </span><span class="s1">set_pyenv_cfg</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2"># prefer venv options over ours, but keep our extra</span>
+        <span class="s1">venv_content </span><span class="s3">= </span><span class="s1">copy</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">pyenv_cfg</span><span class="s3">.</span><span class="s1">refresh</span><span class="s3">())</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">set_pyenv_cfg</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">pyenv_cfg</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">venv_content</span><span class="s3">)</span>
+
+    <span class="s0">def </span><span class="s1">__getattribute__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">item</span><span class="s3">):</span>
+        <span class="s1">describe </span><span class="s3">= </span><span class="s1">object</span><span class="s3">.</span><span class="s1">__getattribute__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s4">&quot;describe&quot;</span><span class="s3">)</span>
+        <span class="s0">if </span><span class="s1">describe </span><span class="s0">is not None and </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">describe</span><span class="s3">, </span><span class="s1">item</span><span class="s3">):</span>
+            <span class="s1">element </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">describe</span><span class="s3">, </span><span class="s1">item</span><span class="s3">)</span>
+            <span class="s0">if not </span><span class="s1">callable</span><span class="s3">(</span><span class="s1">element</span><span class="s3">) </span><span class="s0">or </span><span class="s1">item </span><span class="s3">== </span><span class="s4">&quot;script&quot;</span><span class="s3">:</span>
+                <span class="s0">return </span><span class="s1">element</span>
+        <span class="s0">return </span><span class="s1">object</span><span class="s3">.</span><span class="s1">__getattribute__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">item</span><span class="s3">)</span>
+
+
+<span class="s1">__all__ </span><span class="s3">= [</span>
+    <span class="s4">&quot;Venv&quot;</span><span class="s3">,</span>
+<span class="s3">]</span>
+</pre>
+</body>
+</html>

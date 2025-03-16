@@ -1,0 +1,109 @@
+<html>
+<head>
+<title>activate.sh</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+activate.sh</font>
+</center></td></tr></table>
+<pre><span class="s0"># This file must be used with &quot;source bin/activate&quot; *from bash*</span>
+<span class="s0"># you cannot run it directly</span>
+
+
+<span class="s2">if </span><span class="s3">[ </span><span class="s4">&quot;</span><span class="s2">$</span><span class="s3">{</span><span class="s1">BASH_SOURCE-</span><span class="s3">}</span><span class="s4">&quot; </span><span class="s1">= </span><span class="s4">&quot;</span><span class="s3">$0</span><span class="s4">&quot; </span><span class="s3">]</span><span class="s1">; </span><span class="s2">then</span>
+    <span class="s1">echo </span><span class="s4">&quot;You must source this script: \$ source </span><span class="s3">$0</span><span class="s4">&quot; </span><span class="s3">&gt;&amp;</span><span class="s5">2</span>
+    <span class="s1">exit </span><span class="s5">33</span>
+<span class="s2">fi</span>
+
+<span class="s1">deactivate </span><span class="s3">() {</span>
+    <span class="s1">unset -f pydoc </span><span class="s2">&gt;</span><span class="s1">/dev/null </span><span class="s5">2</span><span class="s3">&gt;&amp;</span><span class="s5">1 </span><span class="s2">|| </span><span class="s1">true</span>
+
+    <span class="s0"># reset old environment variables</span>
+    <span class="s0"># ! [ -z ${VAR+_} ] returns true if VAR is declared at all</span>
+    <span class="s2">if ! </span><span class="s3">[ </span><span class="s1">-z </span><span class="s4">&quot;</span><span class="s2">$</span><span class="s3">{</span><span class="s1">_OLD_VIRTUAL_PATH:+_</span><span class="s3">}</span><span class="s4">&quot; </span><span class="s3">] </span><span class="s1">; </span><span class="s2">then</span>
+        <span class="s1">PATH=</span><span class="s4">&quot;</span><span class="s3">$_OLD_VIRTUAL_PATH</span><span class="s4">&quot;</span>
+        <span class="s1">export PATH</span>
+        <span class="s1">unset _OLD_VIRTUAL_PATH</span>
+    <span class="s2">fi</span>
+    <span class="s2">if ! </span><span class="s3">[ </span><span class="s1">-z </span><span class="s4">&quot;</span><span class="s2">$</span><span class="s3">{</span><span class="s1">_OLD_VIRTUAL_PYTHONHOME+_</span><span class="s3">}</span><span class="s4">&quot; </span><span class="s3">] </span><span class="s1">; </span><span class="s2">then</span>
+        <span class="s1">PYTHONHOME=</span><span class="s4">&quot;</span><span class="s3">$_OLD_VIRTUAL_PYTHONHOME</span><span class="s4">&quot;</span>
+        <span class="s1">export PYTHONHOME</span>
+        <span class="s1">unset _OLD_VIRTUAL_PYTHONHOME</span>
+    <span class="s2">fi</span>
+
+    <span class="s0"># The hash command must be called to get it to forget past</span>
+    <span class="s0"># commands. Without forgetting past commands the $PATH changes</span>
+    <span class="s0"># we made may not be respected</span>
+    <span class="s1">hash -r </span><span class="s5">2</span><span class="s2">&gt;</span><span class="s1">/dev/null</span>
+
+    <span class="s2">if ! </span><span class="s3">[ </span><span class="s1">-z </span><span class="s4">&quot;</span><span class="s2">$</span><span class="s3">{</span><span class="s1">_OLD_VIRTUAL_PS1+_</span><span class="s3">}</span><span class="s4">&quot; </span><span class="s3">] </span><span class="s1">; </span><span class="s2">then</span>
+        <span class="s1">PS1=</span><span class="s4">&quot;</span><span class="s3">$_OLD_VIRTUAL_PS1</span><span class="s4">&quot;</span>
+        <span class="s1">export PS1</span>
+        <span class="s1">unset _OLD_VIRTUAL_PS1</span>
+    <span class="s2">fi</span>
+
+    <span class="s1">unset VIRTUAL_ENV</span>
+    <span class="s1">unset VIRTUAL_ENV_PROMPT</span>
+    <span class="s2">if </span><span class="s3">[ </span><span class="s2">! </span><span class="s4">&quot;</span><span class="s2">$</span><span class="s3">{</span><span class="s5">1</span><span class="s1">-</span><span class="s3">}</span><span class="s4">&quot; </span><span class="s1">= </span><span class="s4">&quot;nondestructive&quot; </span><span class="s3">] </span><span class="s1">; </span><span class="s2">then</span>
+    <span class="s0"># Self destruct!</span>
+        <span class="s1">unset -f deactivate</span>
+    <span class="s2">fi</span>
+<span class="s3">}</span>
+
+<span class="s0"># unset irrelevant variables</span>
+<span class="s1">deactivate nondestructive</span>
+
+<span class="s1">VIRTUAL_ENV=__VIRTUAL_ENV__</span>
+<span class="s2">if </span><span class="s3">([ </span><span class="s4">&quot;</span><span class="s3">$OSTYPE</span><span class="s4">&quot; </span><span class="s1">= </span><span class="s4">&quot;cygwin&quot; </span><span class="s3">] </span><span class="s2">|| </span><span class="s3">[ </span><span class="s4">&quot;</span><span class="s3">$OSTYPE</span><span class="s4">&quot; </span><span class="s1">= </span><span class="s4">&quot;msys&quot; </span><span class="s3">]) </span><span class="s2">&amp;&amp; $</span><span class="s3">(</span><span class="s1">command -v cygpath </span><span class="s3">&amp;&gt; </span><span class="s1">/dev/null</span><span class="s3">) </span><span class="s1">; </span><span class="s2">then</span>
+    <span class="s1">VIRTUAL_ENV=</span><span class="s2">$</span><span class="s3">(</span><span class="s1">cygpath -u </span><span class="s4">&quot;</span><span class="s3">$VIRTUAL_ENV</span><span class="s4">&quot;</span><span class="s3">)</span>
+<span class="s2">fi</span>
+<span class="s1">export VIRTUAL_ENV</span>
+
+<span class="s1">_OLD_VIRTUAL_PATH=</span><span class="s4">&quot;</span><span class="s3">$PATH</span><span class="s4">&quot;</span>
+<span class="s1">PATH=</span><span class="s4">&quot;</span><span class="s3">$VIRTUAL_ENV</span><span class="s4">/&quot;</span><span class="s1">__BIN_NAME__</span><span class="s4">&quot;:</span><span class="s3">$PATH</span><span class="s4">&quot;</span>
+<span class="s1">export PATH</span>
+
+<span class="s2">if </span><span class="s3">[ </span><span class="s4">&quot;x&quot;</span><span class="s1">__VIRTUAL_PROMPT__ != x </span><span class="s3">] </span><span class="s1">; </span><span class="s2">then</span>
+    <span class="s1">VIRTUAL_ENV_PROMPT=__VIRTUAL_PROMPT__</span>
+<span class="s2">else</span>
+    <span class="s1">VIRTUAL_ENV_PROMPT=</span><span class="s2">$</span><span class="s3">(</span><span class="s1">basename </span><span class="s4">&quot;</span><span class="s3">$VIRTUAL_ENV</span><span class="s4">&quot;</span><span class="s3">)</span>
+<span class="s2">fi</span>
+<span class="s1">export VIRTUAL_ENV_PROMPT</span>
+
+<span class="s0"># unset PYTHONHOME if set</span>
+<span class="s2">if ! </span><span class="s3">[ </span><span class="s1">-z </span><span class="s4">&quot;</span><span class="s2">$</span><span class="s3">{</span><span class="s1">PYTHONHOME+_</span><span class="s3">}</span><span class="s4">&quot; </span><span class="s3">] </span><span class="s1">; </span><span class="s2">then</span>
+    <span class="s1">_OLD_VIRTUAL_PYTHONHOME=</span><span class="s4">&quot;</span><span class="s3">$PYTHONHOME</span><span class="s4">&quot;</span>
+    <span class="s1">unset PYTHONHOME</span>
+<span class="s2">fi</span>
+
+<span class="s2">if </span><span class="s3">[ </span><span class="s1">-z </span><span class="s4">&quot;</span><span class="s2">$</span><span class="s3">{</span><span class="s1">VIRTUAL_ENV_DISABLE_PROMPT-</span><span class="s3">}</span><span class="s4">&quot; </span><span class="s3">] </span><span class="s1">; </span><span class="s2">then</span>
+    <span class="s1">_OLD_VIRTUAL_PS1=</span><span class="s4">&quot;</span><span class="s2">$</span><span class="s3">{</span><span class="s1">PS1-</span><span class="s3">}</span><span class="s4">&quot;</span>
+    <span class="s1">PS1=</span><span class="s4">&quot;(</span><span class="s2">$</span><span class="s3">{</span><span class="s1">VIRTUAL_ENV_PROMPT</span><span class="s3">}</span><span class="s4">) </span><span class="s2">$</span><span class="s3">{</span><span class="s1">PS1-</span><span class="s3">}</span><span class="s4">&quot;</span>
+    <span class="s1">export PS1</span>
+<span class="s2">fi</span>
+
+<span class="s0"># Make sure to unalias pydoc if it's already there</span>
+<span class="s1">alias pydoc </span><span class="s5">2</span><span class="s2">&gt;</span><span class="s1">/dev/null </span><span class="s2">&gt;</span><span class="s1">/dev/null </span><span class="s2">&amp;&amp; </span><span class="s1">unalias pydoc </span><span class="s2">|| </span><span class="s1">true</span>
+
+<span class="s1">pydoc </span><span class="s3">() {</span>
+    <span class="s1">python -m pydoc </span><span class="s4">&quot;</span><span class="s3">$@</span><span class="s4">&quot;</span>
+<span class="s3">}</span>
+
+<span class="s0"># The hash command must be called to get it to forget past</span>
+<span class="s0"># commands. Without forgetting past commands the $PATH changes</span>
+<span class="s0"># we made may not be respected</span>
+<span class="s1">hash -r </span><span class="s5">2</span><span class="s2">&gt;</span><span class="s1">/dev/null </span><span class="s2">|| </span><span class="s1">true</span>
+</pre>
+</body>
+</html>

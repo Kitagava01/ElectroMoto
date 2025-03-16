@@ -1,0 +1,108 @@
+<html>
+<head>
+<title>switch_amd64_unix.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_amd64_unix.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * this is the internal transfer function. 
+ * 
+ * HISTORY 
+ * 3-May-13   Ralf Schmitt  &lt;ralf@systemexit.de&gt; 
+ *     Add support for strange GCC caller-save decisions 
+ *     (ported from switch_aarch64_gcc.h) 
+ * 18-Aug-11  Alexey Borzenkov  &lt;snaury@gmail.com&gt; 
+ *      Correctly save rbp, csr and cw 
+ * 01-Apr-04  Hye-Shik Chang    &lt;perky@FreeBSD.org&gt; 
+ *      Ported from i386 to amd64. 
+ * 24-Nov-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      needed to add another magic constant to insure 
+ *      that f in slp_eval_frame(PyFrameObject *f) 
+ *      STACK_REFPLUS will probably be 1 in most cases. 
+ *      gets included into the saved stack area. 
+ * 17-Sep-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      after virtualizing stack save/restore, the 
+ *      stack size shrunk a bit. Needed to introduce 
+ *      an adjustment STACK_MAGIC per platform. 
+ * 15-Sep-02  Gerd Woetzel       &lt;gerd.woetzel@GMD.DE&gt; 
+ *      slightly changed framework for spark 
+ * 31-Avr-02  Armin Rigo         &lt;arigo@ulb.ac.be&gt; 
+ *      Added ebx, esi and edi register-saves. 
+ * 01-Mar-02  Samual M. Rushing  &lt;rushing@ironport.com&gt; 
+ *      Ported from i386. 
+ */</span>
+
+<span class="s2">#define </span><span class="s1">STACK_REFPLUS </span><span class="s3">1</span>
+
+<span class="s2">#ifdef </span><span class="s1">SLP_EVAL</span>
+
+<span class="s0">/* #define STACK_MAGIC 3 */</span>
+<span class="s0">/* the above works fine with gcc 2.96, but 2.95.3 wants this */</span>
+<span class="s2">#define </span><span class="s1">STACK_MAGIC </span><span class="s3">0</span>
+
+<span class="s2">#define </span><span class="s1">REGS_TO_SAVE </span><span class="s4">&quot;r12&quot;</span><span class="s1">, </span><span class="s4">&quot;r13&quot;</span><span class="s1">, </span><span class="s4">&quot;r14&quot;</span><span class="s1">, </span><span class="s4">&quot;r15&quot;</span>
+
+<span class="s2">static int</span>
+<span class="s1">slp_switch(</span><span class="s2">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s2">int </span><span class="s1">err;</span>
+    <span class="s2">void</span><span class="s1">* rbp;</span>
+    <span class="s2">void</span><span class="s1">* rbx;</span>
+    <span class="s2">unsigned int </span><span class="s1">csr;</span>
+    <span class="s2">unsigned short </span><span class="s1">cw;</span>
+    <span class="s0">/* This used to be declared 'register', but that does nothing in 
+    modern compilers and is explicitly forbidden in some new 
+    standards. */</span>
+    <span class="s2">long </span><span class="s1">*stackref, stsizediff;</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;fstcw %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=m&quot; </span><span class="s1">(cw));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;stmxcsr %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=m&quot; </span><span class="s1">(csr));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;movq %%rbp, %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=m&quot; </span><span class="s1">(rbp));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;movq %%rbx, %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=m&quot; </span><span class="s1">(rbx));</span>
+    <span class="s1">__asm__ (</span><span class="s4">&quot;movq %%rsp, %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=g&quot; </span><span class="s1">(stackref));</span>
+    <span class="s1">{</span>
+        <span class="s1">SLP_SAVE_STATE(stackref, stsizediff);</span>
+        <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span>
+            <span class="s4">&quot;addq %0, %%rsp</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;addq %0, %%rbp</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s1">:</span>
+            <span class="s1">: </span><span class="s4">&quot;r&quot; </span><span class="s1">(stsizediff)</span>
+            <span class="s1">);</span>
+        <span class="s1">SLP_RESTORE_STATE();</span>
+        <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;xorq %%rax, %%rax&quot; </span><span class="s1">: </span><span class="s4">&quot;=a&quot; </span><span class="s1">(err));</span>
+    <span class="s1">}</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;movq %0, %%rbx&quot; </span><span class="s1">: : </span><span class="s4">&quot;m&quot; </span><span class="s1">(rbx));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;movq %0, %%rbp&quot; </span><span class="s1">: : </span><span class="s4">&quot;m&quot; </span><span class="s1">(rbp));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;ldmxcsr %0&quot; </span><span class="s1">: : </span><span class="s4">&quot;m&quot; </span><span class="s1">(csr));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;fldcw %0&quot; </span><span class="s1">: : </span><span class="s4">&quot;m&quot; </span><span class="s1">(cw));</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s2">return </span><span class="s1">err;</span>
+<span class="s1">}</span>
+
+<span class="s2">#endif</span>
+
+<span class="s0">/* 
+ * further self-processing support 
+ */</span>
+
+<span class="s0">/* 
+ * if you want to add self-inspection tools, place them 
+ * here. See the x86_msvc for the necessary defines. 
+ * These features are highly experimental und not 
+ * essential yet. 
+ */</span>
+</pre>
+</body>
+</html>

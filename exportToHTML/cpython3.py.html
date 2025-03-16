@@ -1,0 +1,158 @@
+<html>
+<head>
+<title>cpython3.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #5f826b; font-style: italic;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cpython3.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">abc</span>
+<span class="s0">import </span><span class="s1">fnmatch</span>
+<span class="s0">from </span><span class="s1">itertools </span><span class="s0">import </span><span class="s1">chain</span>
+<span class="s0">from </span><span class="s1">operator </span><span class="s0">import </span><span class="s1">methodcaller </span><span class="s0">as </span><span class="s1">method</span>
+<span class="s0">from </span><span class="s1">pathlib </span><span class="s0">import </span><span class="s1">Path</span>
+<span class="s0">from </span><span class="s1">textwrap </span><span class="s0">import </span><span class="s1">dedent</span>
+
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s2">.</span><span class="s1">create</span><span class="s2">.</span><span class="s1">describe </span><span class="s0">import </span><span class="s1">Python3Supports</span>
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s2">.</span><span class="s1">create</span><span class="s2">.</span><span class="s1">via_global_ref</span><span class="s2">.</span><span class="s1">builtin</span><span class="s2">.</span><span class="s1">ref </span><span class="s0">import </span><span class="s1">PathRefToDest</span>
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s2">.</span><span class="s1">create</span><span class="s2">.</span><span class="s1">via_global_ref</span><span class="s2">.</span><span class="s1">store </span><span class="s0">import </span><span class="s1">is_store_python</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">common </span><span class="s0">import </span><span class="s1">CPython</span><span class="s2">, </span><span class="s1">CPythonPosix</span><span class="s2">, </span><span class="s1">CPythonWindows</span><span class="s2">, </span><span class="s1">is_mac_os_framework</span><span class="s2">, </span><span class="s1">is_macos_brew</span>
+
+
+<span class="s0">class </span><span class="s1">CPython3</span><span class="s2">(</span><span class="s1">CPython</span><span class="s2">, </span><span class="s1">Python3Supports</span><span class="s2">, </span><span class="s1">abc</span><span class="s2">.</span><span class="s1">ABC</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;CPython 3 or later.&quot;&quot;&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">CPython3Posix</span><span class="s2">(</span><span class="s1">CPythonPosix</span><span class="s2">, </span><span class="s1">CPython3</span><span class="s2">):</span>
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">can_describe</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s2">(</span>
+            <span class="s1">is_mac_os_framework</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">) </span><span class="s0">is False</span>
+            <span class="s0">and </span><span class="s1">is_macos_brew</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">) </span><span class="s0">is False</span>
+            <span class="s0">and </span><span class="s1">super</span><span class="s2">().</span><span class="s1">can_describe</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)</span>
+        <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">env_patch_text</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">text </span><span class="s2">= </span><span class="s1">super</span><span class="s2">().</span><span class="s1">env_patch_text</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">pyvenv_launch_patch_active</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">interpreter</span><span class="s2">):</span>
+            <span class="s1">text </span><span class="s2">+= </span><span class="s1">dedent</span><span class="s2">(</span>
+                <span class="s4">&quot;&quot;&quot; 
+                # for https://github.com/python/cpython/pull/9516, see https://github.com/pypa/virtualenv/issues/1704 
+                import os 
+                if &quot;__PYVENV_LAUNCHER__&quot; in os.environ: 
+                    del os.environ[&quot;__PYVENV_LAUNCHER__&quot;] 
+                &quot;&quot;&quot;</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">text</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">pyvenv_launch_patch_active</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s1">ver </span><span class="s2">= </span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">version_info</span>
+        <span class="s0">return </span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">platform </span><span class="s2">== </span><span class="s4">&quot;darwin&quot; </span><span class="s0">and </span><span class="s2">((</span><span class="s5">3</span><span class="s2">, </span><span class="s5">7</span><span class="s2">, </span><span class="s5">8</span><span class="s2">) &gt; </span><span class="s1">ver </span><span class="s2">&gt;= (</span><span class="s5">3</span><span class="s2">, </span><span class="s5">7</span><span class="s2">) </span><span class="s0">or </span><span class="s2">(</span><span class="s5">3</span><span class="s2">, </span><span class="s5">8</span><span class="s2">, </span><span class="s5">3</span><span class="s2">) &gt; </span><span class="s1">ver </span><span class="s2">&gt;= (</span><span class="s5">3</span><span class="s2">, </span><span class="s5">8</span><span class="s2">))</span>
+
+
+<span class="s0">class </span><span class="s1">CPython3Windows</span><span class="s2">(</span><span class="s1">CPythonWindows</span><span class="s2">, </span><span class="s1">CPython3</span><span class="s2">):</span>
+    <span class="s3">&quot;&quot;&quot;CPython 3 on Windows.&quot;&quot;&quot;</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">setup_meta</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">is_store_python</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">):  </span><span class="s6"># store python is not supported here</span>
+            <span class="s0">return None</span>
+        <span class="s0">return </span><span class="s1">super</span><span class="s2">().</span><span class="s1">setup_meta</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">sources</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">has_shim</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">):</span>
+            <span class="s1">refs </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">executables</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">refs </span><span class="s2">= </span><span class="s1">chain</span><span class="s2">(</span>
+                <span class="s1">cls</span><span class="s2">.</span><span class="s1">executables</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">),</span>
+                <span class="s1">cls</span><span class="s2">.</span><span class="s1">dll_and_pyd</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">),</span>
+                <span class="s1">cls</span><span class="s2">.</span><span class="s1">python_zip</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">),</span>
+            <span class="s2">)</span>
+        <span class="s0">yield from </span><span class="s1">refs</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">executables</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">super</span><span class="s2">().</span><span class="s1">sources</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">has_shim</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">version_info</span><span class="s2">.</span><span class="s1">minor </span><span class="s2">&gt;= </span><span class="s5">7 </span><span class="s0">and </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">shim</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">) </span><span class="s0">is not None  </span><span class="s6"># noqa: PLR2004</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">shim</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s1">shim </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">system_stdlib</span><span class="s2">) / </span><span class="s4">&quot;venv&quot; </span><span class="s2">/ </span><span class="s4">&quot;scripts&quot; </span><span class="s2">/ </span><span class="s4">&quot;nt&quot; </span><span class="s2">/ </span><span class="s4">&quot;python.exe&quot;</span>
+        <span class="s0">if </span><span class="s1">shim</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">():</span>
+            <span class="s0">return </span><span class="s1">shim</span>
+        <span class="s0">return None</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">host_python</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s0">if </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">has_shim</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">):</span>
+            <span class="s6"># starting with CPython 3.7 Windows ships with a venvlauncher.exe that avoids the need for dll/pyd copies</span>
+            <span class="s6"># it also means the wrapper must be copied to avoid bugs such as https://bugs.python.org/issue42013</span>
+            <span class="s0">return </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">shim</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">super</span><span class="s2">().</span><span class="s1">host_python</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">dll_and_pyd</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s1">folders </span><span class="s2">= [</span><span class="s1">Path</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">system_executable</span><span class="s2">).</span><span class="s1">parent</span><span class="s2">]</span>
+
+        <span class="s6"># May be missing on some Python hosts.</span>
+        <span class="s6"># See https://github.com/pypa/virtualenv/issues/2368</span>
+        <span class="s1">dll_folder </span><span class="s2">= </span><span class="s1">Path</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">system_prefix</span><span class="s2">) / </span><span class="s4">&quot;DLLs&quot;</span>
+        <span class="s0">if </span><span class="s1">dll_folder</span><span class="s2">.</span><span class="s1">is_dir</span><span class="s2">():</span>
+            <span class="s1">folders</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">dll_folder</span><span class="s2">)</span>
+
+        <span class="s0">for </span><span class="s1">folder </span><span class="s0">in </span><span class="s1">folders</span><span class="s2">:</span>
+            <span class="s0">for </span><span class="s1">file </span><span class="s0">in </span><span class="s1">folder</span><span class="s2">.</span><span class="s1">iterdir</span><span class="s2">():</span>
+                <span class="s0">if </span><span class="s1">file</span><span class="s2">.</span><span class="s1">suffix </span><span class="s0">in </span><span class="s2">{</span><span class="s4">&quot;.pyd&quot;</span><span class="s2">, </span><span class="s4">&quot;.dll&quot;</span><span class="s2">}:</span>
+                    <span class="s0">yield </span><span class="s1">PathRefToDest</span><span class="s2">(</span><span class="s1">file</span><span class="s2">, </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">to_bin</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">python_zip</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">interpreter</span><span class="s2">):</span>
+        <span class="s4">&quot;&quot;&quot; 
+        &quot;python{VERSION}.zip&quot; contains compiled *.pyc std lib packages, where 
+        &quot;VERSION&quot; is `py_version_nodot` var from the `sysconfig` module. 
+        :see: https://docs.python.org/3/using/windows.html#the-embeddable-package 
+        :see: `discovery.py_info.PythonInfo` class (interpreter). 
+        :see: `python -m sysconfig` output. 
+ 
+        :note: The embeddable Python distribution for Windows includes 
+        &quot;python{VERSION}.zip&quot; and &quot;python{VERSION}._pth&quot; files. User can 
+        move/rename *zip* file and edit `sys.path` by editing *_pth* file. 
+        Here the `pattern` is used only for the default *zip* file name! 
+        &quot;&quot;&quot;  </span><span class="s6"># noqa: D205</span>
+        <span class="s1">pattern </span><span class="s2">= </span><span class="s4">f&quot;*python</span><span class="s0">{</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">version_nodot</span><span class="s0">}</span><span class="s4">.zip&quot;</span>
+        <span class="s1">matches </span><span class="s2">= </span><span class="s1">fnmatch</span><span class="s2">.</span><span class="s1">filter</span><span class="s2">(</span><span class="s1">interpreter</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">pattern</span><span class="s2">)</span>
+        <span class="s1">matched_paths </span><span class="s2">= </span><span class="s1">map</span><span class="s2">(</span><span class="s1">Path</span><span class="s2">, </span><span class="s1">matches</span><span class="s2">)</span>
+        <span class="s1">existing_paths </span><span class="s2">= </span><span class="s1">filter</span><span class="s2">(</span><span class="s1">method</span><span class="s2">(</span><span class="s4">&quot;exists&quot;</span><span class="s2">), </span><span class="s1">matched_paths</span><span class="s2">)</span>
+        <span class="s1">path </span><span class="s2">= </span><span class="s1">next</span><span class="s2">(</span><span class="s1">existing_paths</span><span class="s2">, </span><span class="s0">None</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">path </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">yield </span><span class="s1">PathRefToDest</span><span class="s2">(</span><span class="s1">path</span><span class="s2">, </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">to_bin</span><span class="s2">)</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s4">&quot;CPython3&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;CPython3Posix&quot;</span><span class="s2">,</span>
+    <span class="s4">&quot;CPython3Windows&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

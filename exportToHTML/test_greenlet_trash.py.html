@@ -1,0 +1,210 @@
+<html>
+<head>
+<title>test_greenlet_trash.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #2aacb8;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_greenlet_trash.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -*-</span>
+<span class="s2">&quot;&quot;&quot; 
+Tests for greenlets interacting with the CPython trash can API. 
+ 
+The CPython trash can API is not designed to be re-entered from a 
+single thread. But this can happen using greenlets, if something 
+during the object deallocation process switches greenlets, and this second 
+greenlet then causes the trash can to get entered again. Here, we do this 
+very explicitly, but in other cases (like gevent) it could be arbitrarily more 
+complicated: for example, a weakref callback might try to acquire a lock that's 
+already held by another greenlet; that would allow a greenlet switch to occur. 
+ 
+See https://github.com/gevent/gevent/issues/1909 
+ 
+This test is fragile and relies on details of the CPython 
+implementation (like most of the rest of this package): 
+ 
+    - We enter the trashcan and deferred deallocation after 
+      ``_PyTrash_UNWIND_LEVEL`` calls. This constant, defined in 
+      CPython's object.c, is generally 50. That's basically how many objects are required to 
+      get us into the deferred deallocation situation. 
+ 
+    - The test fails by hitting an ``assert()`` in object.c; if the 
+      build didn't enable assert, then we don't catch this. 
+ 
+    - If the test fails in that way, the interpreter crashes. 
+&quot;&quot;&quot;</span>
+<span class="s3">from </span><span class="s1">__future__ </span><span class="s3">import </span><span class="s1">print_function</span><span class="s4">, </span><span class="s1">absolute_import</span><span class="s4">, </span><span class="s1">division</span>
+
+<span class="s3">import </span><span class="s1">unittest</span>
+
+
+<span class="s3">class </span><span class="s1">TestTrashCanReEnter</span><span class="s4">(</span><span class="s1">unittest</span><span class="s4">.</span><span class="s1">TestCase</span><span class="s4">):</span>
+
+    <span class="s3">def </span><span class="s1">test_it</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s0"># pylint:disable-next=no-name-in-module</span>
+            <span class="s3">from </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">_greenlet </span><span class="s3">import </span><span class="s1">get_tstate_trash_delete_nesting </span><span class="s0"># pylint:disable=unused-import</span>
+        <span class="s3">except </span><span class="s1">ImportError</span><span class="s4">:</span>
+            <span class="s3">import </span><span class="s1">sys</span>
+            <span class="s0"># Python 3.13 has not &quot;trash delete nesting&quot; anymore (but &quot;delete later&quot;)</span>
+            <span class="s3">assert </span><span class="s1">sys</span><span class="s4">.</span><span class="s1">version_info</span><span class="s4">[:</span><span class="s5">2</span><span class="s4">] &gt;= (</span><span class="s5">3</span><span class="s4">, </span><span class="s5">13</span><span class="s4">)</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">skipTest</span><span class="s4">(</span><span class="s6">&quot;get_tstate_trash_delete_nesting is not available.&quot;</span><span class="s4">)</span>
+
+        <span class="s0"># Try several times to trigger it, because it isn't 100%</span>
+        <span class="s0"># reliable.</span>
+        <span class="s3">for </span><span class="s1">_ </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s5">10</span><span class="s4">):</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">check_it</span><span class="s4">()</span>
+
+    <span class="s3">def </span><span class="s1">check_it</span><span class="s4">(</span><span class="s1">self</span><span class="s4">): </span><span class="s0"># pylint:disable=too-many-statements</span>
+        <span class="s3">import </span><span class="s1">greenlet</span>
+        <span class="s3">from </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">_greenlet </span><span class="s3">import </span><span class="s1">get_tstate_trash_delete_nesting </span><span class="s0"># pylint:disable=no-name-in-module</span>
+        <span class="s1">main </span><span class="s4">= </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">getcurrent</span><span class="s4">()</span>
+
+        <span class="s3">assert </span><span class="s1">get_tstate_trash_delete_nesting</span><span class="s4">() == </span><span class="s5">0</span>
+
+        <span class="s0"># We expect to be in deferred deallocation after this many</span>
+        <span class="s0"># deallocations have occurred. TODO: I wish we had a better way to do</span>
+        <span class="s0"># this --- that was before get_tstate_trash_delete_nesting; perhaps</span>
+        <span class="s0"># we can use that API to do better?</span>
+        <span class="s1">TRASH_UNWIND_LEVEL </span><span class="s4">= </span><span class="s5">50</span>
+        <span class="s0"># How many objects to put in a container; it's the container that</span>
+        <span class="s0"># queues objects for deferred deallocation.</span>
+        <span class="s1">OBJECTS_PER_CONTAINER </span><span class="s4">= </span><span class="s5">500</span>
+
+        <span class="s3">class </span><span class="s1">Dealloc</span><span class="s4">: </span><span class="s0"># define the class here because we alter class variables each time we run.</span>
+            <span class="s2">&quot;&quot;&quot; 
+            An object with a ``__del__`` method. When it starts getting deallocated 
+            from a deferred trash can run, it switches greenlets, allocates more objects 
+            which then also go in the trash can. If we don't save state appropriately, 
+            nesting gets out of order and we can crash the interpreter. 
+            &quot;&quot;&quot;</span>
+
+            <span class="s0">#: Has our deallocation actually run and switched greenlets?</span>
+            <span class="s0">#: When it does, this will be set to the current greenlet. This should</span>
+            <span class="s0">#: be happening in the main greenlet, so we check that down below.</span>
+            <span class="s1">SPAWNED </span><span class="s4">= </span><span class="s3">False</span>
+
+            <span class="s0">#: Has the background greenlet run?</span>
+            <span class="s1">BG_RAN </span><span class="s4">= </span><span class="s3">False</span>
+
+            <span class="s1">BG_GLET </span><span class="s4">= </span><span class="s3">None</span>
+
+            <span class="s0">#: How many of these things have ever been allocated.</span>
+            <span class="s1">CREATED </span><span class="s4">= </span><span class="s5">0</span>
+
+            <span class="s0">#: How many of these things have ever been deallocated.</span>
+            <span class="s1">DESTROYED </span><span class="s4">= </span><span class="s5">0</span>
+
+            <span class="s0">#: How many were destroyed not in the main greenlet. There should always</span>
+            <span class="s0">#: be some.</span>
+            <span class="s0">#: If the test is broken or things change in the trashcan implementation,</span>
+            <span class="s0">#: this may not be correct.</span>
+            <span class="s1">DESTROYED_BG </span><span class="s4">= </span><span class="s5">0</span>
+
+            <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">sequence_number</span><span class="s4">):</span>
+                <span class="s2">&quot;&quot;&quot; 
+                :param sequence_number: The ordinal of this object during 
+                   one particular creation run. This is used to detect (guess, really) 
+                   when we have entered the trash can's deferred deallocation. 
+                &quot;&quot;&quot;</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">i </span><span class="s4">= </span><span class="s1">sequence_number</span>
+                <span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">CREATED </span><span class="s4">+= </span><span class="s5">1</span>
+
+            <span class="s3">def </span><span class="s1">__del__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+                <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">i </span><span class="s4">== </span><span class="s1">TRASH_UNWIND_LEVEL </span><span class="s3">and not </span><span class="s1">self</span><span class="s4">.</span><span class="s1">SPAWNED</span><span class="s4">:</span>
+                    <span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">SPAWNED </span><span class="s4">= </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">getcurrent</span><span class="s4">()</span>
+                    <span class="s1">other </span><span class="s4">= </span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">BG_GLET </span><span class="s4">= </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">greenlet</span><span class="s4">(</span><span class="s1">background_greenlet</span><span class="s4">)</span>
+                    <span class="s1">x </span><span class="s4">= </span><span class="s1">other</span><span class="s4">.</span><span class="s1">switch</span><span class="s4">()</span>
+                    <span class="s3">assert </span><span class="s1">x </span><span class="s4">== </span><span class="s5">42</span>
+                    <span class="s0"># It's important that we don't switch back to the greenlet,</span>
+                    <span class="s0"># we leave it hanging there in an incomplete state. But we don't let it</span>
+                    <span class="s0"># get collected, either. If we complete it now, while we're still</span>
+                    <span class="s0"># in the scope of the initial trash can, things work out and we</span>
+                    <span class="s0"># don't see the problem. We need this greenlet to complete</span>
+                    <span class="s0"># at some point in the future, after we've exited this trash can invocation.</span>
+                    <span class="s3">del </span><span class="s1">other</span>
+                <span class="s3">elif </span><span class="s1">self</span><span class="s4">.</span><span class="s1">i </span><span class="s4">== </span><span class="s5">40 </span><span class="s3">and </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">getcurrent</span><span class="s4">() </span><span class="s3">is not </span><span class="s1">main</span><span class="s4">:</span>
+                    <span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">BG_RAN </span><span class="s4">= </span><span class="s3">True</span>
+                    <span class="s3">try</span><span class="s4">:</span>
+                        <span class="s1">main</span><span class="s4">.</span><span class="s1">switch</span><span class="s4">(</span><span class="s5">42</span><span class="s4">)</span>
+                    <span class="s3">except </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">GreenletExit </span><span class="s3">as </span><span class="s1">ex</span><span class="s4">:</span>
+                        <span class="s0"># We expect this; all references to us go away</span>
+                        <span class="s0"># while we're still running, and we need to finish deleting</span>
+                        <span class="s0"># ourself.</span>
+                        <span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">BG_RAN </span><span class="s4">= </span><span class="s1">type</span><span class="s4">(</span><span class="s1">ex</span><span class="s4">)</span>
+                        <span class="s3">del </span><span class="s1">ex</span>
+
+                <span class="s0"># Record the fact that we're dead last of all. This ensures that</span>
+                <span class="s0"># we actually get returned too.</span>
+                <span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">DESTROYED </span><span class="s4">+= </span><span class="s5">1</span>
+                <span class="s3">if </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">getcurrent</span><span class="s4">() </span><span class="s3">is not </span><span class="s1">main</span><span class="s4">:</span>
+                    <span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">DESTROYED_BG </span><span class="s4">+= </span><span class="s5">1</span>
+
+
+        <span class="s3">def </span><span class="s1">background_greenlet</span><span class="s4">():</span>
+            <span class="s0"># We direct through a second function, instead of</span>
+            <span class="s0"># directly calling ``make_some()``, so that we have complete</span>
+            <span class="s0"># control over when these objects are destroyed: we need them</span>
+            <span class="s0"># to be destroyed in the context of the background greenlet</span>
+            <span class="s1">t </span><span class="s4">= </span><span class="s1">make_some</span><span class="s4">()</span>
+            <span class="s3">del </span><span class="s1">t </span><span class="s0"># Triggere deletion.</span>
+
+        <span class="s3">def </span><span class="s1">make_some</span><span class="s4">():</span>
+            <span class="s1">t </span><span class="s4">= ()</span>
+            <span class="s1">i </span><span class="s4">= </span><span class="s1">OBJECTS_PER_CONTAINER</span>
+            <span class="s3">while </span><span class="s1">i</span><span class="s4">:</span>
+                <span class="s0"># Nest the tuples; it's the recursion that gets us</span>
+                <span class="s0"># into trash.</span>
+                <span class="s1">t </span><span class="s4">= (</span><span class="s1">Dealloc</span><span class="s4">(</span><span class="s1">i</span><span class="s4">), </span><span class="s1">t</span><span class="s4">)</span>
+                <span class="s1">i </span><span class="s4">-= </span><span class="s5">1</span>
+            <span class="s3">return </span><span class="s1">t</span>
+
+
+        <span class="s1">some </span><span class="s4">= </span><span class="s1">make_some</span><span class="s4">()</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertEqual</span><span class="s4">(</span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">CREATED</span><span class="s4">, </span><span class="s1">OBJECTS_PER_CONTAINER</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertEqual</span><span class="s4">(</span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">DESTROYED</span><span class="s4">, </span><span class="s5">0</span><span class="s4">)</span>
+
+        <span class="s0"># If we're going to crash, it should be on the following line.</span>
+        <span class="s0"># We only crash if ``assert()`` is enabled, of course.</span>
+        <span class="s3">del </span><span class="s1">some</span>
+
+        <span class="s0"># For non-debug builds of CPython, we won't crash. The best we can do is check</span>
+        <span class="s0"># the nesting level explicitly.</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertEqual</span><span class="s4">(</span><span class="s5">0</span><span class="s4">, </span><span class="s1">get_tstate_trash_delete_nesting</span><span class="s4">())</span>
+
+        <span class="s0"># Discard this, raising GreenletExit into where it is waiting.</span>
+        <span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">BG_GLET </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s0"># The same nesting level maintains.</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertEqual</span><span class="s4">(</span><span class="s5">0</span><span class="s4">, </span><span class="s1">get_tstate_trash_delete_nesting</span><span class="s4">())</span>
+
+        <span class="s0"># We definitely cleaned some up in the background</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertGreater</span><span class="s4">(</span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">DESTROYED_BG</span><span class="s4">, </span><span class="s5">0</span><span class="s4">)</span>
+
+        <span class="s0"># Make sure all the cleanups happened.</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertIs</span><span class="s4">(</span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">SPAWNED</span><span class="s4">, </span><span class="s1">main</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertTrue</span><span class="s4">(</span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">BG_RAN</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertEqual</span><span class="s4">(</span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">BG_RAN</span><span class="s4">, </span><span class="s1">greenlet</span><span class="s4">.</span><span class="s1">GreenletExit</span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertEqual</span><span class="s4">(</span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">CREATED</span><span class="s4">, </span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">DESTROYED </span><span class="s4">)</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">assertEqual</span><span class="s4">(</span><span class="s1">Dealloc</span><span class="s4">.</span><span class="s1">CREATED</span><span class="s4">, </span><span class="s1">OBJECTS_PER_CONTAINER </span><span class="s4">* </span><span class="s5">2</span><span class="s4">)</span>
+
+        <span class="s3">import </span><span class="s1">gc</span>
+        <span class="s1">gc</span><span class="s4">.</span><span class="s1">collect</span><span class="s4">()</span>
+
+
+<span class="s3">if </span><span class="s1">__name__ </span><span class="s4">== </span><span class="s6">'__main__'</span><span class="s4">:</span>
+    <span class="s1">unittest</span><span class="s4">.</span><span class="s1">main</span><span class="s4">()</span>
+</pre>
+</body>
+</html>

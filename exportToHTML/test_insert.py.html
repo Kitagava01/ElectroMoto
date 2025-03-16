@@ -1,0 +1,654 @@
+<html>
+<head>
+<title>test_insert.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_insert.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># testing/suite/test_insert.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+<span class="s0"># mypy: ignore-errors</span>
+
+<span class="s2">from </span><span class="s1">decimal </span><span class="s2">import </span><span class="s1">Decimal</span>
+<span class="s2">import </span><span class="s1">uuid</span>
+
+<span class="s2">from </span><span class="s3">. </span><span class="s2">import </span><span class="s1">testing</span>
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">fixtures</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">assertions </span><span class="s2">import </span><span class="s1">eq_</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">config </span><span class="s2">import </span><span class="s1">requirements</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">Column</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">Table</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">Double</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">Float</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">Identity</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">Integer</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">literal</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">literal_column</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">Numeric</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">select</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">String</span>
+<span class="s2">from </span><span class="s3">...</span><span class="s1">types </span><span class="s2">import </span><span class="s1">LargeBinary</span>
+<span class="s2">from </span><span class="s3">...</span><span class="s1">types </span><span class="s2">import </span><span class="s1">UUID</span>
+<span class="s2">from </span><span class="s3">...</span><span class="s1">types </span><span class="s2">import </span><span class="s1">Uuid</span>
+
+
+<span class="s2">class </span><span class="s1">LastrowidTest</span><span class="s3">(</span><span class="s1">fixtures</span><span class="s3">.</span><span class="s1">TablesTest</span><span class="s3">):</span>
+    <span class="s1">run_deletes </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+
+    <span class="s1">__backend__ </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s1">__requires__ </span><span class="s3">= </span><span class="s4">&quot;implements_get_lastrowid&quot;</span><span class="s3">, </span><span class="s4">&quot;autoincrement_insert&quot;</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">define_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">):</span>
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;autoinc_pk&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span>
+                <span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">test_needs_autoincrement</span><span class="s3">=</span><span class="s2">True</span>
+            <span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+            <span class="s1">implicit_returning</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;manual_pk&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">autoincrement</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+            <span class="s1">implicit_returning</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_assert_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">table</span><span class="s3">, </span><span class="s1">conn</span><span class="s3">):</span>
+        <span class="s1">row </span><span class="s3">= </span><span class="s1">conn</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">select</span><span class="s3">()).</span><span class="s1">first</span><span class="s3">()</span>
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">row</span><span class="s3">,</span>
+            <span class="s3">(</span>
+                <span class="s1">conn</span><span class="s3">.</span><span class="s1">dialect</span><span class="s3">.</span><span class="s1">default_sequence_base</span><span class="s3">,</span>
+                <span class="s4">&quot;some data&quot;</span><span class="s3">,</span>
+            <span class="s3">),</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_autoincrement_on_insert</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(), </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;some data&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_assert_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_last_inserted_id</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(), </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;some data&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">pk </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">scalar</span><span class="s3">(</span><span class="s1">select</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">))</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">inserted_primary_key</span><span class="s3">, (</span><span class="s1">pk</span><span class="s3">,))</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">dbapi_lastrowid</span>
+    <span class="s2">def </span><span class="s1">test_native_lastrowid_autoinc</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(), </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;some data&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">lastrowid </span><span class="s3">= </span><span class="s1">r</span><span class="s3">.</span><span class="s1">lastrowid</span>
+        <span class="s1">pk </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">scalar</span><span class="s3">(</span><span class="s1">select</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">))</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">lastrowid</span><span class="s3">, </span><span class="s1">pk</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">InsertBehaviorTest</span><span class="s3">(</span><span class="s1">fixtures</span><span class="s3">.</span><span class="s1">TablesTest</span><span class="s3">):</span>
+    <span class="s1">run_deletes </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+    <span class="s1">__backend__ </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">define_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">):</span>
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;autoinc_pk&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span>
+                <span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">test_needs_autoincrement</span><span class="s3">=</span><span class="s2">True</span>
+            <span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+        <span class="s3">)</span>
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;manual_pk&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">autoincrement</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+        <span class="s3">)</span>
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;no_implicit_returning&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span>
+                <span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">test_needs_autoincrement</span><span class="s3">=</span><span class="s2">True</span>
+            <span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+            <span class="s1">implicit_returning</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;includes_defaults&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span>
+                <span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">test_needs_autoincrement</span><span class="s3">=</span><span class="s2">True</span>
+            <span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;x&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">default</span><span class="s3">=</span><span class="s5">5</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span>
+                <span class="s4">&quot;y&quot;</span><span class="s3">,</span>
+                <span class="s1">Integer</span><span class="s3">,</span>
+                <span class="s1">default</span><span class="s3">=</span><span class="s1">literal_column</span><span class="s3">(</span><span class="s4">&quot;2&quot;</span><span class="s3">, </span><span class="s1">type_</span><span class="s3">=</span><span class="s1">Integer</span><span class="s3">) + </span><span class="s1">literal</span><span class="s3">(</span><span class="s5">2</span><span class="s3">),</span>
+            <span class="s3">),</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">variation</span><span class="s3">(</span><span class="s4">&quot;style&quot;</span><span class="s3">, [</span><span class="s4">&quot;plain&quot;</span><span class="s3">, </span><span class="s4">&quot;return_defaults&quot;</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">variation</span><span class="s3">(</span><span class="s4">&quot;executemany&quot;</span><span class="s3">, [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_no_results_for_non_returning_insert</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">, </span><span class="s1">style</span><span class="s3">, </span><span class="s1">executemany</span>
+    <span class="s3">):</span>
+        <span class="s6">&quot;&quot;&quot;test another INSERT issue found during #10453&quot;&quot;&quot;</span>
+
+        <span class="s1">table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">no_implicit_returning</span>
+
+        <span class="s1">stmt </span><span class="s3">= </span><span class="s1">table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">style</span><span class="s3">.</span><span class="s1">return_defaults</span><span class="s3">:</span>
+            <span class="s1">stmt </span><span class="s3">= </span><span class="s1">stmt</span><span class="s3">.</span><span class="s1">return_defaults</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">executemany</span><span class="s3">:</span>
+            <span class="s1">data </span><span class="s3">= [</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d1&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d2&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d3&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d4&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d5&quot;</span><span class="s3">},</span>
+            <span class="s3">]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">data </span><span class="s3">= {</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d1&quot;</span><span class="s3">}</span>
+
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">stmt</span><span class="s3">, </span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">returns_rows</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">autoincrement_insert</span>
+    <span class="s2">def </span><span class="s1">test_autoclose_on_insert</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(), </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;some data&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">_soft_closed</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">closed</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">is_insert</span>
+
+        <span class="s0"># new as of I8091919d45421e3f53029b8660427f844fee0228; for the moment</span>
+        <span class="s0"># an insert where the PK was taken from a row that the dialect</span>
+        <span class="s0"># selected, as is the case for mssql/pyodbc, will still report</span>
+        <span class="s0"># returns_rows as true because there's a cursor description.  in that</span>
+        <span class="s0"># case, the row had to have been consumed at least.</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">returns_rows </span><span class="s2">or </span><span class="s1">r</span><span class="s3">.</span><span class="s1">fetchone</span><span class="s3">() </span><span class="s2">is None</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">insert_returning</span>
+    <span class="s2">def </span><span class="s1">test_autoclose_on_insert_implicit_returning</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s0"># return_defaults() ensures RETURNING will be used,</span>
+            <span class="s0"># new in 2.0 as sqlite/mariadb offer both RETURNING and</span>
+            <span class="s0"># cursor.lastrowid</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">return_defaults</span><span class="s3">(),</span>
+            <span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;some data&quot;</span><span class="s3">),</span>
+        <span class="s3">)</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">_soft_closed</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">closed</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">is_insert</span>
+
+        <span class="s0"># note we are experimenting with having this be True</span>
+        <span class="s0"># as of I8091919d45421e3f53029b8660427f844fee0228 .</span>
+        <span class="s0"># implicit returning has fetched the row, but it still is a</span>
+        <span class="s0"># &quot;returns rows&quot;</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">returns_rows</span>
+
+        <span class="s0"># and we should be able to fetchone() on it, we just get no row</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">fetchone</span><span class="s3">(), </span><span class="s2">None</span><span class="s3">)</span>
+
+        <span class="s0"># and the keys, etc.</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">keys</span><span class="s3">(), [</span><span class="s4">&quot;id&quot;</span><span class="s3">])</span>
+
+        <span class="s0"># but the dialect took in the row already.   not really sure</span>
+        <span class="s0"># what the best behavior is.</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">empty_inserts</span>
+    <span class="s2">def </span><span class="s1">test_empty_insert</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">())</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">_soft_closed</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">closed</span>
+
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">select</span><span class="s3">().</span><span class="s1">where</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">!= </span><span class="s2">None</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">all</span><span class="s3">()), </span><span class="s5">1</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">empty_inserts_executemany</span>
+    <span class="s2">def </span><span class="s1">test_empty_insert_multiple</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(), [{}, {}, {}])</span>
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">_soft_closed</span>
+        <span class="s2">assert not </span><span class="s1">r</span><span class="s3">.</span><span class="s1">closed</span>
+
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">select</span><span class="s3">().</span><span class="s1">where</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">!= </span><span class="s2">None</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">all</span><span class="s3">()), </span><span class="s5">3</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">insert_from_select</span>
+    <span class="s2">def </span><span class="s1">test_insert_from_select_autoinc</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">src_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">manual_pk</span>
+        <span class="s1">dest_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">src_table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(),</span>
+            <span class="s3">[</span>
+                <span class="s1">dict</span><span class="s3">(</span><span class="s1">id</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;data1&quot;</span><span class="s3">),</span>
+                <span class="s1">dict</span><span class="s3">(</span><span class="s1">id</span><span class="s3">=</span><span class="s5">2</span><span class="s3">, </span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;data2&quot;</span><span class="s3">),</span>
+                <span class="s1">dict</span><span class="s3">(</span><span class="s1">id</span><span class="s3">=</span><span class="s5">3</span><span class="s3">, </span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;data3&quot;</span><span class="s3">),</span>
+            <span class="s3">],</span>
+        <span class="s3">)</span>
+
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">dest_table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">from_select</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">,),</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">src_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">).</span><span class="s1">where</span><span class="s3">(</span>
+                    <span class="s1">src_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;data2&quot;</span><span class="s3">, </span><span class="s4">&quot;data3&quot;</span><span class="s3">])</span>
+                <span class="s3">),</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">result</span><span class="s3">.</span><span class="s1">inserted_primary_key</span><span class="s3">, (</span><span class="s2">None</span><span class="s3">,))</span>
+
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">dest_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">).</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">dest_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">result</span><span class="s3">.</span><span class="s1">fetchall</span><span class="s3">(), [(</span><span class="s4">&quot;data2&quot;</span><span class="s3">,), (</span><span class="s4">&quot;data3&quot;</span><span class="s3">,)])</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">insert_from_select</span>
+    <span class="s2">def </span><span class="s1">test_insert_from_select_autoinc_no_rows</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">src_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">manual_pk</span>
+        <span class="s1">dest_table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span>
+
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">dest_table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">from_select</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">,),</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">src_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">).</span><span class="s1">where</span><span class="s3">(</span>
+                    <span class="s1">src_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;data2&quot;</span><span class="s3">, </span><span class="s4">&quot;data3&quot;</span><span class="s3">])</span>
+                <span class="s3">),</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">result</span><span class="s3">.</span><span class="s1">inserted_primary_key</span><span class="s3">, (</span><span class="s2">None</span><span class="s3">,))</span>
+
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">select</span><span class="s3">(</span><span class="s1">dest_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">).</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">dest_table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">result</span><span class="s3">.</span><span class="s1">fetchall</span><span class="s3">(), [])</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">insert_from_select</span>
+    <span class="s2">def </span><span class="s1">test_insert_from_select</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">manual_pk</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(),</span>
+            <span class="s3">[</span>
+                <span class="s1">dict</span><span class="s3">(</span><span class="s1">id</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;data1&quot;</span><span class="s3">),</span>
+                <span class="s1">dict</span><span class="s3">(</span><span class="s1">id</span><span class="s3">=</span><span class="s5">2</span><span class="s3">, </span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;data2&quot;</span><span class="s3">),</span>
+                <span class="s1">dict</span><span class="s3">(</span><span class="s1">id</span><span class="s3">=</span><span class="s5">3</span><span class="s3">, </span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;data3&quot;</span><span class="s3">),</span>
+            <span class="s3">],</span>
+        <span class="s3">)</span>
+
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">()</span>
+            <span class="s3">.</span><span class="s1">inline</span><span class="s3">()</span>
+            <span class="s3">.</span><span class="s1">from_select</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">),</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">+ </span><span class="s5">5</span><span class="s3">, </span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">).</span><span class="s1">where</span><span class="s3">(</span>
+                    <span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;data2&quot;</span><span class="s3">, </span><span class="s4">&quot;data3&quot;</span><span class="s3">])</span>
+                <span class="s3">),</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">).</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">)</span>
+            <span class="s3">).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">[(</span><span class="s4">&quot;data1&quot;</span><span class="s3">,), (</span><span class="s4">&quot;data2&quot;</span><span class="s3">,), (</span><span class="s4">&quot;data2&quot;</span><span class="s3">,), (</span><span class="s4">&quot;data3&quot;</span><span class="s3">,), (</span><span class="s4">&quot;data3&quot;</span><span class="s3">,)],</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">insert_from_select</span>
+    <span class="s2">def </span><span class="s1">test_insert_from_select_with_defaults</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">includes_defaults</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(),</span>
+            <span class="s3">[</span>
+                <span class="s1">dict</span><span class="s3">(</span><span class="s1">id</span><span class="s3">=</span><span class="s5">1</span><span class="s3">, </span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;data1&quot;</span><span class="s3">),</span>
+                <span class="s1">dict</span><span class="s3">(</span><span class="s1">id</span><span class="s3">=</span><span class="s5">2</span><span class="s3">, </span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;data2&quot;</span><span class="s3">),</span>
+                <span class="s1">dict</span><span class="s3">(</span><span class="s1">id</span><span class="s3">=</span><span class="s5">3</span><span class="s3">, </span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;data3&quot;</span><span class="s3">),</span>
+            <span class="s3">],</span>
+        <span class="s3">)</span>
+
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">()</span>
+            <span class="s3">.</span><span class="s1">inline</span><span class="s3">()</span>
+            <span class="s3">.</span><span class="s1">from_select</span><span class="s3">(</span>
+                <span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s4">&quot;data&quot;</span><span class="s3">),</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id </span><span class="s3">+ </span><span class="s5">5</span><span class="s3">, </span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">).</span><span class="s1">where</span><span class="s3">(</span>
+                    <span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">.</span><span class="s1">in_</span><span class="s3">([</span><span class="s4">&quot;data2&quot;</span><span class="s3">, </span><span class="s4">&quot;data3&quot;</span><span class="s3">])</span>
+                <span class="s3">),</span>
+            <span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+                <span class="s1">select</span><span class="s3">(</span><span class="s1">table</span><span class="s3">).</span><span class="s1">order_by</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">data</span><span class="s3">, </span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">)</span>
+            <span class="s3">).</span><span class="s1">fetchall</span><span class="s3">(),</span>
+            <span class="s3">[</span>
+                <span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s4">&quot;data1&quot;</span><span class="s3">, </span><span class="s5">5</span><span class="s3">, </span><span class="s5">4</span><span class="s3">),</span>
+                <span class="s3">(</span><span class="s5">2</span><span class="s3">, </span><span class="s4">&quot;data2&quot;</span><span class="s3">, </span><span class="s5">5</span><span class="s3">, </span><span class="s5">4</span><span class="s3">),</span>
+                <span class="s3">(</span><span class="s5">7</span><span class="s3">, </span><span class="s4">&quot;data2&quot;</span><span class="s3">, </span><span class="s5">5</span><span class="s3">, </span><span class="s5">4</span><span class="s3">),</span>
+                <span class="s3">(</span><span class="s5">3</span><span class="s3">, </span><span class="s4">&quot;data3&quot;</span><span class="s3">, </span><span class="s5">5</span><span class="s3">, </span><span class="s5">4</span><span class="s3">),</span>
+                <span class="s3">(</span><span class="s5">8</span><span class="s3">, </span><span class="s4">&quot;data3&quot;</span><span class="s3">, </span><span class="s5">5</span><span class="s3">, </span><span class="s5">4</span><span class="s3">),</span>
+            <span class="s3">],</span>
+        <span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">ReturningTest</span><span class="s3">(</span><span class="s1">fixtures</span><span class="s3">.</span><span class="s1">TablesTest</span><span class="s3">):</span>
+    <span class="s1">run_create_tables </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+    <span class="s1">__requires__ </span><span class="s3">= </span><span class="s4">&quot;insert_returning&quot;</span><span class="s3">, </span><span class="s4">&quot;autoincrement_insert&quot;</span>
+    <span class="s1">__backend__ </span><span class="s3">= </span><span class="s2">True</span>
+
+    <span class="s2">def </span><span class="s1">_assert_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">table</span><span class="s3">, </span><span class="s1">conn</span><span class="s3">):</span>
+        <span class="s1">row </span><span class="s3">= </span><span class="s1">conn</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">select</span><span class="s3">()).</span><span class="s1">first</span><span class="s3">()</span>
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">row</span><span class="s3">,</span>
+            <span class="s3">(</span>
+                <span class="s1">conn</span><span class="s3">.</span><span class="s1">dialect</span><span class="s3">.</span><span class="s1">default_sequence_base</span><span class="s3">,</span>
+                <span class="s4">&quot;some data&quot;</span><span class="s3">,</span>
+            <span class="s3">),</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">define_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">):</span>
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;autoinc_pk&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span>
+                <span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">test_needs_autoincrement</span><span class="s3">=</span><span class="s2">True</span>
+            <span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;data&quot;</span><span class="s3">, </span><span class="s1">String</span><span class="s3">(</span><span class="s5">50</span><span class="s3">)),</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">fetch_rows_post_commit</span>
+    <span class="s2">def </span><span class="s1">test_explicit_returning_pk_autocommit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">returning</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">), </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;some data&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">pk </span><span class="s3">= </span><span class="s1">r</span><span class="s3">.</span><span class="s1">first</span><span class="s3">()[</span><span class="s5">0</span><span class="s3">]</span>
+        <span class="s1">fetched_pk </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">scalar</span><span class="s3">(</span><span class="s1">select</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">))</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">fetched_pk</span><span class="s3">, </span><span class="s1">pk</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_explicit_returning_pk_no_autocommit</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">table </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">returning</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">), </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;some data&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+
+        <span class="s1">pk </span><span class="s3">= </span><span class="s1">r</span><span class="s3">.</span><span class="s1">first</span><span class="s3">()[</span><span class="s5">0</span><span class="s3">]</span>
+        <span class="s1">fetched_pk </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">scalar</span><span class="s3">(</span><span class="s1">select</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">))</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">fetched_pk</span><span class="s3">, </span><span class="s1">pk</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_autoincrement_on_insert_implicit_returning</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(), </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;some data&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_assert_round_trip</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">test_last_inserted_id_implicit_returning</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(), </span><span class="s1">dict</span><span class="s3">(</span><span class="s1">data</span><span class="s3">=</span><span class="s4">&quot;some data&quot;</span><span class="s3">)</span>
+        <span class="s3">)</span>
+        <span class="s1">pk </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">scalar</span><span class="s3">(</span><span class="s1">select</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">))</span>
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">r</span><span class="s3">.</span><span class="s1">inserted_primary_key</span><span class="s3">, (</span><span class="s1">pk</span><span class="s3">,))</span>
+
+    <span class="s3">@</span><span class="s1">requirements</span><span class="s3">.</span><span class="s1">insert_executemany_returning</span>
+    <span class="s2">def </span><span class="s1">test_insertmanyvalues_returning</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">returning</span><span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span>
+            <span class="s3">),</span>
+            <span class="s3">[</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d1&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d2&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d3&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d4&quot;</span><span class="s3">},</span>
+                <span class="s3">{</span><span class="s4">&quot;data&quot;</span><span class="s3">: </span><span class="s4">&quot;d5&quot;</span><span class="s3">},</span>
+            <span class="s3">],</span>
+        <span class="s3">)</span>
+        <span class="s1">rall </span><span class="s3">= </span><span class="s1">r</span><span class="s3">.</span><span class="s1">all</span><span class="s3">()</span>
+
+        <span class="s1">pks </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">select</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">autoinc_pk</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">))</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span><span class="s1">rall</span><span class="s3">, </span><span class="s1">pks</span><span class="s3">.</span><span class="s1">all</span><span class="s3">())</span>
+
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">combinations</span><span class="s3">(</span>
+        <span class="s3">(</span><span class="s1">Double</span><span class="s3">(), </span><span class="s5">8.5514716</span><span class="s3">, </span><span class="s2">True</span><span class="s3">),</span>
+        <span class="s3">(</span>
+            <span class="s1">Double</span><span class="s3">(</span><span class="s5">53</span><span class="s3">),</span>
+            <span class="s5">8.5514716</span><span class="s3">,</span>
+            <span class="s2">True</span><span class="s3">,</span>
+            <span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">float_or_double_precision_behaves_generically</span><span class="s3">,</span>
+        <span class="s3">),</span>
+        <span class="s3">(</span><span class="s1">Float</span><span class="s3">(), </span><span class="s5">8.5514</span><span class="s3">, </span><span class="s2">True</span><span class="s3">),</span>
+        <span class="s3">(</span>
+            <span class="s1">Float</span><span class="s3">(</span><span class="s5">8</span><span class="s3">),</span>
+            <span class="s5">8.5514</span><span class="s3">,</span>
+            <span class="s2">True</span><span class="s3">,</span>
+            <span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">float_or_double_precision_behaves_generically</span><span class="s3">,</span>
+        <span class="s3">),</span>
+        <span class="s3">(</span>
+            <span class="s1">Numeric</span><span class="s3">(</span><span class="s1">precision</span><span class="s3">=</span><span class="s5">15</span><span class="s3">, </span><span class="s1">scale</span><span class="s3">=</span><span class="s5">12</span><span class="s3">, </span><span class="s1">asdecimal</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+            <span class="s5">8.5514716</span><span class="s3">,</span>
+            <span class="s2">True</span><span class="s3">,</span>
+            <span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">literal_float_coercion</span><span class="s3">,</span>
+        <span class="s3">),</span>
+        <span class="s3">(</span>
+            <span class="s1">Numeric</span><span class="s3">(</span><span class="s1">precision</span><span class="s3">=</span><span class="s5">15</span><span class="s3">, </span><span class="s1">scale</span><span class="s3">=</span><span class="s5">12</span><span class="s3">, </span><span class="s1">asdecimal</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">Decimal</span><span class="s3">(</span><span class="s4">&quot;8.5514716&quot;</span><span class="s3">),</span>
+            <span class="s2">False</span><span class="s3">,</span>
+        <span class="s3">),</span>
+        <span class="s1">argnames</span><span class="s3">=</span><span class="s4">&quot;type_,value,do_rounding&quot;</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">variation</span><span class="s3">(</span><span class="s4">&quot;sort_by_parameter_order&quot;</span><span class="s3">, [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">variation</span><span class="s3">(</span><span class="s4">&quot;multiple_rows&quot;</span><span class="s3">, [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">])</span>
+    <span class="s2">def </span><span class="s1">test_insert_w_floats</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">connection</span><span class="s3">,</span>
+        <span class="s1">metadata</span><span class="s3">,</span>
+        <span class="s1">sort_by_parameter_order</span><span class="s3">,</span>
+        <span class="s1">type_</span><span class="s3">,</span>
+        <span class="s1">value</span><span class="s3">,</span>
+        <span class="s1">do_rounding</span><span class="s3">,</span>
+        <span class="s1">multiple_rows</span><span class="s3">,</span>
+    <span class="s3">):</span>
+        <span class="s6">&quot;&quot;&quot;test #9701. 
+ 
+        this tests insertmanyvalues as well as decimal / floating point 
+        RETURNING types 
+ 
+        &quot;&quot;&quot;</span>
+
+        <span class="s1">t </span><span class="s3">= </span><span class="s1">Table</span><span class="s3">(</span>
+            <span class="s0"># Oracle backends seems to be getting confused if</span>
+            <span class="s0"># this table is named the same as the one</span>
+            <span class="s0"># in test_imv_returning_datatypes.  use a different name</span>
+            <span class="s4">&quot;f_t&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">Identity</span><span class="s3">(), </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;value&quot;</span><span class="s3">, </span><span class="s1">type_</span><span class="s3">),</span>
+        <span class="s3">)</span>
+
+        <span class="s1">t</span><span class="s3">.</span><span class="s1">create</span><span class="s3">(</span><span class="s1">connection</span><span class="s3">)</span>
+
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">t</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">returning</span><span class="s3">(</span>
+                <span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">,</span>
+                <span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">value</span><span class="s3">,</span>
+                <span class="s1">sort_by_parameter_order</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">(</span><span class="s1">sort_by_parameter_order</span><span class="s3">),</span>
+            <span class="s3">),</span>
+            <span class="s3">(</span>
+                <span class="s3">[{</span><span class="s4">&quot;value&quot;</span><span class="s3">: </span><span class="s1">value</span><span class="s3">} </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s5">10</span><span class="s3">)]</span>
+                <span class="s2">if </span><span class="s1">multiple_rows</span>
+                <span class="s2">else </span><span class="s3">{</span><span class="s4">&quot;value&quot;</span><span class="s3">: </span><span class="s1">value</span><span class="s3">}</span>
+            <span class="s3">),</span>
+        <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">multiple_rows</span><span class="s3">:</span>
+            <span class="s1">i_range </span><span class="s3">= </span><span class="s1">range</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s5">11</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">i_range </span><span class="s3">= </span><span class="s1">range</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">)</span>
+
+        <span class="s0"># we want to test only that we are getting floating points back</span>
+        <span class="s0"># with some degree of the original value maintained, that it is not</span>
+        <span class="s0"># being truncated to an integer.  there's too much variation in how</span>
+        <span class="s0"># drivers return floats, which should not be relied upon to be</span>
+        <span class="s0"># exact, for us to just compare as is (works for PG drivers but not</span>
+        <span class="s0"># others) so we use rounding here.  There's precedent for this</span>
+        <span class="s0"># in suite/test_types.py::NumericTest as well</span>
+
+        <span class="s2">if </span><span class="s1">do_rounding</span><span class="s3">:</span>
+            <span class="s1">eq_</span><span class="s3">(</span>
+                <span class="s3">{(</span><span class="s1">id_</span><span class="s3">, </span><span class="s1">round</span><span class="s3">(</span><span class="s1">val_</span><span class="s3">, </span><span class="s5">5</span><span class="s3">)) </span><span class="s2">for </span><span class="s1">id_</span><span class="s3">, </span><span class="s1">val_ </span><span class="s2">in </span><span class="s1">result</span><span class="s3">},</span>
+                <span class="s3">{(</span><span class="s1">id_</span><span class="s3">, </span><span class="s1">round</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s5">5</span><span class="s3">)) </span><span class="s2">for </span><span class="s1">id_ </span><span class="s2">in </span><span class="s1">i_range</span><span class="s3">},</span>
+            <span class="s3">)</span>
+
+            <span class="s1">eq_</span><span class="s3">(</span>
+                <span class="s3">{</span>
+                    <span class="s1">round</span><span class="s3">(</span><span class="s1">val_</span><span class="s3">, </span><span class="s5">5</span><span class="s3">)</span>
+                    <span class="s2">for </span><span class="s1">val_ </span><span class="s2">in </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">scalars</span><span class="s3">(</span><span class="s1">select</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">value</span><span class="s3">))</span>
+                <span class="s3">},</span>
+                <span class="s3">{</span><span class="s1">round</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s5">5</span><span class="s3">)},</span>
+            <span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">eq_</span><span class="s3">(</span>
+                <span class="s1">set</span><span class="s3">(</span><span class="s1">result</span><span class="s3">),</span>
+                <span class="s3">{(</span><span class="s1">id_</span><span class="s3">, </span><span class="s1">value</span><span class="s3">) </span><span class="s2">for </span><span class="s1">id_ </span><span class="s2">in </span><span class="s1">i_range</span><span class="s3">},</span>
+            <span class="s3">)</span>
+
+            <span class="s1">eq_</span><span class="s3">(</span>
+                <span class="s1">set</span><span class="s3">(</span><span class="s1">connection</span><span class="s3">.</span><span class="s1">scalars</span><span class="s3">(</span><span class="s1">select</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">value</span><span class="s3">))),</span>
+                <span class="s3">{</span><span class="s1">value</span><span class="s3">},</span>
+            <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">combinations</span><span class="s3">(</span>
+        <span class="s3">(</span>
+            <span class="s4">&quot;non_native_uuid&quot;</span><span class="s3">,</span>
+            <span class="s1">Uuid</span><span class="s3">(</span><span class="s1">native_uuid</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+            <span class="s1">uuid</span><span class="s3">.</span><span class="s1">uuid4</span><span class="s3">(),</span>
+        <span class="s3">),</span>
+        <span class="s3">(</span>
+            <span class="s4">&quot;non_native_uuid_str&quot;</span><span class="s3">,</span>
+            <span class="s1">Uuid</span><span class="s3">(</span><span class="s1">as_uuid</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">native_uuid</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+            <span class="s1">str</span><span class="s3">(</span><span class="s1">uuid</span><span class="s3">.</span><span class="s1">uuid4</span><span class="s3">()),</span>
+        <span class="s3">),</span>
+        <span class="s3">(</span>
+            <span class="s4">&quot;generic_native_uuid&quot;</span><span class="s3">,</span>
+            <span class="s1">Uuid</span><span class="s3">(</span><span class="s1">native_uuid</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">uuid</span><span class="s3">.</span><span class="s1">uuid4</span><span class="s3">(),</span>
+            <span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">uuid_data_type</span><span class="s3">,</span>
+        <span class="s3">),</span>
+        <span class="s3">(</span>
+            <span class="s4">&quot;generic_native_uuid_str&quot;</span><span class="s3">,</span>
+            <span class="s1">Uuid</span><span class="s3">(</span><span class="s1">as_uuid</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">native_uuid</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">str</span><span class="s3">(</span><span class="s1">uuid</span><span class="s3">.</span><span class="s1">uuid4</span><span class="s3">()),</span>
+            <span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">uuid_data_type</span><span class="s3">,</span>
+        <span class="s3">),</span>
+        <span class="s3">(</span><span class="s4">&quot;UUID&quot;</span><span class="s3">, </span><span class="s1">UUID</span><span class="s3">(), </span><span class="s1">uuid</span><span class="s3">.</span><span class="s1">uuid4</span><span class="s3">(), </span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">uuid_data_type</span><span class="s3">),</span>
+        <span class="s3">(</span>
+            <span class="s4">&quot;LargeBinary1&quot;</span><span class="s3">,</span>
+            <span class="s1">LargeBinary</span><span class="s3">(),</span>
+            <span class="s7">b&quot;this is binary&quot;</span><span class="s3">,</span>
+        <span class="s3">),</span>
+        <span class="s3">(</span><span class="s4">&quot;LargeBinary2&quot;</span><span class="s3">, </span><span class="s1">LargeBinary</span><span class="s3">(), </span><span class="s7">b&quot;7</span><span class="s2">\xe7\x9f</span><span class="s7">&quot;</span><span class="s3">),</span>
+        <span class="s1">argnames</span><span class="s3">=</span><span class="s4">&quot;type_,value&quot;</span><span class="s3">,</span>
+        <span class="s1">id_</span><span class="s3">=</span><span class="s4">&quot;iaa&quot;</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">variation</span><span class="s3">(</span><span class="s4">&quot;sort_by_parameter_order&quot;</span><span class="s3">, [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">variation</span><span class="s3">(</span><span class="s4">&quot;multiple_rows&quot;</span><span class="s3">, [</span><span class="s2">True</span><span class="s3">, </span><span class="s2">False</span><span class="s3">])</span>
+    <span class="s3">@</span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">insert_returning</span>
+    <span class="s2">def </span><span class="s1">test_imv_returning_datatypes</span><span class="s3">(</span>
+        <span class="s1">self</span><span class="s3">,</span>
+        <span class="s1">connection</span><span class="s3">,</span>
+        <span class="s1">metadata</span><span class="s3">,</span>
+        <span class="s1">sort_by_parameter_order</span><span class="s3">,</span>
+        <span class="s1">type_</span><span class="s3">,</span>
+        <span class="s1">value</span><span class="s3">,</span>
+        <span class="s1">multiple_rows</span><span class="s3">,</span>
+    <span class="s3">):</span>
+        <span class="s6">&quot;&quot;&quot;test #9739, #9808 (similar to #9701). 
+ 
+        this tests insertmanyvalues in conjunction with various datatypes. 
+ 
+        These tests are particularly for the asyncpg driver which needs 
+        most types to be explicitly cast for the new IMV format 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">t </span><span class="s3">= </span><span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;d_t&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">Identity</span><span class="s3">(), </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;value&quot;</span><span class="s3">, </span><span class="s1">type_</span><span class="s3">),</span>
+        <span class="s3">)</span>
+
+        <span class="s1">t</span><span class="s3">.</span><span class="s1">create</span><span class="s3">(</span><span class="s1">connection</span><span class="s3">)</span>
+
+        <span class="s1">result </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+            <span class="s1">t</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">().</span><span class="s1">returning</span><span class="s3">(</span>
+                <span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">id</span><span class="s3">,</span>
+                <span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">value</span><span class="s3">,</span>
+                <span class="s1">sort_by_parameter_order</span><span class="s3">=</span><span class="s1">bool</span><span class="s3">(</span><span class="s1">sort_by_parameter_order</span><span class="s3">),</span>
+            <span class="s3">),</span>
+            <span class="s3">(</span>
+                <span class="s3">[{</span><span class="s4">&quot;value&quot;</span><span class="s3">: </span><span class="s1">value</span><span class="s3">} </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range</span><span class="s3">(</span><span class="s5">10</span><span class="s3">)]</span>
+                <span class="s2">if </span><span class="s1">multiple_rows</span>
+                <span class="s2">else </span><span class="s3">{</span><span class="s4">&quot;value&quot;</span><span class="s3">: </span><span class="s1">value</span><span class="s3">}</span>
+            <span class="s3">),</span>
+        <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">multiple_rows</span><span class="s3">:</span>
+            <span class="s1">i_range </span><span class="s3">= </span><span class="s1">range</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s5">11</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">i_range </span><span class="s3">= </span><span class="s1">range</span><span class="s3">(</span><span class="s5">1</span><span class="s3">, </span><span class="s5">2</span><span class="s3">)</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">set</span><span class="s3">(</span><span class="s1">result</span><span class="s3">),</span>
+            <span class="s3">{(</span><span class="s1">id_</span><span class="s3">, </span><span class="s1">value</span><span class="s3">) </span><span class="s2">for </span><span class="s1">id_ </span><span class="s2">in </span><span class="s1">i_range</span><span class="s3">},</span>
+        <span class="s3">)</span>
+
+        <span class="s1">eq_</span><span class="s3">(</span>
+            <span class="s1">set</span><span class="s3">(</span><span class="s1">connection</span><span class="s3">.</span><span class="s1">scalars</span><span class="s3">(</span><span class="s1">select</span><span class="s3">(</span><span class="s1">t</span><span class="s3">.</span><span class="s1">c</span><span class="s3">.</span><span class="s1">value</span><span class="s3">))),</span>
+            <span class="s3">{</span><span class="s1">value</span><span class="s3">},</span>
+        <span class="s3">)</span>
+
+
+<span class="s1">__all__ </span><span class="s3">= (</span><span class="s4">&quot;LastrowidTest&quot;</span><span class="s3">, </span><span class="s4">&quot;InsertBehaviorTest&quot;</span><span class="s3">, </span><span class="s4">&quot;ReturningTest&quot;</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

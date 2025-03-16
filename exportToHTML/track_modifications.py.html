@@ -1,0 +1,109 @@
+<html>
+<head>
+<title>track_modifications.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+track_modifications.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+
+<span class="s0">import </span><span class="s1">sqlalchemy </span><span class="s0">as </span><span class="s1">sa</span>
+<span class="s0">import </span><span class="s1">sqlalchemy</span><span class="s2">.</span><span class="s1">event </span><span class="s0">as </span><span class="s1">sa_event</span>
+<span class="s0">import </span><span class="s1">sqlalchemy</span><span class="s2">.</span><span class="s1">orm </span><span class="s0">as </span><span class="s1">sa_orm</span>
+<span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">current_app</span>
+<span class="s0">from </span><span class="s1">flask </span><span class="s0">import </span><span class="s1">has_app_context</span>
+<span class="s0">from </span><span class="s1">flask</span><span class="s2">.</span><span class="s1">signals </span><span class="s0">import </span><span class="s1">Namespace  </span><span class="s3"># type: ignore[attr-defined]</span>
+
+<span class="s0">if </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s0">from </span><span class="s2">.</span><span class="s1">session </span><span class="s0">import </span><span class="s1">Session</span>
+
+<span class="s1">_signals </span><span class="s2">= </span><span class="s1">Namespace</span><span class="s2">()</span>
+
+<span class="s1">models_committed </span><span class="s2">= </span><span class="s1">_signals</span><span class="s2">.</span><span class="s1">signal</span><span class="s2">(</span><span class="s4">&quot;models-committed&quot;</span><span class="s2">)</span>
+<span class="s4">&quot;&quot;&quot;This Blinker signal is sent after the session is committed if there were changed 
+models in the session. 
+ 
+The sender is the application that emitted the changes. The receiver is passed the 
+``changes`` argument with a list of tuples in the form ``(instance, operation)``. 
+The operations are ``&quot;insert&quot;``, ``&quot;update&quot;``, and ``&quot;delete&quot;``. 
+&quot;&quot;&quot;</span>
+
+<span class="s1">before_models_committed </span><span class="s2">= </span><span class="s1">_signals</span><span class="s2">.</span><span class="s1">signal</span><span class="s2">(</span><span class="s4">&quot;before-models-committed&quot;</span><span class="s2">)</span>
+<span class="s4">&quot;&quot;&quot;This signal works exactly like :data:`models_committed` but is emitted before the 
+commit takes place. 
+&quot;&quot;&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">_listen</span><span class="s2">(</span><span class="s1">session</span><span class="s2">: </span><span class="s1">sa_orm</span><span class="s2">.</span><span class="s1">scoped_session</span><span class="s2">[</span><span class="s1">Session</span><span class="s2">]) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">sa_event</span><span class="s2">.</span><span class="s1">listen</span><span class="s2">(</span><span class="s1">session</span><span class="s2">, </span><span class="s4">&quot;before_flush&quot;</span><span class="s2">, </span><span class="s1">_record_ops</span><span class="s2">, </span><span class="s1">named</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">sa_event</span><span class="s2">.</span><span class="s1">listen</span><span class="s2">(</span><span class="s1">session</span><span class="s2">, </span><span class="s4">&quot;before_commit&quot;</span><span class="s2">, </span><span class="s1">_record_ops</span><span class="s2">, </span><span class="s1">named</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+    <span class="s1">sa_event</span><span class="s2">.</span><span class="s1">listen</span><span class="s2">(</span><span class="s1">session</span><span class="s2">, </span><span class="s4">&quot;before_commit&quot;</span><span class="s2">, </span><span class="s1">_before_commit</span><span class="s2">)</span>
+    <span class="s1">sa_event</span><span class="s2">.</span><span class="s1">listen</span><span class="s2">(</span><span class="s1">session</span><span class="s2">, </span><span class="s4">&quot;after_commit&quot;</span><span class="s2">, </span><span class="s1">_after_commit</span><span class="s2">)</span>
+    <span class="s1">sa_event</span><span class="s2">.</span><span class="s1">listen</span><span class="s2">(</span><span class="s1">session</span><span class="s2">, </span><span class="s4">&quot;after_rollback&quot;</span><span class="s2">, </span><span class="s1">_after_rollback</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_record_ops</span><span class="s2">(</span><span class="s1">session</span><span class="s2">: </span><span class="s1">Session</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">if not </span><span class="s1">has_app_context</span><span class="s2">():</span>
+        <span class="s0">return</span>
+
+    <span class="s0">if not </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">[</span><span class="s4">&quot;SQLALCHEMY_TRACK_MODIFICATIONS&quot;</span><span class="s2">]:</span>
+        <span class="s0">return</span>
+
+    <span class="s0">for </span><span class="s1">targets</span><span class="s2">, </span><span class="s1">operation </span><span class="s0">in </span><span class="s2">(</span>
+        <span class="s2">(</span><span class="s1">session</span><span class="s2">.</span><span class="s1">new</span><span class="s2">, </span><span class="s4">&quot;insert&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">session</span><span class="s2">.</span><span class="s1">dirty</span><span class="s2">, </span><span class="s4">&quot;update&quot;</span><span class="s2">),</span>
+        <span class="s2">(</span><span class="s1">session</span><span class="s2">.</span><span class="s1">deleted</span><span class="s2">, </span><span class="s4">&quot;delete&quot;</span><span class="s2">),</span>
+    <span class="s2">):</span>
+        <span class="s0">for </span><span class="s1">target </span><span class="s0">in </span><span class="s1">targets</span><span class="s2">:</span>
+            <span class="s1">state </span><span class="s2">= </span><span class="s1">sa</span><span class="s2">.</span><span class="s1">inspect</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+            <span class="s1">key </span><span class="s2">= </span><span class="s1">state</span><span class="s2">.</span><span class="s1">identity_key </span><span class="s0">if </span><span class="s1">state</span><span class="s2">.</span><span class="s1">has_identity </span><span class="s0">else </span><span class="s1">id</span><span class="s2">(</span><span class="s1">target</span><span class="s2">)</span>
+            <span class="s1">session</span><span class="s2">.</span><span class="s1">_model_changes</span><span class="s2">[</span><span class="s1">key</span><span class="s2">] = (</span><span class="s1">target</span><span class="s2">, </span><span class="s1">operation</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_before_commit</span><span class="s2">(</span><span class="s1">session</span><span class="s2">: </span><span class="s1">Session</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">if not </span><span class="s1">has_app_context</span><span class="s2">():</span>
+        <span class="s0">return</span>
+
+    <span class="s1">app </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">_get_current_object</span><span class="s2">()  </span><span class="s3"># type: ignore[attr-defined]</span>
+
+    <span class="s0">if not </span><span class="s1">app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">[</span><span class="s4">&quot;SQLALCHEMY_TRACK_MODIFICATIONS&quot;</span><span class="s2">]:</span>
+        <span class="s0">return</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">.</span><span class="s1">_model_changes</span><span class="s2">:</span>
+        <span class="s1">changes </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">session</span><span class="s2">.</span><span class="s1">_model_changes</span><span class="s2">.</span><span class="s1">values</span><span class="s2">())</span>
+        <span class="s1">before_models_committed</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">app</span><span class="s2">, </span><span class="s1">changes</span><span class="s2">=</span><span class="s1">changes</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_after_commit</span><span class="s2">(</span><span class="s1">session</span><span class="s2">: </span><span class="s1">Session</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s0">if not </span><span class="s1">has_app_context</span><span class="s2">():</span>
+        <span class="s0">return</span>
+
+    <span class="s1">app </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">_get_current_object</span><span class="s2">()  </span><span class="s3"># type: ignore[attr-defined]</span>
+
+    <span class="s0">if not </span><span class="s1">app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">[</span><span class="s4">&quot;SQLALCHEMY_TRACK_MODIFICATIONS&quot;</span><span class="s2">]:</span>
+        <span class="s0">return</span>
+
+    <span class="s0">if </span><span class="s1">session</span><span class="s2">.</span><span class="s1">_model_changes</span><span class="s2">:</span>
+        <span class="s1">changes </span><span class="s2">= </span><span class="s1">list</span><span class="s2">(</span><span class="s1">session</span><span class="s2">.</span><span class="s1">_model_changes</span><span class="s2">.</span><span class="s1">values</span><span class="s2">())</span>
+        <span class="s1">models_committed</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span><span class="s1">app</span><span class="s2">, </span><span class="s1">changes</span><span class="s2">=</span><span class="s1">changes</span><span class="s2">)</span>
+        <span class="s1">session</span><span class="s2">.</span><span class="s1">_model_changes</span><span class="s2">.</span><span class="s1">clear</span><span class="s2">()</span>
+
+
+<span class="s0">def </span><span class="s1">_after_rollback</span><span class="s2">(</span><span class="s1">session</span><span class="s2">: </span><span class="s1">Session</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+    <span class="s1">session</span><span class="s2">.</span><span class="s1">_model_changes</span><span class="s2">.</span><span class="s1">clear</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

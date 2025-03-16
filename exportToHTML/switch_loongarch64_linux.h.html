@@ -1,0 +1,52 @@
+<html>
+<head>
+<title>switch_loongarch64_linux.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #2aacb8;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_loongarch64_linux.h</font>
+</center></td></tr></table>
+<pre><span class="s0">#define </span><span class="s1">STACK_REFPLUS </span><span class="s2">1</span>
+
+<span class="s0">#ifdef </span><span class="s1">SLP_EVAL</span>
+<span class="s0">#define </span><span class="s1">STACK_MAGIC </span><span class="s2">0</span>
+
+<span class="s0">#define </span><span class="s1">REGS_TO_SAVE </span><span class="s3">&quot;s0&quot;</span><span class="s1">, </span><span class="s3">&quot;s1&quot;</span><span class="s1">, </span><span class="s3">&quot;s2&quot;</span><span class="s1">, </span><span class="s3">&quot;s3&quot;</span><span class="s1">, </span><span class="s3">&quot;s4&quot;</span><span class="s1">, </span><span class="s3">&quot;s5&quot;</span><span class="s1">, \</span>
+                    <span class="s3">&quot;s6&quot;</span><span class="s1">, </span><span class="s3">&quot;s7&quot;</span><span class="s1">, </span><span class="s3">&quot;s8&quot;</span><span class="s1">, </span><span class="s3">&quot;fp&quot;</span><span class="s1">, \</span>
+                    <span class="s3">&quot;f24&quot;</span><span class="s1">, </span><span class="s3">&quot;f25&quot;</span><span class="s1">, </span><span class="s3">&quot;f26&quot;</span><span class="s1">, </span><span class="s3">&quot;f27&quot;</span><span class="s1">, </span><span class="s3">&quot;f28&quot;</span><span class="s1">, </span><span class="s3">&quot;f29&quot;</span><span class="s1">, </span><span class="s3">&quot;f30&quot;</span><span class="s1">, </span><span class="s3">&quot;f31&quot;</span>
+
+<span class="s0">static int</span>
+<span class="s1">slp_switch(</span><span class="s0">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s0">int </span><span class="s1">ret;</span>
+    <span class="s0">long </span><span class="s1">*stackref, stsizediff;</span>
+    <span class="s1">__asm__ </span><span class="s0">volatile </span><span class="s1">(</span><span class="s3">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s1">__asm__ </span><span class="s0">volatile </span><span class="s1">(</span><span class="s3">&quot;move %0, $sp&quot; </span><span class="s1">: </span><span class="s3">&quot;=r&quot; </span><span class="s1">(stackref) : );</span>
+    <span class="s1">{</span>
+        <span class="s1">SLP_SAVE_STATE(stackref, stsizediff);</span>
+        <span class="s1">__asm__ </span><span class="s0">volatile </span><span class="s1">(</span>
+            <span class="s3">&quot;add.d $sp, $sp, %0</span><span class="s0">\n\t</span><span class="s3">&quot;</span>
+            <span class="s1">: </span><span class="s4">/* no outputs */</span>
+            <span class="s1">: </span><span class="s3">&quot;r&quot; </span><span class="s1">(stsizediff)</span>
+        <span class="s1">);</span>
+        <span class="s1">SLP_RESTORE_STATE();</span>
+    <span class="s1">}</span>
+    <span class="s1">__asm__ </span><span class="s0">volatile </span><span class="s1">(</span><span class="s3">&quot;&quot; </span><span class="s1">: : : REGS_TO_SAVE);</span>
+    <span class="s1">__asm__ </span><span class="s0">volatile </span><span class="s1">(</span><span class="s3">&quot;move %0, $zero&quot; </span><span class="s1">: </span><span class="s3">&quot;=r&quot; </span><span class="s1">(ret) : );</span>
+    <span class="s0">return </span><span class="s1">ret;</span>
+<span class="s1">}</span>
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

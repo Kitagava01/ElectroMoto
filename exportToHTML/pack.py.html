@@ -1,0 +1,229 @@
+<html>
+<head>
+<title>pack.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+pack.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2010, 2011 Sebastian Thiel (byronimo@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitDB and is released under</span>
+<span class="s0"># the New BSD License: https://opensource.org/license/bsd-3-clause/</span>
+<span class="s2">&quot;&quot;&quot;Module containing a database to deal with packs&quot;&quot;&quot;</span>
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">db</span><span class="s4">.</span><span class="s1">base </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">FileDBBase</span><span class="s4">,</span>
+    <span class="s1">ObjectDBR</span><span class="s4">,</span>
+    <span class="s1">CachingDB</span>
+<span class="s4">)</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">util </span><span class="s3">import </span><span class="s1">LazyMixin</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">exc </span><span class="s3">import </span><span class="s4">(</span>
+    <span class="s1">BadObject</span><span class="s4">,</span>
+    <span class="s1">UnsupportedOperation</span><span class="s4">,</span>
+    <span class="s1">AmbiguousObjectName</span>
+<span class="s4">)</span>
+
+<span class="s3">from </span><span class="s1">gitdb</span><span class="s4">.</span><span class="s1">pack </span><span class="s3">import </span><span class="s1">PackEntity</span>
+
+<span class="s3">from </span><span class="s1">functools </span><span class="s3">import </span><span class="s1">reduce</span>
+
+<span class="s3">import </span><span class="s1">os</span>
+<span class="s3">import </span><span class="s1">glob</span>
+
+<span class="s1">__all__ </span><span class="s4">= (</span><span class="s5">'PackedDB'</span><span class="s4">, )</span>
+
+<span class="s0">#{ Utilities</span>
+
+
+<span class="s3">class </span><span class="s1">PackedDB</span><span class="s4">(</span><span class="s1">FileDBBase</span><span class="s4">, </span><span class="s1">ObjectDBR</span><span class="s4">, </span><span class="s1">CachingDB</span><span class="s4">, </span><span class="s1">LazyMixin</span><span class="s4">):</span>
+
+    <span class="s2">&quot;&quot;&quot;A database operating on a set of object packs&quot;&quot;&quot;</span>
+
+    <span class="s0"># sort the priority list every N queries</span>
+    <span class="s0"># Higher values are better, performance tests don't show this has</span>
+    <span class="s0"># any effect, but it should have one</span>
+    <span class="s1">_sort_interval </span><span class="s4">= </span><span class="s6">500</span>
+
+    <span class="s3">def </span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">root_path</span><span class="s4">):</span>
+        <span class="s1">super</span><span class="s4">().</span><span class="s1">__init__</span><span class="s4">(</span><span class="s1">root_path</span><span class="s4">)</span>
+        <span class="s0"># list of lists with three items:</span>
+        <span class="s0"># * hits - number of times the pack was hit with a request</span>
+        <span class="s0"># * entity - Pack entity instance</span>
+        <span class="s0"># * sha_to_index - PackIndexFile.sha_to_index method for direct cache query</span>
+        <span class="s0"># self._entities = list()       # lazy loaded list</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_hit_count </span><span class="s4">= </span><span class="s6">0             </span><span class="s0"># amount of hits</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_st_mtime </span><span class="s4">= </span><span class="s6">0              </span><span class="s0"># last modification data of our root path</span>
+
+    <span class="s3">def </span><span class="s1">_set_cache_</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">attr</span><span class="s4">):</span>
+        <span class="s3">if </span><span class="s1">attr </span><span class="s4">== </span><span class="s5">'_entities'</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_entities </span><span class="s4">= </span><span class="s1">list</span><span class="s4">()</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">update_cache</span><span class="s4">(</span><span class="s1">force</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+        <span class="s0"># END handle entities initialization</span>
+
+    <span class="s3">def </span><span class="s1">_sort_entities</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_entities</span><span class="s4">.</span><span class="s1">sort</span><span class="s4">(</span><span class="s1">key</span><span class="s4">=</span><span class="s3">lambda </span><span class="s1">l</span><span class="s4">: </span><span class="s1">l</span><span class="s4">[</span><span class="s6">0</span><span class="s4">], </span><span class="s1">reverse</span><span class="s4">=</span><span class="s3">True</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">_pack_info</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">sha</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;:return: tuple(entity, index) for an item at the given sha 
+        :param sha: 20 or 40 byte sha 
+        :raise BadObject: 
+        **Note:** This method is not thread-safe, but may be hit in multi-threaded 
+            operation. The worst thing that can happen though is a counter that 
+            was not incremented, or the list being in wrong order. So we safe 
+            the time for locking here, lets see how that goes&quot;&quot;&quot;</span>
+        <span class="s0"># presort ?</span>
+        <span class="s3">if </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_hit_count </span><span class="s4">% </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_sort_interval </span><span class="s4">== </span><span class="s6">0</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_sort_entities</span><span class="s4">()</span>
+        <span class="s0"># END update sorting</span>
+
+        <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_entities</span><span class="s4">:</span>
+            <span class="s1">index </span><span class="s4">= </span><span class="s1">item</span><span class="s4">[</span><span class="s6">2</span><span class="s4">](</span><span class="s1">sha</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">index </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s1">item</span><span class="s4">[</span><span class="s6">0</span><span class="s4">] += </span><span class="s6">1            </span><span class="s0"># one hit for you</span>
+                <span class="s1">self</span><span class="s4">.</span><span class="s1">_hit_count </span><span class="s4">+= </span><span class="s6">1    </span><span class="s0"># general hit count</span>
+                <span class="s3">return </span><span class="s4">(</span><span class="s1">item</span><span class="s4">[</span><span class="s6">1</span><span class="s4">], </span><span class="s1">index</span><span class="s4">)</span>
+            <span class="s0"># END index found in pack</span>
+        <span class="s0"># END for each item</span>
+
+        <span class="s0"># no hit, see whether we have to update packs</span>
+        <span class="s0"># NOTE: considering packs don't change very often, we safe this call</span>
+        <span class="s0"># and leave it to the super-caller to trigger that</span>
+        <span class="s3">raise </span><span class="s1">BadObject</span><span class="s4">(</span><span class="s1">sha</span><span class="s4">)</span>
+
+    <span class="s0">#{ Object DB Read</span>
+
+    <span class="s3">def </span><span class="s1">has_object</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">sha</span><span class="s4">):</span>
+        <span class="s3">try</span><span class="s4">:</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_pack_info</span><span class="s4">(</span><span class="s1">sha</span><span class="s4">)</span>
+            <span class="s3">return True</span>
+        <span class="s3">except </span><span class="s1">BadObject</span><span class="s4">:</span>
+            <span class="s3">return False</span>
+        <span class="s0"># END exception handling</span>
+
+    <span class="s3">def </span><span class="s1">info</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">sha</span><span class="s4">):</span>
+        <span class="s1">entity</span><span class="s4">, </span><span class="s1">index </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_pack_info</span><span class="s4">(</span><span class="s1">sha</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">info_at_index</span><span class="s4">(</span><span class="s1">index</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">stream</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">sha</span><span class="s4">):</span>
+        <span class="s1">entity</span><span class="s4">, </span><span class="s1">index </span><span class="s4">= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_pack_info</span><span class="s4">(</span><span class="s1">sha</span><span class="s4">)</span>
+        <span class="s3">return </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">stream_at_index</span><span class="s4">(</span><span class="s1">index</span><span class="s4">)</span>
+
+    <span class="s3">def </span><span class="s1">sha_iter</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s3">for </span><span class="s1">entity </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">entities</span><span class="s4">():</span>
+            <span class="s1">index </span><span class="s4">= </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">index</span><span class="s4">()</span>
+            <span class="s1">sha_by_index </span><span class="s4">= </span><span class="s1">index</span><span class="s4">.</span><span class="s1">sha</span>
+            <span class="s3">for </span><span class="s1">index </span><span class="s3">in </span><span class="s1">range</span><span class="s4">(</span><span class="s1">index</span><span class="s4">.</span><span class="s1">size</span><span class="s4">()):</span>
+                <span class="s3">yield </span><span class="s1">sha_by_index</span><span class="s4">(</span><span class="s1">index</span><span class="s4">)</span>
+            <span class="s0"># END for each index</span>
+        <span class="s0"># END for each entity</span>
+
+    <span class="s3">def </span><span class="s1">size</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s1">sizes </span><span class="s4">= [</span><span class="s1">item</span><span class="s4">[</span><span class="s6">1</span><span class="s4">].</span><span class="s1">index</span><span class="s4">().</span><span class="s1">size</span><span class="s4">() </span><span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_entities</span><span class="s4">]</span>
+        <span class="s3">return </span><span class="s1">reduce</span><span class="s4">(</span><span class="s3">lambda </span><span class="s1">x</span><span class="s4">, </span><span class="s1">y</span><span class="s4">: </span><span class="s1">x </span><span class="s4">+ </span><span class="s1">y</span><span class="s4">, </span><span class="s1">sizes</span><span class="s4">, </span><span class="s6">0</span><span class="s4">)</span>
+
+    <span class="s0">#} END object db read</span>
+
+    <span class="s0">#{ object db write</span>
+
+    <span class="s3">def </span><span class="s1">store</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">istream</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;Storing individual objects is not feasible as a pack is designed to 
+        hold multiple objects. Writing or rewriting packs for single objects is 
+        inefficient&quot;&quot;&quot;</span>
+        <span class="s3">raise </span><span class="s1">UnsupportedOperation</span><span class="s4">()</span>
+
+    <span class="s0">#} END object db write</span>
+
+    <span class="s0">#{ Interface</span>
+
+    <span class="s3">def </span><span class="s1">update_cache</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">force</span><span class="s4">=</span><span class="s3">False</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot; 
+        Update our cache with the actually existing packs on disk. Add new ones, 
+        and remove deleted ones. We keep the unchanged ones 
+ 
+        :param force: If True, the cache will be updated even though the directory 
+            does not appear to have changed according to its modification timestamp. 
+        :return: True if the packs have been updated so there is new information, 
+            False if there was no change to the pack database&quot;&quot;&quot;</span>
+        <span class="s1">stat </span><span class="s4">= </span><span class="s1">os</span><span class="s4">.</span><span class="s1">stat</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">root_path</span><span class="s4">())</span>
+        <span class="s3">if not </span><span class="s1">force </span><span class="s3">and </span><span class="s1">stat</span><span class="s4">.</span><span class="s1">st_mtime </span><span class="s4">&lt;= </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_st_mtime</span><span class="s4">:</span>
+            <span class="s3">return False</span>
+        <span class="s0"># END abort early on no change</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_st_mtime </span><span class="s4">= </span><span class="s1">stat</span><span class="s4">.</span><span class="s1">st_mtime</span>
+
+        <span class="s0"># packs are supposed to be prefixed with pack- by git-convention</span>
+        <span class="s0"># get all pack files, figure out what changed</span>
+        <span class="s1">pack_files </span><span class="s4">= </span><span class="s1">set</span><span class="s4">(</span><span class="s1">glob</span><span class="s4">.</span><span class="s1">glob</span><span class="s4">(</span><span class="s1">os</span><span class="s4">.</span><span class="s1">path</span><span class="s4">.</span><span class="s1">join</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">root_path</span><span class="s4">(), </span><span class="s5">&quot;pack-*.pack&quot;</span><span class="s4">)))</span>
+        <span class="s1">our_pack_files </span><span class="s4">= {</span><span class="s1">item</span><span class="s4">[</span><span class="s6">1</span><span class="s4">].</span><span class="s1">pack</span><span class="s4">().</span><span class="s1">path</span><span class="s4">() </span><span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_entities</span><span class="s4">}</span>
+
+        <span class="s0"># new packs</span>
+        <span class="s3">for </span><span class="s1">pack_file </span><span class="s3">in </span><span class="s4">(</span><span class="s1">pack_files </span><span class="s4">- </span><span class="s1">our_pack_files</span><span class="s4">):</span>
+            <span class="s0"># init the hit-counter/priority with the size, a good measure for hit-</span>
+            <span class="s0"># probability. Its implemented so that only 12 bytes will be read</span>
+            <span class="s1">entity </span><span class="s4">= </span><span class="s1">PackEntity</span><span class="s4">(</span><span class="s1">pack_file</span><span class="s4">)</span>
+            <span class="s1">self</span><span class="s4">.</span><span class="s1">_entities</span><span class="s4">.</span><span class="s1">append</span><span class="s4">([</span><span class="s1">entity</span><span class="s4">.</span><span class="s1">pack</span><span class="s4">().</span><span class="s1">size</span><span class="s4">(), </span><span class="s1">entity</span><span class="s4">, </span><span class="s1">entity</span><span class="s4">.</span><span class="s1">index</span><span class="s4">().</span><span class="s1">sha_to_index</span><span class="s4">])</span>
+        <span class="s0"># END for each new packfile</span>
+
+        <span class="s0"># removed packs</span>
+        <span class="s3">for </span><span class="s1">pack_file </span><span class="s3">in </span><span class="s4">(</span><span class="s1">our_pack_files </span><span class="s4">- </span><span class="s1">pack_files</span><span class="s4">):</span>
+            <span class="s1">del_index </span><span class="s4">= -</span><span class="s6">1</span>
+            <span class="s3">for </span><span class="s1">i</span><span class="s4">, </span><span class="s1">item </span><span class="s3">in </span><span class="s1">enumerate</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_entities</span><span class="s4">):</span>
+                <span class="s3">if </span><span class="s1">item</span><span class="s4">[</span><span class="s6">1</span><span class="s4">].</span><span class="s1">pack</span><span class="s4">().</span><span class="s1">path</span><span class="s4">() == </span><span class="s1">pack_file</span><span class="s4">:</span>
+                    <span class="s1">del_index </span><span class="s4">= </span><span class="s1">i</span>
+                    <span class="s3">break</span>
+                <span class="s0"># END found index</span>
+            <span class="s0"># END for each entity</span>
+            <span class="s3">assert </span><span class="s1">del_index </span><span class="s4">!= -</span><span class="s6">1</span>
+            <span class="s3">del</span><span class="s4">(</span><span class="s1">self</span><span class="s4">.</span><span class="s1">_entities</span><span class="s4">[</span><span class="s1">del_index</span><span class="s4">])</span>
+        <span class="s0"># END for each removed pack</span>
+
+        <span class="s0"># reinitialize prioritiess</span>
+        <span class="s1">self</span><span class="s4">.</span><span class="s1">_sort_entities</span><span class="s4">()</span>
+        <span class="s3">return True</span>
+
+    <span class="s3">def </span><span class="s1">entities</span><span class="s4">(</span><span class="s1">self</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;:return: list of pack entities operated upon by this database&quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s4">[</span><span class="s1">item</span><span class="s4">[</span><span class="s6">1</span><span class="s4">] </span><span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_entities</span><span class="s4">]</span>
+
+    <span class="s3">def </span><span class="s1">partial_to_complete_sha</span><span class="s4">(</span><span class="s1">self</span><span class="s4">, </span><span class="s1">partial_binsha</span><span class="s4">, </span><span class="s1">canonical_length</span><span class="s4">):</span>
+        <span class="s2">&quot;&quot;&quot;:return: 20 byte sha as inferred by the given partial binary sha 
+        :param partial_binsha: binary sha with less than 20 bytes 
+        :param canonical_length: length of the corresponding canonical representation. 
+            It is required as binary sha's cannot display whether the original hex sha 
+            had an odd or even number of characters 
+        :raise AmbiguousObjectName: 
+        :raise BadObject: &quot;&quot;&quot;</span>
+        <span class="s1">candidate </span><span class="s4">= </span><span class="s3">None</span>
+        <span class="s3">for </span><span class="s1">item </span><span class="s3">in </span><span class="s1">self</span><span class="s4">.</span><span class="s1">_entities</span><span class="s4">:</span>
+            <span class="s1">item_index </span><span class="s4">= </span><span class="s1">item</span><span class="s4">[</span><span class="s6">1</span><span class="s4">].</span><span class="s1">index</span><span class="s4">().</span><span class="s1">partial_sha_to_index</span><span class="s4">(</span><span class="s1">partial_binsha</span><span class="s4">, </span><span class="s1">canonical_length</span><span class="s4">)</span>
+            <span class="s3">if </span><span class="s1">item_index </span><span class="s3">is not None</span><span class="s4">:</span>
+                <span class="s1">sha </span><span class="s4">= </span><span class="s1">item</span><span class="s4">[</span><span class="s6">1</span><span class="s4">].</span><span class="s1">index</span><span class="s4">().</span><span class="s1">sha</span><span class="s4">(</span><span class="s1">item_index</span><span class="s4">)</span>
+                <span class="s3">if </span><span class="s1">candidate </span><span class="s3">and </span><span class="s1">candidate </span><span class="s4">!= </span><span class="s1">sha</span><span class="s4">:</span>
+                    <span class="s3">raise </span><span class="s1">AmbiguousObjectName</span><span class="s4">(</span><span class="s1">partial_binsha</span><span class="s4">)</span>
+                <span class="s1">candidate </span><span class="s4">= </span><span class="s1">sha</span>
+            <span class="s0"># END handle full sha could be found</span>
+        <span class="s0"># END for each entity</span>
+
+        <span class="s3">if </span><span class="s1">candidate</span><span class="s4">:</span>
+            <span class="s3">return </span><span class="s1">candidate</span>
+
+        <span class="s0"># still not found ?</span>
+        <span class="s3">raise </span><span class="s1">BadObject</span><span class="s4">(</span><span class="s1">partial_binsha</span><span class="s4">)</span>
+
+    <span class="s0">#} END interface</span>
+</pre>
+</body>
+</html>

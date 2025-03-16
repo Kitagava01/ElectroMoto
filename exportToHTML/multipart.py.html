@@ -1,0 +1,347 @@
+<html>
+<head>
+<title>multipart.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #a5c261;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+.s7 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+multipart.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+<span class="s0">from </span><span class="s1">dataclasses </span><span class="s0">import </span><span class="s1">dataclass</span>
+<span class="s0">from </span><span class="s1">enum </span><span class="s0">import </span><span class="s1">auto</span>
+<span class="s0">from </span><span class="s1">enum </span><span class="s0">import </span><span class="s1">Enum</span>
+
+<span class="s0">from </span><span class="s2">..</span><span class="s1">datastructures </span><span class="s0">import </span><span class="s1">Headers</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">exceptions </span><span class="s0">import </span><span class="s1">RequestEntityTooLarge</span>
+<span class="s0">from </span><span class="s2">..</span><span class="s1">http </span><span class="s0">import </span><span class="s1">parse_options_header</span>
+
+
+<span class="s0">class </span><span class="s1">Event</span><span class="s2">:</span>
+    <span class="s0">pass</span>
+
+
+<span class="s2">@</span><span class="s1">dataclass</span><span class="s2">(</span><span class="s1">frozen</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Preamble</span><span class="s2">(</span><span class="s1">Event</span><span class="s2">):</span>
+    <span class="s1">data</span><span class="s2">: </span><span class="s1">bytes</span>
+
+
+<span class="s2">@</span><span class="s1">dataclass</span><span class="s2">(</span><span class="s1">frozen</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Field</span><span class="s2">(</span><span class="s1">Event</span><span class="s2">):</span>
+    <span class="s1">name</span><span class="s2">: </span><span class="s1">str</span>
+    <span class="s1">headers</span><span class="s2">: </span><span class="s1">Headers</span>
+
+
+<span class="s2">@</span><span class="s1">dataclass</span><span class="s2">(</span><span class="s1">frozen</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">File</span><span class="s2">(</span><span class="s1">Event</span><span class="s2">):</span>
+    <span class="s1">name</span><span class="s2">: </span><span class="s1">str</span>
+    <span class="s1">filename</span><span class="s2">: </span><span class="s1">str</span>
+    <span class="s1">headers</span><span class="s2">: </span><span class="s1">Headers</span>
+
+
+<span class="s2">@</span><span class="s1">dataclass</span><span class="s2">(</span><span class="s1">frozen</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">Event</span><span class="s2">):</span>
+    <span class="s1">data</span><span class="s2">: </span><span class="s1">bytes</span>
+    <span class="s1">more_data</span><span class="s2">: </span><span class="s1">bool</span>
+
+
+<span class="s2">@</span><span class="s1">dataclass</span><span class="s2">(</span><span class="s1">frozen</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+<span class="s0">class </span><span class="s1">Epilogue</span><span class="s2">(</span><span class="s1">Event</span><span class="s2">):</span>
+    <span class="s1">data</span><span class="s2">: </span><span class="s1">bytes</span>
+
+
+<span class="s0">class </span><span class="s1">NeedData</span><span class="s2">(</span><span class="s1">Event</span><span class="s2">):</span>
+    <span class="s0">pass</span>
+
+
+<span class="s1">NEED_DATA </span><span class="s2">= </span><span class="s1">NeedData</span><span class="s2">()</span>
+
+
+<span class="s0">class </span><span class="s1">State</span><span class="s2">(</span><span class="s1">Enum</span><span class="s2">):</span>
+    <span class="s1">PREAMBLE </span><span class="s2">= </span><span class="s1">auto</span><span class="s2">()</span>
+    <span class="s1">PART </span><span class="s2">= </span><span class="s1">auto</span><span class="s2">()</span>
+    <span class="s1">DATA </span><span class="s2">= </span><span class="s1">auto</span><span class="s2">()</span>
+    <span class="s1">DATA_START </span><span class="s2">= </span><span class="s1">auto</span><span class="s2">()</span>
+    <span class="s1">EPILOGUE </span><span class="s2">= </span><span class="s1">auto</span><span class="s2">()</span>
+    <span class="s1">COMPLETE </span><span class="s2">= </span><span class="s1">auto</span><span class="s2">()</span>
+
+
+<span class="s3"># Multipart line breaks MUST be CRLF (\r\n) by RFC-7578, except that</span>
+<span class="s3"># many implementations break this and either use CR or LF alone.</span>
+<span class="s1">LINE_BREAK </span><span class="s2">= </span><span class="s4">b&quot;(?:</span><span class="s0">\r\n</span><span class="s4">|</span><span class="s0">\n</span><span class="s4">|</span><span class="s0">\r</span><span class="s4">)&quot;</span>
+<span class="s1">BLANK_LINE_RE </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s4">b&quot;(?:</span><span class="s0">\r\n\r\n</span><span class="s4">|</span><span class="s0">\r\r</span><span class="s4">|</span><span class="s0">\n\n</span><span class="s4">)&quot;</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">MULTILINE</span><span class="s2">)</span>
+<span class="s1">LINE_BREAK_RE </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s1">LINE_BREAK</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">MULTILINE</span><span class="s2">)</span>
+<span class="s3"># Header values can be continued via a space or tab after the linebreak, as</span>
+<span class="s3"># per RFC2231</span>
+<span class="s1">HEADER_CONTINUATION_RE </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s4">b&quot;%s[ </span><span class="s0">\t</span><span class="s4">]&quot; </span><span class="s2">% </span><span class="s1">LINE_BREAK</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">MULTILINE</span><span class="s2">)</span>
+<span class="s3"># This must be long enough to contain any line breaks plus any</span>
+<span class="s3"># additional boundary markers (--) such that they will be found in a</span>
+<span class="s3"># subsequent search</span>
+<span class="s1">SEARCH_EXTRA_LENGTH </span><span class="s2">= </span><span class="s5">8</span>
+
+
+<span class="s0">class </span><span class="s1">MultipartDecoder</span><span class="s2">:</span>
+    <span class="s6">&quot;&quot;&quot;Decodes a multipart message as bytes into Python events. 
+ 
+    The part data is returned as available to allow the caller to save 
+    the data from memory to disk, if desired. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">boundary</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">,</span>
+        <span class="s1">max_form_memory_size</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+        <span class="s2">*,</span>
+        <span class="s1">max_parts</span><span class="s2">: </span><span class="s1">int </span><span class="s2">| </span><span class="s0">None </span><span class="s2">= </span><span class="s0">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">buffer </span><span class="s2">= </span><span class="s1">bytearray</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">complete </span><span class="s2">= </span><span class="s0">False</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">max_form_memory_size </span><span class="s2">= </span><span class="s1">max_form_memory_size</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">max_parts </span><span class="s2">= </span><span class="s1">max_parts</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">PREAMBLE</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">boundary </span><span class="s2">= </span><span class="s1">boundary</span>
+
+        <span class="s3"># Note in the below \h i.e. horizontal whitespace is used</span>
+        <span class="s3"># as [^\S\n\r] as \h isn't supported in python.</span>
+
+        <span class="s3"># The preamble must end with a boundary where the boundary is</span>
+        <span class="s3"># prefixed by a line break, RFC2046. Except that many</span>
+        <span class="s3"># implementations including Werkzeug's tests omit the line</span>
+        <span class="s3"># break prefix. In addition the first boundary could be the</span>
+        <span class="s3"># epilogue boundary (for empty form-data) hence the matching</span>
+        <span class="s3"># group to understand if it is an epilogue boundary.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">preamble_re </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span>
+            <span class="s4">rb&quot;%s?--%s(--[^\S\n\r]*%s?|[^\S\n\r]*%s)&quot;</span>
+            <span class="s2">% (</span><span class="s1">LINE_BREAK</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">escape</span><span class="s2">(</span><span class="s1">boundary</span><span class="s2">), </span><span class="s1">LINE_BREAK</span><span class="s2">, </span><span class="s1">LINE_BREAK</span><span class="s2">),</span>
+            <span class="s1">re</span><span class="s2">.</span><span class="s1">MULTILINE</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s3"># A boundary must include a line break prefix and suffix, and</span>
+        <span class="s3"># may include trailing whitespace. In addition the boundary</span>
+        <span class="s3"># could be the epilogue boundary hence the matching group to</span>
+        <span class="s3"># understand if it is an epilogue boundary.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">boundary_re </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span>
+            <span class="s4">rb&quot;%s--%s(--[^\S\n\r]*%s?|[^\S\n\r]*%s)&quot;</span>
+            <span class="s2">% (</span><span class="s1">LINE_BREAK</span><span class="s2">, </span><span class="s1">re</span><span class="s2">.</span><span class="s1">escape</span><span class="s2">(</span><span class="s1">boundary</span><span class="s2">), </span><span class="s1">LINE_BREAK</span><span class="s2">, </span><span class="s1">LINE_BREAK</span><span class="s2">),</span>
+            <span class="s1">re</span><span class="s2">.</span><span class="s1">MULTILINE</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_search_position </span><span class="s2">= </span><span class="s5">0</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">_parts_decoded </span><span class="s2">= </span><span class="s5">0</span>
+
+    <span class="s0">def </span><span class="s1">last_newline</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">last_nl </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">rindex</span><span class="s2">(</span><span class="s4">b&quot;</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+            <span class="s1">last_nl </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s0">try</span><span class="s2">:</span>
+            <span class="s1">last_cr </span><span class="s2">= </span><span class="s1">data</span><span class="s2">.</span><span class="s1">rindex</span><span class="s2">(</span><span class="s4">b&quot;</span><span class="s0">\r</span><span class="s4">&quot;</span><span class="s2">)</span>
+        <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+            <span class="s1">last_cr </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">min</span><span class="s2">(</span><span class="s1">last_nl</span><span class="s2">, </span><span class="s1">last_cr</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">receive_data</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">: </span><span class="s1">bytes </span><span class="s2">| </span><span class="s0">None</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">data </span><span class="s0">is None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">complete </span><span class="s2">= </span><span class="s0">True</span>
+        <span class="s0">elif </span><span class="s2">(</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">max_form_memory_size </span><span class="s0">is not None</span>
+            <span class="s0">and </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">) + </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">) &gt; </span><span class="s1">self</span><span class="s2">.</span><span class="s1">max_form_memory_size</span>
+        <span class="s2">):</span>
+            <span class="s3"># Ensure that data within single event does not exceed limit.</span>
+            <span class="s3"># Also checked across accumulated events in MultiPartParser.</span>
+            <span class="s0">raise </span><span class="s1">RequestEntityTooLarge</span><span class="s2">()</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">next_event</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Event</span><span class="s2">:</span>
+        <span class="s1">event</span><span class="s2">: </span><span class="s1">Event </span><span class="s2">= </span><span class="s1">NEED_DATA</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">== </span><span class="s1">State</span><span class="s2">.</span><span class="s1">PREAMBLE</span><span class="s2">:</span>
+            <span class="s1">match </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">preamble_re</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_search_position</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">match </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">match</span><span class="s2">.</span><span class="s1">group</span><span class="s2">(</span><span class="s5">1</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s4">b&quot;--&quot;</span><span class="s2">):</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">EPILOGUE</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">PART</span>
+                <span class="s1">data </span><span class="s2">= </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">[: </span><span class="s1">match</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()])</span>
+                <span class="s0">del </span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">[: </span><span class="s1">match</span><span class="s2">.</span><span class="s1">end</span><span class="s2">()]</span>
+                <span class="s1">event </span><span class="s2">= </span><span class="s1">Preamble</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s1">data</span><span class="s2">)</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_search_position </span><span class="s2">= </span><span class="s5">0</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s3"># Update the search start position to be equal to the</span>
+                <span class="s3"># current buffer length (already searched) minus a</span>
+                <span class="s3"># safe buffer for part of the search target.</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_search_position </span><span class="s2">= </span><span class="s1">max</span><span class="s2">(</span>
+                    <span class="s5">0</span><span class="s2">, </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">) - </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">boundary</span><span class="s2">) - </span><span class="s1">SEARCH_EXTRA_LENGTH</span>
+                <span class="s2">)</span>
+
+        <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">== </span><span class="s1">State</span><span class="s2">.</span><span class="s1">PART</span><span class="s2">:</span>
+            <span class="s1">match </span><span class="s2">= </span><span class="s1">BLANK_LINE_RE</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_search_position</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">match </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s1">headers </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_parse_headers</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">[: </span><span class="s1">match</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()])</span>
+                <span class="s3"># The final header ends with a single CRLF, however a</span>
+                <span class="s3"># blank line indicates the start of the</span>
+                <span class="s3"># body. Therefore the end is after the first CRLF.</span>
+                <span class="s1">headers_end </span><span class="s2">= (</span><span class="s1">match</span><span class="s2">.</span><span class="s1">start</span><span class="s2">() + </span><span class="s1">match</span><span class="s2">.</span><span class="s1">end</span><span class="s2">()) // </span><span class="s5">2</span>
+                <span class="s0">del </span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">[:</span><span class="s1">headers_end</span><span class="s2">]</span>
+
+                <span class="s0">if </span><span class="s7">&quot;content-disposition&quot; </span><span class="s0">not in </span><span class="s1">headers</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s7">&quot;Missing Content-Disposition header&quot;</span><span class="s2">)</span>
+
+                <span class="s1">disposition</span><span class="s2">, </span><span class="s1">extra </span><span class="s2">= </span><span class="s1">parse_options_header</span><span class="s2">(</span>
+                    <span class="s1">headers</span><span class="s2">[</span><span class="s7">&quot;content-disposition&quot;</span><span class="s2">]</span>
+                <span class="s2">)</span>
+                <span class="s1">name </span><span class="s2">= </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">str</span><span class="s2">, </span><span class="s1">extra</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s7">&quot;name&quot;</span><span class="s2">))</span>
+                <span class="s1">filename </span><span class="s2">= </span><span class="s1">extra</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s7">&quot;filename&quot;</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">filename </span><span class="s0">is not None</span><span class="s2">:</span>
+                    <span class="s1">event </span><span class="s2">= </span><span class="s1">File</span><span class="s2">(</span>
+                        <span class="s1">filename</span><span class="s2">=</span><span class="s1">filename</span><span class="s2">,</span>
+                        <span class="s1">headers</span><span class="s2">=</span><span class="s1">headers</span><span class="s2">,</span>
+                        <span class="s1">name</span><span class="s2">=</span><span class="s1">name</span><span class="s2">,</span>
+                    <span class="s2">)</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">event </span><span class="s2">= </span><span class="s1">Field</span><span class="s2">(</span>
+                        <span class="s1">headers</span><span class="s2">=</span><span class="s1">headers</span><span class="s2">,</span>
+                        <span class="s1">name</span><span class="s2">=</span><span class="s1">name</span><span class="s2">,</span>
+                    <span class="s2">)</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">DATA_START</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_search_position </span><span class="s2">= </span><span class="s5">0</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_parts_decoded </span><span class="s2">+= </span><span class="s5">1</span>
+
+                <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">max_parts </span><span class="s0">is not None and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_parts_decoded </span><span class="s2">&gt; </span><span class="s1">self</span><span class="s2">.</span><span class="s1">max_parts</span><span class="s2">:</span>
+                    <span class="s0">raise </span><span class="s1">RequestEntityTooLarge</span><span class="s2">()</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s3"># Update the search start position to be equal to the</span>
+                <span class="s3"># current buffer length (already searched) minus a</span>
+                <span class="s3"># safe buffer for part of the search target.</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">_search_position </span><span class="s2">= </span><span class="s1">max</span><span class="s2">(</span><span class="s5">0</span><span class="s2">, </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">) - </span><span class="s1">SEARCH_EXTRA_LENGTH</span><span class="s2">)</span>
+
+        <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">== </span><span class="s1">State</span><span class="s2">.</span><span class="s1">DATA_START</span><span class="s2">:</span>
+            <span class="s1">data</span><span class="s2">, </span><span class="s1">del_index</span><span class="s2">, </span><span class="s1">more_data </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_parse_data</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">start</span><span class="s2">=</span><span class="s0">True</span><span class="s2">)</span>
+            <span class="s0">del </span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">[:</span><span class="s1">del_index</span><span class="s2">]</span>
+            <span class="s1">event </span><span class="s2">= </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s1">data</span><span class="s2">, </span><span class="s1">more_data</span><span class="s2">=</span><span class="s1">more_data</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">more_data</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">DATA</span>
+
+        <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">== </span><span class="s1">State</span><span class="s2">.</span><span class="s1">DATA</span><span class="s2">:</span>
+            <span class="s1">data</span><span class="s2">, </span><span class="s1">del_index</span><span class="s2">, </span><span class="s1">more_data </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_parse_data</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">, </span><span class="s1">start</span><span class="s2">=</span><span class="s0">False</span><span class="s2">)</span>
+            <span class="s0">del </span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">[:</span><span class="s1">del_index</span><span class="s2">]</span>
+            <span class="s0">if </span><span class="s1">data </span><span class="s0">or not </span><span class="s1">more_data</span><span class="s2">:</span>
+                <span class="s1">event </span><span class="s2">= </span><span class="s1">Data</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s1">data</span><span class="s2">, </span><span class="s1">more_data</span><span class="s2">=</span><span class="s1">more_data</span><span class="s2">)</span>
+
+        <span class="s0">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">== </span><span class="s1">State</span><span class="s2">.</span><span class="s1">EPILOGUE </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">complete</span><span class="s2">:</span>
+            <span class="s1">event </span><span class="s2">= </span><span class="s1">Epilogue</span><span class="s2">(</span><span class="s1">data</span><span class="s2">=</span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">))</span>
+            <span class="s0">del </span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">[:]</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">COMPLETE</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">complete </span><span class="s0">and </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">event</span><span class="s2">, </span><span class="s1">NeedData</span><span class="s2">):</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s7">f&quot;Invalid form-data cannot parse beyond </span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">state</span><span class="s0">}</span><span class="s7">&quot;</span><span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">event</span>
+
+    <span class="s0">def </span><span class="s1">_parse_headers</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">) </span><span class="s1">-&gt; Headers</span><span class="s2">:</span>
+        <span class="s1">headers</span><span class="s2">: </span><span class="s1">list</span><span class="s2">[</span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]] = []</span>
+        <span class="s3"># Merge the continued headers into one line</span>
+        <span class="s1">data </span><span class="s2">= </span><span class="s1">HEADER_CONTINUATION_RE</span><span class="s2">.</span><span class="s1">sub</span><span class="s2">(</span><span class="s4">b&quot; &quot;</span><span class="s2">, </span><span class="s1">data</span><span class="s2">)</span>
+        <span class="s3"># Now there is one header per line</span>
+        <span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">data</span><span class="s2">.</span><span class="s1">splitlines</span><span class="s2">():</span>
+            <span class="s1">line </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+
+            <span class="s0">if </span><span class="s1">line </span><span class="s2">!= </span><span class="s4">b&quot;&quot;</span><span class="s2">:</span>
+                <span class="s1">name</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">value </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">().</span><span class="s1">partition</span><span class="s2">(</span><span class="s7">&quot;:&quot;</span><span class="s2">)</span>
+                <span class="s1">headers</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s1">name</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(), </span><span class="s1">value</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()))</span>
+        <span class="s0">return </span><span class="s1">Headers</span><span class="s2">(</span><span class="s1">headers</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_parse_data</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">data</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">, *, </span><span class="s1">start</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">int</span><span class="s2">, </span><span class="s1">bool</span><span class="s2">]:</span>
+        <span class="s3"># Body parts must start with CRLF (or CR or LF)</span>
+        <span class="s0">if </span><span class="s1">start</span><span class="s2">:</span>
+            <span class="s1">match </span><span class="s2">= </span><span class="s1">LINE_BREAK_RE</span><span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+            <span class="s1">data_start </span><span class="s2">= </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">t</span><span class="s2">.</span><span class="s1">Match</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">], </span><span class="s1">match</span><span class="s2">).</span><span class="s1">end</span><span class="s2">()</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">data_start </span><span class="s2">= </span><span class="s5">0</span>
+
+        <span class="s1">boundary </span><span class="s2">= </span><span class="s4">b&quot;--&quot; </span><span class="s2">+ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">boundary</span>
+
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">buffer</span><span class="s2">.</span><span class="s1">find</span><span class="s2">(</span><span class="s1">boundary</span><span class="s2">) == -</span><span class="s5">1</span><span class="s2">:</span>
+            <span class="s3"># No complete boundary in the buffer, but there may be</span>
+            <span class="s3"># a partial boundary at the end. As the boundary</span>
+            <span class="s3"># starts with either a nl or cr find the earliest and</span>
+            <span class="s3"># return up to that as data.</span>
+            <span class="s1">data_end </span><span class="s2">= </span><span class="s1">del_index </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">last_newline</span><span class="s2">(</span><span class="s1">data</span><span class="s2">[</span><span class="s1">data_start</span><span class="s2">:]) + </span><span class="s1">data_start</span>
+            <span class="s3"># If amount of data after last newline is far from</span>
+            <span class="s3"># possible length of partial boundary, we should</span>
+            <span class="s3"># assume that there is no partial boundary in the buffer</span>
+            <span class="s3"># and return all pending data.</span>
+            <span class="s0">if </span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">) - </span><span class="s1">data_end</span><span class="s2">) &gt; </span><span class="s1">len</span><span class="s2">(</span><span class="s4">b&quot;</span><span class="s0">\n</span><span class="s4">&quot; </span><span class="s2">+ </span><span class="s1">boundary</span><span class="s2">):</span>
+                <span class="s1">data_end </span><span class="s2">= </span><span class="s1">del_index </span><span class="s2">= </span><span class="s1">len</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+            <span class="s1">more_data </span><span class="s2">= </span><span class="s0">True</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s1">match </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">boundary_re</span><span class="s2">.</span><span class="s1">search</span><span class="s2">(</span><span class="s1">data</span><span class="s2">)</span>
+            <span class="s0">if </span><span class="s1">match </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">match</span><span class="s2">.</span><span class="s1">group</span><span class="s2">(</span><span class="s5">1</span><span class="s2">).</span><span class="s1">startswith</span><span class="s2">(</span><span class="s4">b&quot;--&quot;</span><span class="s2">):</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">EPILOGUE</span>
+                <span class="s0">else</span><span class="s2">:</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">PART</span>
+                <span class="s1">data_end </span><span class="s2">= </span><span class="s1">match</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()</span>
+                <span class="s1">del_index </span><span class="s2">= </span><span class="s1">match</span><span class="s2">.</span><span class="s1">end</span><span class="s2">()</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s1">data_end </span><span class="s2">= </span><span class="s1">del_index </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">last_newline</span><span class="s2">(</span><span class="s1">data</span><span class="s2">[</span><span class="s1">data_start</span><span class="s2">:]) + </span><span class="s1">data_start</span>
+            <span class="s1">more_data </span><span class="s2">= </span><span class="s1">match </span><span class="s0">is None</span>
+
+        <span class="s0">return </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">data</span><span class="s2">[</span><span class="s1">data_start</span><span class="s2">:</span><span class="s1">data_end</span><span class="s2">]), </span><span class="s1">del_index</span><span class="s2">, </span><span class="s1">more_data</span>
+
+
+<span class="s0">class </span><span class="s1">MultipartEncoder</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">boundary</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">boundary </span><span class="s2">= </span><span class="s1">boundary</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">PREAMBLE</span>
+
+    <span class="s0">def </span><span class="s1">send_event</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">event</span><span class="s2">: </span><span class="s1">Event</span><span class="s2">) </span><span class="s1">-&gt; bytes</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">event</span><span class="s2">, </span><span class="s1">Preamble</span><span class="s2">) </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">== </span><span class="s1">State</span><span class="s2">.</span><span class="s1">PREAMBLE</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">PART</span>
+            <span class="s0">return </span><span class="s1">event</span><span class="s2">.</span><span class="s1">data</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">event</span><span class="s2">, (</span><span class="s1">Field</span><span class="s2">, </span><span class="s1">File</span><span class="s2">)) </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s0">in </span><span class="s2">{</span>
+            <span class="s1">State</span><span class="s2">.</span><span class="s1">PREAMBLE</span><span class="s2">,</span>
+            <span class="s1">State</span><span class="s2">.</span><span class="s1">PART</span><span class="s2">,</span>
+            <span class="s1">State</span><span class="s2">.</span><span class="s1">DATA</span><span class="s2">,</span>
+        <span class="s2">}:</span>
+            <span class="s1">data </span><span class="s2">= </span><span class="s4">b&quot;</span><span class="s0">\r\n</span><span class="s4">--&quot; </span><span class="s2">+ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">boundary </span><span class="s2">+ </span><span class="s4">b&quot;</span><span class="s0">\r\n</span><span class="s4">&quot;</span>
+            <span class="s1">data </span><span class="s2">+= </span><span class="s4">b'Content-Disposition: form-data; name=&quot;%s&quot;' </span><span class="s2">% </span><span class="s1">event</span><span class="s2">.</span><span class="s1">name</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">()</span>
+            <span class="s0">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">event</span><span class="s2">, </span><span class="s1">File</span><span class="s2">):</span>
+                <span class="s1">data </span><span class="s2">+= </span><span class="s4">b'; filename=&quot;%s&quot;' </span><span class="s2">% </span><span class="s1">event</span><span class="s2">.</span><span class="s1">filename</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">()</span>
+            <span class="s1">data </span><span class="s2">+= </span><span class="s4">b&quot;</span><span class="s0">\r\n</span><span class="s4">&quot;</span>
+            <span class="s0">for </span><span class="s1">name</span><span class="s2">, </span><span class="s1">value </span><span class="s0">in </span><span class="s1">t</span><span class="s2">.</span><span class="s1">cast</span><span class="s2">(</span><span class="s1">Field</span><span class="s2">, </span><span class="s1">event</span><span class="s2">).</span><span class="s1">headers</span><span class="s2">:</span>
+                <span class="s0">if </span><span class="s1">name</span><span class="s2">.</span><span class="s1">lower</span><span class="s2">() != </span><span class="s7">&quot;content-disposition&quot;</span><span class="s2">:</span>
+                    <span class="s1">data </span><span class="s2">+= </span><span class="s7">f&quot;</span><span class="s0">{</span><span class="s1">name</span><span class="s0">}</span><span class="s7">: </span><span class="s0">{</span><span class="s1">value</span><span class="s0">}\r\n</span><span class="s7">&quot;</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">()</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">DATA_START</span>
+            <span class="s0">return </span><span class="s1">data</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">event</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">) </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">== </span><span class="s1">State</span><span class="s2">.</span><span class="s1">DATA_START</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">DATA</span>
+            <span class="s0">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">event</span><span class="s2">.</span><span class="s1">data</span><span class="s2">) &gt; </span><span class="s5">0</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s4">b&quot;</span><span class="s0">\r\n</span><span class="s4">&quot; </span><span class="s2">+ </span><span class="s1">event</span><span class="s2">.</span><span class="s1">data</span>
+            <span class="s0">else</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">event</span><span class="s2">.</span><span class="s1">data</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">event</span><span class="s2">, </span><span class="s1">Data</span><span class="s2">) </span><span class="s0">and </span><span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">== </span><span class="s1">State</span><span class="s2">.</span><span class="s1">DATA</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">event</span><span class="s2">.</span><span class="s1">data</span>
+        <span class="s0">elif </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">event</span><span class="s2">, </span><span class="s1">Epilogue</span><span class="s2">):</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">state </span><span class="s2">= </span><span class="s1">State</span><span class="s2">.</span><span class="s1">COMPLETE</span>
+            <span class="s0">return </span><span class="s4">b&quot;</span><span class="s0">\r\n</span><span class="s4">--&quot; </span><span class="s2">+ </span><span class="s1">self</span><span class="s2">.</span><span class="s1">boundary </span><span class="s2">+ </span><span class="s4">b&quot;--</span><span class="s0">\r\n</span><span class="s4">&quot; </span><span class="s2">+ </span><span class="s1">event</span><span class="s2">.</span><span class="s1">data</span>
+        <span class="s0">else</span><span class="s2">:</span>
+            <span class="s0">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s7">f&quot;Cannot generate </span><span class="s0">{</span><span class="s1">event</span><span class="s0">} </span><span class="s7">in state: </span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">state</span><span class="s0">}</span><span class="s7">&quot;</span><span class="s2">)</span>
+</pre>
+</body>
+</html>

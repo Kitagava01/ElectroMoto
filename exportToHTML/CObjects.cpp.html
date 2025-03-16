@@ -1,0 +1,180 @@
+<html>
+<head>
+<title>CObjects.cpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #0da19e;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+CObjects.cpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">COBJECTS_CPP</span>
+<span class="s0">#define </span><span class="s1">COBJECTS_CPP</span>
+<span class="s2">/***************************************************************************** 
+ * C interface 
+ * 
+ * These are exported using the CObject API 
+ */</span>
+<span class="s0">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic push</span>
+<span class="s1">#    pragma clang diagnostic ignored </span><span class="s3">&quot;-Wunused-function&quot;</span>
+<span class="s0">#endif</span>
+
+<span class="s0">#include </span><span class="s3">&quot;greenlet_exceptions.hpp&quot;</span>
+
+<span class="s0">#include </span><span class="s3">&quot;greenlet_internal.hpp&quot;</span>
+<span class="s0">#include </span><span class="s3">&quot;greenlet_refs.hpp&quot;</span>
+
+
+<span class="s0">#include </span><span class="s3">&quot;TThreadStateDestroy.cpp&quot;</span>
+
+<span class="s0">#include </span><span class="s3">&quot;PyGreenlet.hpp&quot;</span>
+
+<span class="s4">using </span><span class="s1">greenlet::PyErrOccurred;</span>
+<span class="s4">using </span><span class="s1">greenlet::Require;</span>
+
+
+
+<span class="s0">extern </span><span class="s3">&quot;C&quot; </span><span class="s1">{</span>
+<span class="s0">static </span><span class="s1">PyGreenlet*</span>
+<span class="s1">PyGreenlet_GetCurrent(</span><span class="s0">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s0">return </span><span class="s1">GET_THREAD_STATE().state().get_current().relinquish_ownership();</span>
+<span class="s1">}</span>
+
+<span class="s0">static int</span>
+<span class="s1">PyGreenlet_SetParent(PyGreenlet* g, PyGreenlet* nparent)</span>
+<span class="s1">{</span>
+    <span class="s0">return </span><span class="s1">green_setparent((PyGreenlet*)g, (PyObject*)nparent, NULL);</span>
+<span class="s1">}</span>
+
+<span class="s0">static </span><span class="s1">PyGreenlet*</span>
+<span class="s1">PyGreenlet_New(PyObject* run, PyGreenlet* parent)</span>
+<span class="s1">{</span>
+    <span class="s4">using </span><span class="s1">greenlet::refs::NewDictReference;</span>
+    <span class="s2">// In the past, we didn't use green_new and green_init, but that</span>
+    <span class="s2">// was a maintenance issue because we duplicated code. This way is</span>
+    <span class="s2">// much safer, but slightly slower. If that's a problem, we could</span>
+    <span class="s2">// refactor green_init to separate argument parsing from initialization.</span>
+    <span class="s1">OwnedGreenlet g = OwnedGreenlet::consuming(green_new(&amp;PyGreenlet_Type, nullptr, nullptr));</span>
+    <span class="s0">if </span><span class="s1">(!g) {</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+
+    <span class="s4">try </span><span class="s1">{</span>
+        <span class="s1">NewDictReference kwargs;</span>
+        <span class="s0">if </span><span class="s1">(run) {</span>
+            <span class="s1">kwargs.SetItem(mod_globs</span><span class="s5">-&gt;</span><span class="s1">str_run, run);</span>
+        <span class="s1">}</span>
+        <span class="s0">if </span><span class="s1">(parent) {</span>
+            <span class="s1">kwargs.SetItem(</span><span class="s3">&quot;parent&quot;</span><span class="s1">, (PyObject*)parent);</span>
+        <span class="s1">}</span>
+
+        <span class="s1">Require(green_init(g.borrow(), mod_globs</span><span class="s5">-&gt;</span><span class="s1">empty_tuple, kwargs.borrow()));</span>
+    <span class="s1">}</span>
+    <span class="s4">catch </span><span class="s1">(</span><span class="s0">const </span><span class="s1">PyErrOccurred&amp;) {</span>
+        <span class="s0">return </span><span class="s1">nullptr;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">return </span><span class="s1">g.relinquish_ownership();</span>
+<span class="s1">}</span>
+
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">PyGreenlet_Switch(PyGreenlet* self, PyObject* args, PyObject* kwargs)</span>
+<span class="s1">{</span>
+    <span class="s0">if </span><span class="s1">(!PyGreenlet_Check(self)) {</span>
+        <span class="s1">PyErr_BadArgument();</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">if </span><span class="s1">(args == NULL) {</span>
+        <span class="s1">args = mod_globs</span><span class="s5">-&gt;</span><span class="s1">empty_tuple;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">if </span><span class="s1">(kwargs == NULL || !PyDict_Check(kwargs)) {</span>
+        <span class="s1">kwargs = NULL;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">return </span><span class="s1">green_switch(self, args, kwargs);</span>
+<span class="s1">}</span>
+
+<span class="s0">static </span><span class="s1">PyObject*</span>
+<span class="s1">PyGreenlet_Throw(PyGreenlet* self, PyObject* typ, PyObject* val, PyObject* tb)</span>
+<span class="s1">{</span>
+    <span class="s0">if </span><span class="s1">(!PyGreenlet_Check(self)) {</span>
+        <span class="s1">PyErr_BadArgument();</span>
+        <span class="s0">return </span><span class="s1">nullptr;</span>
+    <span class="s1">}</span>
+    <span class="s4">try </span><span class="s1">{</span>
+        <span class="s1">PyErrPieces err_pieces(typ, val, tb);</span>
+        <span class="s0">return </span><span class="s1">internal_green_throw(self, err_pieces).relinquish_ownership();</span>
+    <span class="s1">}</span>
+    <span class="s4">catch </span><span class="s1">(</span><span class="s0">const </span><span class="s1">PyErrOccurred&amp;) {</span>
+        <span class="s0">return </span><span class="s1">nullptr;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+
+
+
+<span class="s0">static int</span>
+<span class="s1">Extern_PyGreenlet_MAIN(PyGreenlet* self)</span>
+<span class="s1">{</span>
+    <span class="s0">if </span><span class="s1">(!PyGreenlet_Check(self)) {</span>
+        <span class="s1">PyErr_BadArgument();</span>
+        <span class="s0">return </span><span class="s1">-</span><span class="s6">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s0">return </span><span class="s1">self</span><span class="s5">-&gt;</span><span class="s1">pimpl</span><span class="s5">-&gt;</span><span class="s1">main();</span>
+<span class="s1">}</span>
+
+<span class="s0">static int</span>
+<span class="s1">Extern_PyGreenlet_ACTIVE(PyGreenlet* self)</span>
+<span class="s1">{</span>
+    <span class="s0">if </span><span class="s1">(!PyGreenlet_Check(self)) {</span>
+        <span class="s1">PyErr_BadArgument();</span>
+        <span class="s0">return </span><span class="s1">-</span><span class="s6">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s0">return </span><span class="s1">self</span><span class="s5">-&gt;</span><span class="s1">pimpl</span><span class="s5">-&gt;</span><span class="s1">active();</span>
+<span class="s1">}</span>
+
+<span class="s0">static int</span>
+<span class="s1">Extern_PyGreenlet_STARTED(PyGreenlet* self)</span>
+<span class="s1">{</span>
+    <span class="s0">if </span><span class="s1">(!PyGreenlet_Check(self)) {</span>
+        <span class="s1">PyErr_BadArgument();</span>
+        <span class="s0">return </span><span class="s1">-</span><span class="s6">1</span><span class="s1">;</span>
+    <span class="s1">}</span>
+    <span class="s0">return </span><span class="s1">self</span><span class="s5">-&gt;</span><span class="s1">pimpl</span><span class="s5">-&gt;</span><span class="s1">started();</span>
+<span class="s1">}</span>
+
+<span class="s0">static </span><span class="s1">PyGreenlet*</span>
+<span class="s1">Extern_PyGreenlet_GET_PARENT(PyGreenlet* self)</span>
+<span class="s1">{</span>
+    <span class="s0">if </span><span class="s1">(!PyGreenlet_Check(self)) {</span>
+        <span class="s1">PyErr_BadArgument();</span>
+        <span class="s0">return </span><span class="s1">NULL;</span>
+    <span class="s1">}</span>
+    <span class="s2">// This can return NULL even if there is no exception</span>
+    <span class="s0">return </span><span class="s1">self</span><span class="s5">-&gt;</span><span class="s1">pimpl</span><span class="s5">-&gt;</span><span class="s1">parent().acquire();</span>
+<span class="s1">}</span>
+<span class="s1">} </span><span class="s2">// extern C.</span>
+
+<span class="s2">/** End C API ****************************************************************/</span>
+<span class="s0">#ifdef </span><span class="s1">__clang__</span>
+<span class="s1">#    pragma clang diagnostic pop</span>
+<span class="s0">#endif</span>
+
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

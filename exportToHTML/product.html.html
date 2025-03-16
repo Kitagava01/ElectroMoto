@@ -1,0 +1,34 @@
+<html>
+<head>
+<title>product.html</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #bcbec4;}
+.s1 { color: #d5b778;}
+.s2 { color: #bababa;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+product.html</font>
+</center></td></tr></table>
+<pre><span class="s0">{% extends 'base.html' %}</span>
+
+<span class="s0">{% block title %}{{ product.name }} - Магазин Электромотоциклов{% endblock %}</span>
+
+<span class="s0">{% block content %}</span>
+<span class="s1">&lt;div </span><span class="s2">class</span><span class="s3">=&quot;product-detail&quot;</span><span class="s1">&gt;</span>
+    <span class="s1">&lt;img </span><span class="s2">src</span><span class="s3">=&quot;{{ url_for('static', filename='images/' + product.image) }}&quot; </span><span class="s2">alt</span><span class="s3">=&quot;{{ product.name }}&quot;</span><span class="s1">&gt;</span>
+    <span class="s1">&lt;h2&gt;</span><span class="s0">{{ product.name }}</span><span class="s1">&lt;/h2&gt;</span>
+    <span class="s1">&lt;p&gt;</span><span class="s0">{{ product.description }}</span><span class="s1">&lt;/p&gt;</span>
+    <span class="s1">&lt;p&gt;</span><span class="s0">Цена: {{ product.price }} руб.</span><span class="s1">&lt;/p&gt;</span>
+    <span class="s4">&lt;!-- Вы можете добавить кнопку &quot;Купить&quot; или другие элементы --&gt;</span>
+<span class="s1">&lt;/div&gt;</span>
+<span class="s0">{% endblock %}</span>
+</pre>
+</body>
+</html>

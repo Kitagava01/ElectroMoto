@@ -1,0 +1,113 @@
+<html>
+<head>
+<title>switch_sparc_sun_gcc.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_sparc_sun_gcc.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * this is the internal transfer function. 
+ * 
+ * HISTORY 
+ * 16-May-15  Alexey Borzenkov &lt;snaury@gmail.com&gt; 
+ *      Move stack spilling code inside save/restore functions 
+ * 30-Aug-13  Floris Bruynooghe &lt;flub@devork.be&gt; 
+        Clean the register windows again before returning. 
+        This does not clobber the PIC register as it leaves 
+        the current window intact and is required for multi- 
+        threaded code to work correctly. 
+ * 08-Mar-11  Floris Bruynooghe &lt;flub@devork.be&gt; 
+ *      No need to set return value register explicitly 
+ *      before the stack and framepointer are adjusted 
+ *      as none of the other registers are influenced by 
+ *      this.  Also don't needlessly clean the windows 
+ *      ('ta %0&quot; :: &quot;i&quot; (ST_CLEAN_WINDOWS)') as that 
+ *      clobbers the gcc PIC register (%l7). 
+ * 24-Nov-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      needed to add another magic constant to insure 
+ *      that f in slp_eval_frame(PyFrameObject *f) 
+ *      STACK_REFPLUS will probably be 1 in most cases. 
+ *      gets included into the saved stack area. 
+ * 17-Sep-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      after virtualizing stack save/restore, the 
+ *      stack size shrunk a bit. Needed to introduce 
+ *      an adjustment STACK_MAGIC per platform. 
+ * 15-Sep-02  Gerd Woetzel       &lt;gerd.woetzel@GMD.DE&gt; 
+ *      added support for SunOS sparc with gcc 
+ */</span>
+
+<span class="s2">#define </span><span class="s1">STACK_REFPLUS </span><span class="s3">1</span>
+
+<span class="s2">#ifdef </span><span class="s1">SLP_EVAL</span>
+
+
+<span class="s2">#define </span><span class="s1">STACK_MAGIC </span><span class="s3">0</span>
+
+
+<span class="s2">#if </span><span class="s1">defined(__sparcv9)</span>
+<span class="s2">#define </span><span class="s1">SLP_FLUSHW __asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;flushw&quot;</span><span class="s1">)</span>
+<span class="s2">#else</span>
+<span class="s2">#define </span><span class="s1">SLP_FLUSHW __asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;ta 3&quot;</span><span class="s1">) </span><span class="s0">/* ST_FLUSH_WINDOWS */</span>
+<span class="s2">#endif</span>
+
+<span class="s0">/* On sparc we need to spill register windows inside save/restore functions */</span>
+<span class="s2">#define </span><span class="s1">SLP_BEFORE_SAVE_STATE() SLP_FLUSHW</span>
+<span class="s2">#define </span><span class="s1">SLP_BEFORE_RESTORE_STATE() SLP_FLUSHW</span>
+
+
+<span class="s2">static int</span>
+<span class="s1">slp_switch(</span><span class="s2">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s2">int </span><span class="s1">err;</span>
+    <span class="s2">int </span><span class="s1">*stackref, stsizediff;</span>
+
+    <span class="s0">/* Put current stack pointer into stackref. 
+     * Register spilling is done in save/restore. 
+     */</span>
+    <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;mov %%sp, %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=r&quot; </span><span class="s1">(stackref));</span>
+
+    <span class="s1">{</span>
+        <span class="s0">/* Thou shalt put SLP_SAVE_STATE into a local block */</span>
+        <span class="s0">/* Copy the current stack onto the heap */</span>
+        <span class="s1">SLP_SAVE_STATE(stackref, stsizediff);</span>
+
+        <span class="s0">/* Increment stack and frame pointer by stsizediff */</span>
+        <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span>
+            <span class="s4">&quot;add %0, %%sp, %%sp</span><span class="s2">\n\t</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;add %0, %%fp, %%fp&quot;</span>
+            <span class="s1">: : </span><span class="s4">&quot;r&quot; </span><span class="s1">(stsizediff));</span>
+
+        <span class="s0">/* Copy new stack from it's save store on the heap */</span>
+        <span class="s1">SLP_RESTORE_STATE();</span>
+
+        <span class="s1">__asm__ </span><span class="s2">volatile </span><span class="s1">(</span><span class="s4">&quot;mov %1, %0&quot; </span><span class="s1">: </span><span class="s4">&quot;=r&quot; </span><span class="s1">(err) : </span><span class="s4">&quot;i&quot; </span><span class="s1">(</span><span class="s3">0</span><span class="s1">));</span>
+        <span class="s2">return </span><span class="s1">err;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+
+<span class="s2">#endif</span>
+
+<span class="s0">/* 
+ * further self-processing support 
+ */</span>
+
+<span class="s0">/* 
+ * if you want to add self-inspection tools, place them 
+ * here. See the x86_msvc for the necessary defines. 
+ * These features are highly experimental und not 
+ * essential yet. 
+ */</span>
+</pre>
+</body>
+</html>

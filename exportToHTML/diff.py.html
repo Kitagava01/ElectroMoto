@@ -1,0 +1,799 @@
+<html>
+<head>
+<title>diff.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #cf8e6d;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #a5c261;}
+.s7 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+diff.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2008, 2009 Michael Trier (mtrier@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitPython and is released under the</span>
+<span class="s0"># 3-Clause BSD License: https://opensource.org/license/bsd-3-clause/</span>
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s3">&quot;DiffConstants&quot;</span><span class="s2">, </span><span class="s3">&quot;NULL_TREE&quot;</span><span class="s2">, </span><span class="s3">&quot;INDEX&quot;</span><span class="s2">, </span><span class="s3">&quot;Diffable&quot;</span><span class="s2">, </span><span class="s3">&quot;DiffIndex&quot;</span><span class="s2">, </span><span class="s3">&quot;Diff&quot;</span><span class="s2">]</span>
+
+<span class="s4">import </span><span class="s1">enum</span>
+<span class="s4">import </span><span class="s1">re</span>
+<span class="s4">import </span><span class="s1">warnings</span>
+
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">cmd </span><span class="s4">import </span><span class="s1">handle_process_output</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">compat </span><span class="s4">import </span><span class="s1">defenc</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">objects</span><span class="s2">.</span><span class="s1">blob </span><span class="s4">import </span><span class="s1">Blob</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">objects</span><span class="s2">.</span><span class="s1">util </span><span class="s4">import </span><span class="s1">mode_str_to_int</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">util </span><span class="s4">import </span><span class="s1">finalize_process</span><span class="s2">, </span><span class="s1">hex_to_bin</span>
+
+<span class="s0"># typing ------------------------------------------------------------------</span>
+
+<span class="s4">from </span><span class="s1">typing </span><span class="s4">import </span><span class="s2">(</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+    <span class="s1">Iterator</span><span class="s2">,</span>
+    <span class="s1">List</span><span class="s2">,</span>
+    <span class="s1">Match</span><span class="s2">,</span>
+    <span class="s1">Optional</span><span class="s2">,</span>
+    <span class="s1">Tuple</span><span class="s2">,</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">TypeVar</span><span class="s2">,</span>
+    <span class="s1">Union</span><span class="s2">,</span>
+    <span class="s1">cast</span><span class="s2">,</span>
+<span class="s2">)</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">types </span><span class="s4">import </span><span class="s1">Literal</span><span class="s2">, </span><span class="s1">PathLike</span>
+
+<span class="s4">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s4">from </span><span class="s1">subprocess </span><span class="s4">import </span><span class="s1">Popen</span>
+
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">cmd </span><span class="s4">import </span><span class="s1">Git</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">objects</span><span class="s2">.</span><span class="s1">base </span><span class="s4">import </span><span class="s1">IndexObject</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">objects</span><span class="s2">.</span><span class="s1">commit </span><span class="s4">import </span><span class="s1">Commit</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">objects</span><span class="s2">.</span><span class="s1">tree </span><span class="s4">import </span><span class="s1">Tree</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">base </span><span class="s4">import </span><span class="s1">Repo</span>
+
+<span class="s1">Lit_change_type </span><span class="s2">= </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;A&quot;</span><span class="s2">, </span><span class="s3">&quot;D&quot;</span><span class="s2">, </span><span class="s3">&quot;C&quot;</span><span class="s2">, </span><span class="s3">&quot;M&quot;</span><span class="s2">, </span><span class="s3">&quot;R&quot;</span><span class="s2">, </span><span class="s3">&quot;T&quot;</span><span class="s2">, </span><span class="s3">&quot;U&quot;</span><span class="s2">]</span>
+
+<span class="s0"># ------------------------------------------------------------------------</span>
+
+
+<span class="s2">@</span><span class="s1">enum</span><span class="s2">.</span><span class="s1">unique</span>
+<span class="s4">class </span><span class="s1">DiffConstants</span><span class="s2">(</span><span class="s1">enum</span><span class="s2">.</span><span class="s1">Enum</span><span class="s2">):</span>
+    <span class="s5">&quot;&quot;&quot;Special objects for :meth:`Diffable.diff`. 
+ 
+    See the :meth:`Diffable.diff` method's ``other`` parameter, which accepts various 
+    values including these. 
+ 
+    :note: 
+        These constants are also available as attributes of the :mod:`git.diff` module, 
+        the :class:`Diffable` class and its subclasses and instances, and the top-level 
+        :mod:`git` module. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">NULL_TREE </span><span class="s2">= </span><span class="s1">enum</span><span class="s2">.</span><span class="s1">auto</span><span class="s2">()</span>
+    <span class="s3">&quot;&quot;&quot;Stand-in indicating you want to compare against the empty tree in diffs. 
+ 
+    Also accessible as :const:`git.NULL_TREE`, :const:`git.diff.NULL_TREE`, and 
+    :const:`Diffable.NULL_TREE`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">INDEX </span><span class="s2">= </span><span class="s1">enum</span><span class="s2">.</span><span class="s1">auto</span><span class="s2">()</span>
+    <span class="s3">&quot;&quot;&quot;Stand-in indicating you want to diff against the index. 
+ 
+    Also accessible as :const:`git.INDEX`, :const:`git.diff.INDEX`, and 
+    :const:`Diffable.INDEX`, as well as :const:`Diffable.Index`. The latter has been 
+    kept for backward compatibility and made an alias of this, so it may still be used. 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s1">NULL_TREE</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s1">DiffConstants</span><span class="s2">.</span><span class="s1">NULL_TREE</span><span class="s2">] = </span><span class="s1">DiffConstants</span><span class="s2">.</span><span class="s1">NULL_TREE</span>
+<span class="s3">&quot;&quot;&quot;Stand-in indicating you want to compare against the empty tree in diffs. 
+ 
+See :meth:`Diffable.diff`, which accepts this as a value of its ``other`` parameter. 
+ 
+This is an alias of :const:`DiffConstants.NULL_TREE`, which may also be accessed as 
+:const:`git.NULL_TREE` and :const:`Diffable.NULL_TREE`. 
+&quot;&quot;&quot;</span>
+
+<span class="s1">INDEX</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s1">DiffConstants</span><span class="s2">.</span><span class="s1">INDEX</span><span class="s2">] = </span><span class="s1">DiffConstants</span><span class="s2">.</span><span class="s1">INDEX</span>
+<span class="s3">&quot;&quot;&quot;Stand-in indicating you want to diff against the index. 
+ 
+See :meth:`Diffable.diff`, which accepts this as a value of its ``other`` parameter. 
+ 
+This is an alias of :const:`DiffConstants.INDEX`, which may also be accessed as 
+:const:`git.INDEX` and :const:`Diffable.INDEX`, as well as :const:`Diffable.Index`. 
+&quot;&quot;&quot;</span>
+
+<span class="s1">_octal_byte_re </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span><span class="s6">rb&quot;\\([0-9]{3})&quot;</span><span class="s2">)</span>
+
+
+<span class="s4">def </span><span class="s1">_octal_repl</span><span class="s2">(</span><span class="s1">matchobj</span><span class="s2">: </span><span class="s1">Match</span><span class="s2">) </span><span class="s1">-&gt; bytes</span><span class="s2">:</span>
+    <span class="s1">value </span><span class="s2">= </span><span class="s1">matchobj</span><span class="s2">.</span><span class="s1">group</span><span class="s2">(</span><span class="s7">1</span><span class="s2">)</span>
+    <span class="s1">value </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">value</span><span class="s2">, </span><span class="s7">8</span><span class="s2">)</span>
+    <span class="s1">value </span><span class="s2">= </span><span class="s1">bytes</span><span class="s2">(</span><span class="s1">bytearray</span><span class="s2">((</span><span class="s1">value</span><span class="s2">,)))</span>
+    <span class="s4">return </span><span class="s1">value</span>
+
+
+<span class="s4">def </span><span class="s1">decode_path</span><span class="s2">(</span><span class="s1">path</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">has_ab_prefix</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">True</span><span class="s2">) </span><span class="s1">-&gt; Optional</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">]:</span>
+    <span class="s4">if </span><span class="s1">path </span><span class="s2">== </span><span class="s6">b&quot;/dev/null&quot;</span><span class="s2">:</span>
+        <span class="s4">return None</span>
+
+    <span class="s4">if </span><span class="s1">path</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s6">b'&quot;'</span><span class="s2">) </span><span class="s4">and </span><span class="s1">path</span><span class="s2">.</span><span class="s1">endswith</span><span class="s2">(</span><span class="s6">b'&quot;'</span><span class="s2">):</span>
+        <span class="s1">path </span><span class="s2">= </span><span class="s1">path</span><span class="s2">[</span><span class="s7">1</span><span class="s2">:-</span><span class="s7">1</span><span class="s2">].</span><span class="s1">replace</span><span class="s2">(</span><span class="s6">b&quot;</span><span class="s4">\\</span><span class="s6">n&quot;</span><span class="s2">, </span><span class="s6">b&quot;</span><span class="s4">\n</span><span class="s6">&quot;</span><span class="s2">).</span><span class="s1">replace</span><span class="s2">(</span><span class="s6">b&quot;</span><span class="s4">\\</span><span class="s6">t&quot;</span><span class="s2">, </span><span class="s6">b&quot;</span><span class="s4">\t</span><span class="s6">&quot;</span><span class="s2">).</span><span class="s1">replace</span><span class="s2">(</span><span class="s6">b'</span><span class="s4">\\</span><span class="s6">&quot;'</span><span class="s2">, </span><span class="s6">b'&quot;'</span><span class="s2">).</span><span class="s1">replace</span><span class="s2">(</span><span class="s6">b&quot;</span><span class="s4">\\\\</span><span class="s6">&quot;</span><span class="s2">, </span><span class="s6">b&quot;</span><span class="s4">\\</span><span class="s6">&quot;</span><span class="s2">)</span>
+
+    <span class="s1">path </span><span class="s2">= </span><span class="s1">_octal_byte_re</span><span class="s2">.</span><span class="s1">sub</span><span class="s2">(</span><span class="s1">_octal_repl</span><span class="s2">, </span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s4">if </span><span class="s1">has_ab_prefix</span><span class="s2">:</span>
+        <span class="s4">assert </span><span class="s1">path</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s6">b&quot;a/&quot;</span><span class="s2">) </span><span class="s4">or </span><span class="s1">path</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s6">b&quot;b/&quot;</span><span class="s2">)</span>
+        <span class="s1">path </span><span class="s2">= </span><span class="s1">path</span><span class="s2">[</span><span class="s7">2</span><span class="s2">:]</span>
+
+    <span class="s4">return </span><span class="s1">path</span>
+
+
+<span class="s4">class </span><span class="s1">Diffable</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;Common interface for all objects that can be diffed against another object of 
+    compatible type. 
+ 
+    :note: 
+        Subclasses require a :attr:`repo` member, as it is the case for 
+        :class:`~git.objects.base.Object` instances. For practical reasons we do not 
+        derive from :class:`~git.objects.base.Object`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s2">= ()</span>
+
+    <span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span>
+    <span class="s3">&quot;&quot;&quot;Repository to operate on. Must be provided by subclass or sibling class.&quot;&quot;&quot;</span>
+
+    <span class="s1">NULL_TREE </span><span class="s2">= </span><span class="s1">NULL_TREE</span>
+    <span class="s3">&quot;&quot;&quot;Stand-in indicating you want to compare against the empty tree in diffs. 
+ 
+    See the :meth:`diff` method, which accepts this as a value of its ``other`` 
+    parameter. 
+ 
+    This is the same as :const:`DiffConstants.NULL_TREE`, and may also be accessed as 
+    :const:`git.NULL_TREE` and :const:`git.diff.NULL_TREE`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">INDEX </span><span class="s2">= </span><span class="s1">INDEX</span>
+    <span class="s3">&quot;&quot;&quot;Stand-in indicating you want to diff against the index. 
+ 
+    See the :meth:`diff` method, which accepts this as a value of its ``other`` 
+    parameter. 
+ 
+    This is the same as :const:`DiffConstants.INDEX`, and may also be accessed as 
+    :const:`git.INDEX` and :const:`git.diff.INDEX`, as well as :class:`Diffable.INDEX`, 
+    which is kept for backward compatibility (it is now defined an alias of this). 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">Index </span><span class="s2">= </span><span class="s1">INDEX</span>
+    <span class="s3">&quot;&quot;&quot;Stand-in indicating you want to diff against the index 
+    (same as :const:`~Diffable.INDEX`). 
+ 
+    This is an alias of :const:`~Diffable.INDEX`, for backward compatibility. See 
+    :const:`~Diffable.INDEX` and :meth:`diff` for details. 
+ 
+    :note: 
+        Although always meant for use as an opaque constant, this was formerly defined 
+        as a class. Its usage is unchanged, but static type annotations that attempt 
+        to permit only this object must be changed to avoid new mypy errors. This was 
+        previously not possible to do, though ``Type[Diffable.Index]`` approximated it. 
+        It is now possible to do precisely, using ``Literal[DiffConstants.INDEX]``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s4">def </span><span class="s1">_process_diff_args</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">args</span><span class="s2">: </span><span class="s1">List</span><span class="s2">[</span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s3">&quot;Diffable&quot;</span><span class="s2">]],</span>
+    <span class="s2">) </span><span class="s1">-&gt; List</span><span class="s2">[</span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s3">&quot;Diffable&quot;</span><span class="s2">]]:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            Possibly altered version of the given args list. 
+            This method is called right before git command execution. 
+            Subclasses can use it to alter the behaviour of the superclass. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">args</span>
+
+    <span class="s4">def </span><span class="s1">diff</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">other</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">DiffConstants</span><span class="s2">, </span><span class="s3">&quot;Tree&quot;</span><span class="s2">, </span><span class="s3">&quot;Commit&quot;</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s1">INDEX</span><span class="s2">,</span>
+        <span class="s1">paths</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s1">List</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">], </span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, ...], </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">create_patch</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;DiffIndex&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Create diffs between two items being trees, trees and index or an index and 
+        the working tree. Detects renames automatically. 
+ 
+        :param other: 
+            This the item to compare us with. 
+ 
+            * If ``None``, we will be compared to the working tree. 
+ 
+            * If a :class:`~git.types.Tree_ish` or string, it will be compared against 
+              the respective tree. 
+ 
+            * If :const:`INDEX`, it will be compared against the index. 
+ 
+            * If :const:`NULL_TREE`, it will compare against the empty tree. 
+ 
+            This parameter defaults to :const:`INDEX` (rather than ``None``) so that the 
+            method will not by default fail on bare repositories. 
+ 
+        :param paths: 
+            This a list of paths or a single path to limit the diff to. It will only 
+            include at least one of the given path or paths. 
+ 
+        :param create_patch: 
+            If ``True``, the returned :class:`Diff` contains a detailed patch that if 
+            applied makes the self to other. Patches are somewhat costly as blobs have 
+            to be read and diffed. 
+ 
+        :param kwargs: 
+            Additional arguments passed to :manpage:`git-diff(1)`, such as ``R=True`` to 
+            swap both sides of the diff. 
+ 
+        :return: 
+            A :class:`DiffIndex` representing the computed diff. 
+ 
+        :note: 
+            On a bare repository, `other` needs to be provided as :const:`INDEX`, or as 
+            an instance of :class:`~git.objects.tree.Tree` or 
+            :class:`~git.objects.commit.Commit`, or a git command error will occur. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">args</span><span class="s2">: </span><span class="s1">List</span><span class="s2">[</span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s1">Diffable</span><span class="s2">]] = []</span>
+        <span class="s1">args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">&quot;--abbrev=40&quot;</span><span class="s2">)  </span><span class="s0"># We need full shas.</span>
+        <span class="s1">args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">&quot;--full-index&quot;</span><span class="s2">)  </span><span class="s0"># Get full index paths, not only filenames.</span>
+
+        <span class="s0"># Remove default '-M' arg (check for renames) if user is overriding it.</span>
+        <span class="s4">if not </span><span class="s1">any</span><span class="s2">(</span><span class="s1">x </span><span class="s4">in </span><span class="s1">kwargs </span><span class="s4">for </span><span class="s1">x </span><span class="s4">in </span><span class="s2">(</span><span class="s3">&quot;find_renames&quot;</span><span class="s2">, </span><span class="s3">&quot;no_renames&quot;</span><span class="s2">, </span><span class="s3">&quot;M&quot;</span><span class="s2">)):</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">&quot;-M&quot;</span><span class="s2">)</span>
+
+        <span class="s4">if </span><span class="s1">create_patch</span><span class="s2">:</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">&quot;-p&quot;</span><span class="s2">)</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">&quot;--no-ext-diff&quot;</span><span class="s2">)</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">&quot;--raw&quot;</span><span class="s2">)</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">&quot;-z&quot;</span><span class="s2">)</span>
+
+        <span class="s0"># Ensure we never see colored output.</span>
+        <span class="s0"># Fixes: https://github.com/gitpython-developers/GitPython/issues/172</span>
+        <span class="s1">args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">&quot;--no-color&quot;</span><span class="s2">)</span>
+
+        <span class="s4">if </span><span class="s1">paths </span><span class="s4">is not None and not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">paths</span><span class="s2">, (</span><span class="s1">tuple</span><span class="s2">, </span><span class="s1">list</span><span class="s2">)):</span>
+            <span class="s1">paths </span><span class="s2">= [</span><span class="s1">paths</span><span class="s2">]</span>
+
+        <span class="s1">diff_cmd </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">diff</span>
+        <span class="s4">if </span><span class="s1">other </span><span class="s4">is </span><span class="s1">INDEX</span><span class="s2">:</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s7">0</span><span class="s2">, </span><span class="s3">&quot;--cached&quot;</span><span class="s2">)</span>
+        <span class="s4">elif </span><span class="s1">other </span><span class="s4">is </span><span class="s1">NULL_TREE</span><span class="s2">:</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s7">0</span><span class="s2">, </span><span class="s3">&quot;-r&quot;</span><span class="s2">)  </span><span class="s0"># Recursive diff-tree.</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s7">0</span><span class="s2">, </span><span class="s3">&quot;--root&quot;</span><span class="s2">)</span>
+            <span class="s1">diff_cmd </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">diff_tree</span>
+        <span class="s4">elif </span><span class="s1">other </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s7">0</span><span class="s2">, </span><span class="s3">&quot;-r&quot;</span><span class="s2">)  </span><span class="s0"># Recursive diff-tree.</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s7">0</span><span class="s2">, </span><span class="s1">other</span><span class="s2">)</span>
+            <span class="s1">diff_cmd </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">diff_tree</span>
+
+        <span class="s1">args</span><span class="s2">.</span><span class="s1">insert</span><span class="s2">(</span><span class="s7">0</span><span class="s2">, </span><span class="s1">self</span><span class="s2">)</span>
+
+        <span class="s0"># paths is a list or tuple here, or None.</span>
+        <span class="s4">if </span><span class="s1">paths</span><span class="s2">:</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s3">&quot;--&quot;</span><span class="s2">)</span>
+            <span class="s1">args</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">(</span><span class="s1">paths</span><span class="s2">)</span>
+        <span class="s0"># END paths handling</span>
+
+        <span class="s1">kwargs</span><span class="s2">[</span><span class="s3">&quot;as_process&quot;</span><span class="s2">] = </span><span class="s4">True</span>
+        <span class="s1">proc </span><span class="s2">= </span><span class="s1">diff_cmd</span><span class="s2">(*</span><span class="s1">self</span><span class="s2">.</span><span class="s1">_process_diff_args</span><span class="s2">(</span><span class="s1">args</span><span class="s2">), **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+        <span class="s1">diff_method </span><span class="s2">= </span><span class="s1">Diff</span><span class="s2">.</span><span class="s1">_index_from_patch_format </span><span class="s4">if </span><span class="s1">create_patch </span><span class="s4">else </span><span class="s1">Diff</span><span class="s2">.</span><span class="s1">_index_from_raw_format</span>
+        <span class="s1">index </span><span class="s2">= </span><span class="s1">diff_method</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">proc</span><span class="s2">)</span>
+
+        <span class="s1">proc</span><span class="s2">.</span><span class="s1">wait</span><span class="s2">()</span>
+        <span class="s4">return </span><span class="s1">index</span>
+
+
+<span class="s1">T_Diff </span><span class="s2">= </span><span class="s1">TypeVar</span><span class="s2">(</span><span class="s3">&quot;T_Diff&quot;</span><span class="s2">, </span><span class="s1">bound</span><span class="s2">=</span><span class="s3">&quot;Diff&quot;</span><span class="s2">)</span>
+
+
+<span class="s4">class </span><span class="s1">DiffIndex</span><span class="s2">(</span><span class="s1">List</span><span class="s2">[</span><span class="s1">T_Diff</span><span class="s2">]):</span>
+    <span class="s5">R&quot;&quot;&quot;An index for diffs, allowing a list of :class:`Diff`\s to be queried by the diff 
+    properties. 
+ 
+    The class improves the diff handling convenience. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">change_type </span><span class="s2">= (</span><span class="s3">&quot;A&quot;</span><span class="s2">, </span><span class="s3">&quot;C&quot;</span><span class="s2">, </span><span class="s3">&quot;D&quot;</span><span class="s2">, </span><span class="s3">&quot;R&quot;</span><span class="s2">, </span><span class="s3">&quot;M&quot;</span><span class="s2">, </span><span class="s3">&quot;T&quot;</span><span class="s2">)</span>
+    <span class="s3">&quot;&quot;&quot;Change type invariant identifying possible ways a blob can have changed: 
+ 
+    * ``A`` = Added 
+    * ``D`` = Deleted 
+    * ``R`` = Renamed 
+    * ``M`` = Modified 
+    * ``T`` = Changed in the type 
+    &quot;&quot;&quot;</span>
+
+    <span class="s4">def </span><span class="s1">iter_change_type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">change_type</span><span class="s2">: </span><span class="s1">Lit_change_type</span><span class="s2">) </span><span class="s1">-&gt; Iterator</span><span class="s2">[</span><span class="s1">T_Diff</span><span class="s2">]:</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: 
+            Iterator yielding :class:`Diff` instances that match the given `change_type` 
+ 
+        :param change_type: 
+            Member of :attr:`DiffIndex.change_type`, namely: 
+ 
+            * 'A' for added paths 
+            * 'D' for deleted paths 
+            * 'R' for renamed paths 
+            * 'M' for paths with modified data 
+            * 'T' for changed in the type paths 
+        &quot;&quot;&quot;</span>
+        <span class="s4">if </span><span class="s1">change_type </span><span class="s4">not in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">change_type</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;Invalid change type: %s&quot; </span><span class="s2">% </span><span class="s1">change_type</span><span class="s2">)</span>
+
+        <span class="s4">for </span><span class="s1">diffidx </span><span class="s4">in </span><span class="s1">self</span><span class="s2">:</span>
+            <span class="s4">if </span><span class="s1">diffidx</span><span class="s2">.</span><span class="s1">change_type </span><span class="s2">== </span><span class="s1">change_type</span><span class="s2">:</span>
+                <span class="s4">yield </span><span class="s1">diffidx</span>
+            <span class="s4">elif </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;A&quot; </span><span class="s4">and </span><span class="s1">diffidx</span><span class="s2">.</span><span class="s1">new_file</span><span class="s2">:</span>
+                <span class="s4">yield </span><span class="s1">diffidx</span>
+            <span class="s4">elif </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;D&quot; </span><span class="s4">and </span><span class="s1">diffidx</span><span class="s2">.</span><span class="s1">deleted_file</span><span class="s2">:</span>
+                <span class="s4">yield </span><span class="s1">diffidx</span>
+            <span class="s4">elif </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;C&quot; </span><span class="s4">and </span><span class="s1">diffidx</span><span class="s2">.</span><span class="s1">copied_file</span><span class="s2">:</span>
+                <span class="s4">yield </span><span class="s1">diffidx</span>
+            <span class="s4">elif </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;R&quot; </span><span class="s4">and </span><span class="s1">diffidx</span><span class="s2">.</span><span class="s1">renamed</span><span class="s2">:</span>
+                <span class="s4">yield </span><span class="s1">diffidx</span>
+            <span class="s4">elif </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;M&quot; </span><span class="s4">and </span><span class="s1">diffidx</span><span class="s2">.</span><span class="s1">a_blob </span><span class="s4">and </span><span class="s1">diffidx</span><span class="s2">.</span><span class="s1">b_blob </span><span class="s4">and </span><span class="s1">diffidx</span><span class="s2">.</span><span class="s1">a_blob </span><span class="s2">!= </span><span class="s1">diffidx</span><span class="s2">.</span><span class="s1">b_blob</span><span class="s2">:</span>
+                <span class="s4">yield </span><span class="s1">diffidx</span>
+        <span class="s0"># END for each diff</span>
+
+
+<span class="s4">class </span><span class="s1">Diff</span><span class="s2">:</span>
+    <span class="s5">&quot;&quot;&quot;A Diff contains diff information between two Trees. 
+ 
+    It contains two sides a and b of the diff. Members are prefixed with &quot;a&quot; and &quot;b&quot; 
+    respectively to indicate that. 
+ 
+    Diffs keep information about the changed blob objects, the file mode, renames, 
+    deletions and new files. 
+ 
+    There are a few cases where ``None`` has to be expected as member variable value: 
+ 
+    New File:: 
+ 
+        a_mode is None 
+        a_blob is None 
+        a_path is None 
+ 
+    Deleted File:: 
+ 
+        b_mode is None 
+        b_blob is None 
+        b_path is None 
+ 
+    Working Tree Blobs: 
+ 
+        When comparing to working trees, the working tree blob will have a null hexsha 
+        as a corresponding object does not yet exist. The mode will be null as well. The 
+        path will be available, though. 
+ 
+        If it is listed in a diff, the working tree version of the file must differ from 
+        the version in the index or tree, and hence has been modified. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0"># Precompiled regex.</span>
+    <span class="s1">re_header </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">compile</span><span class="s2">(</span>
+        <span class="s6">rb&quot;&quot;&quot; 
+                                ^diff[ ]--git 
+                                    [ ](?P&lt;a_path_fallback&gt;&quot;?[ab]/.+?&quot;?)[ ](?P&lt;b_path_fallback&gt;&quot;?[ab]/.+?&quot;?)\n 
+                                (?:^old[ ]mode[ ](?P&lt;old_mode&gt;\d+)\n 
+                                   ^new[ ]mode[ ](?P&lt;new_mode&gt;\d+)(?:\n|$))? 
+                                (?:^similarity[ ]index[ ]\d+%\n 
+                                   ^rename[ ]from[ ](?P&lt;rename_from&gt;.*)\n 
+                                   ^rename[ ]to[ ](?P&lt;rename_to&gt;.*)(?:\n|$))? 
+                                (?:^new[ ]file[ ]mode[ ](?P&lt;new_file_mode&gt;.+)(?:\n|$))? 
+                                (?:^deleted[ ]file[ ]mode[ ](?P&lt;deleted_file_mode&gt;.+)(?:\n|$))? 
+                                (?:^similarity[ ]index[ ]\d+%\n 
+                                   ^copy[ ]from[ ].*\n 
+                                   ^copy[ ]to[ ](?P&lt;copied_file_name&gt;.*)(?:\n|$))? 
+                                (?:^index[ ](?P&lt;a_blob_id&gt;[0-9A-Fa-f]+) 
+                                    \.\.(?P&lt;b_blob_id&gt;[0-9A-Fa-f]+)[ ]?(?P&lt;b_mode&gt;.+)?(?:\n|$))? 
+                                (?:^---[ ](?P&lt;a_path&gt;[^\t\n\r\f\v]*)[\t\r\f\v]*(?:\n|$))? 
+                                (?:^\+\+\+[ ](?P&lt;b_path&gt;[^\t\n\r\f\v]*)[\t\r\f\v]*(?:\n|$))? 
+                            &quot;&quot;&quot;</span><span class="s2">,</span>
+        <span class="s1">re</span><span class="s2">.</span><span class="s1">VERBOSE </span><span class="s2">| </span><span class="s1">re</span><span class="s2">.</span><span class="s1">MULTILINE</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s0"># These can be used for comparisons.</span>
+    <span class="s1">NULL_HEX_SHA </span><span class="s2">= </span><span class="s3">&quot;0&quot; </span><span class="s2">* </span><span class="s7">40</span>
+    <span class="s1">NULL_BIN_SHA </span><span class="s2">= </span><span class="s6">b&quot;</span><span class="s4">\0</span><span class="s6">&quot; </span><span class="s2">* </span><span class="s7">20</span>
+
+    <span class="s1">__slots__ </span><span class="s2">= (</span>
+        <span class="s3">&quot;a_blob&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;b_blob&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;a_mode&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;b_mode&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;a_rawpath&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;b_rawpath&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;new_file&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;deleted_file&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;copied_file&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;raw_rename_from&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;raw_rename_to&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;diff&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;change_type&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;score&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">,</span>
+        <span class="s1">a_rawpath</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+        <span class="s1">b_rawpath</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+        <span class="s1">a_blob_id</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">, </span><span class="s4">None</span><span class="s2">],</span>
+        <span class="s1">b_blob_id</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">, </span><span class="s4">None</span><span class="s2">],</span>
+        <span class="s1">a_mode</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">],</span>
+        <span class="s1">b_mode</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">],</span>
+        <span class="s1">new_file</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">deleted_file</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">copied_file</span><span class="s2">: </span><span class="s1">bool</span><span class="s2">,</span>
+        <span class="s1">raw_rename_from</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+        <span class="s1">raw_rename_to</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">],</span>
+        <span class="s1">diff</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">, </span><span class="s4">None</span><span class="s2">],</span>
+        <span class="s1">change_type</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">Lit_change_type</span><span class="s2">],</span>
+        <span class="s1">score</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">int</span><span class="s2">],</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s4">None</span><span class="s2">:</span>
+        <span class="s4">assert </span><span class="s1">a_rawpath </span><span class="s4">is None or </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">a_rawpath</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">)</span>
+        <span class="s4">assert </span><span class="s1">b_rawpath </span><span class="s4">is None or </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">b_rawpath</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">a_rawpath </span><span class="s2">= </span><span class="s1">a_rawpath</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">b_rawpath </span><span class="s2">= </span><span class="s1">b_rawpath</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">a_mode </span><span class="s2">= </span><span class="s1">mode_str_to_int</span><span class="s2">(</span><span class="s1">a_mode</span><span class="s2">) </span><span class="s4">if </span><span class="s1">a_mode </span><span class="s4">else None</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">b_mode </span><span class="s2">= </span><span class="s1">mode_str_to_int</span><span class="s2">(</span><span class="s1">b_mode</span><span class="s2">) </span><span class="s4">if </span><span class="s1">b_mode </span><span class="s4">else None</span>
+
+        <span class="s0"># Determine whether this diff references a submodule. If it does then</span>
+        <span class="s0"># we need to overwrite &quot;repo&quot; to the corresponding submodule's repo instead.</span>
+        <span class="s4">if </span><span class="s1">repo </span><span class="s4">and </span><span class="s1">a_rawpath</span><span class="s2">:</span>
+            <span class="s4">for </span><span class="s1">submodule </span><span class="s4">in </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">submodules</span><span class="s2">:</span>
+                <span class="s4">if </span><span class="s1">submodule</span><span class="s2">.</span><span class="s1">path </span><span class="s2">== </span><span class="s1">a_rawpath</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">, </span><span class="s3">&quot;replace&quot;</span><span class="s2">):</span>
+                    <span class="s4">if </span><span class="s1">submodule</span><span class="s2">.</span><span class="s1">module_exists</span><span class="s2">():</span>
+                        <span class="s1">repo </span><span class="s2">= </span><span class="s1">submodule</span><span class="s2">.</span><span class="s1">module</span><span class="s2">()</span>
+                    <span class="s4">break</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">a_blob</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s3">&quot;IndexObject&quot;</span><span class="s2">, </span><span class="s4">None</span><span class="s2">]</span>
+        <span class="s4">if </span><span class="s1">a_blob_id </span><span class="s4">is None or </span><span class="s1">a_blob_id </span><span class="s2">== </span><span class="s1">self</span><span class="s2">.</span><span class="s1">NULL_HEX_SHA</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">a_blob </span><span class="s2">= </span><span class="s4">None</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">a_blob </span><span class="s2">= </span><span class="s1">Blob</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">hex_to_bin</span><span class="s2">(</span><span class="s1">a_blob_id</span><span class="s2">), </span><span class="s1">mode</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">a_mode</span><span class="s2">, </span><span class="s1">path</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">a_path</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">b_blob</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s3">&quot;IndexObject&quot;</span><span class="s2">, </span><span class="s4">None</span><span class="s2">]</span>
+        <span class="s4">if </span><span class="s1">b_blob_id </span><span class="s4">is None or </span><span class="s1">b_blob_id </span><span class="s2">== </span><span class="s1">self</span><span class="s2">.</span><span class="s1">NULL_HEX_SHA</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">b_blob </span><span class="s2">= </span><span class="s4">None</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">b_blob </span><span class="s2">= </span><span class="s1">Blob</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">hex_to_bin</span><span class="s2">(</span><span class="s1">b_blob_id</span><span class="s2">), </span><span class="s1">mode</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">b_mode</span><span class="s2">, </span><span class="s1">path</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">b_path</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">new_file</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s1">new_file</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">deleted_file</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s1">deleted_file</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">copied_file</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s1">copied_file</span>
+
+        <span class="s0"># Be clear and use None instead of empty strings.</span>
+        <span class="s4">assert </span><span class="s1">raw_rename_from </span><span class="s4">is None or </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">raw_rename_from</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">)</span>
+        <span class="s4">assert </span><span class="s1">raw_rename_to </span><span class="s4">is None or </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">raw_rename_to</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">raw_rename_from </span><span class="s2">= </span><span class="s1">raw_rename_from </span><span class="s4">or None</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">raw_rename_to </span><span class="s2">= </span><span class="s1">raw_rename_to </span><span class="s4">or None</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">diff </span><span class="s2">= </span><span class="s1">diff</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">change_type</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Lit_change_type</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s1">change_type</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">score </span><span class="s2">= </span><span class="s1">score</span>
+
+    <span class="s4">def </span><span class="s1">__eq__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">object</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s4">for </span><span class="s1">name </span><span class="s4">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__slots__</span><span class="s2">:</span>
+            <span class="s4">if </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">) != </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">other</span><span class="s2">, </span><span class="s1">name</span><span class="s2">):</span>
+                <span class="s4">return False</span>
+        <span class="s0"># END for each name</span>
+        <span class="s4">return True</span>
+
+    <span class="s4">def </span><span class="s1">__ne__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">: </span><span class="s1">object</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s4">return not </span><span class="s2">(</span><span class="s1">self </span><span class="s2">== </span><span class="s1">other</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">__hash__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s4">return </span><span class="s1">hash</span><span class="s2">(</span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">n</span><span class="s2">) </span><span class="s4">for </span><span class="s1">n </span><span class="s4">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__slots__</span><span class="s2">))</span>
+
+    <span class="s4">def </span><span class="s1">__str__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s1">h </span><span class="s2">= </span><span class="s3">&quot;%s&quot;</span>
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">a_blob</span><span class="s2">:</span>
+            <span class="s1">h </span><span class="s2">%= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">a_blob</span><span class="s2">.</span><span class="s1">path</span>
+        <span class="s4">elif </span><span class="s1">self</span><span class="s2">.</span><span class="s1">b_blob</span><span class="s2">:</span>
+            <span class="s1">h </span><span class="s2">%= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">b_blob</span><span class="s2">.</span><span class="s1">path</span>
+
+        <span class="s1">msg </span><span class="s2">= </span><span class="s3">&quot;&quot;</span>
+        <span class="s1">line </span><span class="s2">= </span><span class="s4">None</span>
+        <span class="s1">line_length </span><span class="s2">= </span><span class="s7">0</span>
+        <span class="s4">for </span><span class="s1">b</span><span class="s2">, </span><span class="s1">n </span><span class="s4">in </span><span class="s1">zip</span><span class="s2">((</span><span class="s1">self</span><span class="s2">.</span><span class="s1">a_blob</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">b_blob</span><span class="s2">), (</span><span class="s3">&quot;lhs&quot;</span><span class="s2">, </span><span class="s3">&quot;rhs&quot;</span><span class="s2">)):</span>
+            <span class="s4">if </span><span class="s1">b</span><span class="s2">:</span>
+                <span class="s1">line </span><span class="s2">= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">%s: %o | %s&quot; </span><span class="s2">% (</span><span class="s1">n</span><span class="s2">, </span><span class="s1">b</span><span class="s2">.</span><span class="s1">mode</span><span class="s2">, </span><span class="s1">b</span><span class="s2">.</span><span class="s1">hexsha</span><span class="s2">)</span>
+            <span class="s4">else</span><span class="s2">:</span>
+                <span class="s1">line </span><span class="s2">= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">%s: None&quot; </span><span class="s2">% </span><span class="s1">n</span>
+            <span class="s0"># END if blob is not None</span>
+            <span class="s1">line_length </span><span class="s2">= </span><span class="s1">max</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">line</span><span class="s2">), </span><span class="s1">line_length</span><span class="s2">)</span>
+            <span class="s1">msg </span><span class="s2">+= </span><span class="s1">line</span>
+        <span class="s0"># END for each blob</span>
+
+        <span class="s0"># Add headline.</span>
+        <span class="s1">h </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">&quot; </span><span class="s2">+ </span><span class="s3">&quot;=&quot; </span><span class="s2">* </span><span class="s1">line_length</span>
+
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">deleted_file</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">file deleted in rhs&quot;</span>
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">new_file</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">file added in rhs&quot;</span>
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">copied_file</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">file %r copied from %r&quot; </span><span class="s2">% (</span><span class="s1">self</span><span class="s2">.</span><span class="s1">b_path</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">a_path</span><span class="s2">)</span>
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">rename_from</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">file renamed from %r&quot; </span><span class="s2">% </span><span class="s1">self</span><span class="s2">.</span><span class="s1">rename_from</span>
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">rename_to</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">file renamed to %r&quot; </span><span class="s2">% </span><span class="s1">self</span><span class="s2">.</span><span class="s1">rename_to</span>
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">diff</span><span class="s2">:</span>
+            <span class="s1">msg </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">---&quot;</span>
+            <span class="s4">try</span><span class="s2">:</span>
+                <span class="s1">msg </span><span class="s2">+= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">diff</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">) </span><span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">diff</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">) </span><span class="s4">else </span><span class="s1">self</span><span class="s2">.</span><span class="s1">diff</span>
+            <span class="s4">except </span><span class="s1">UnicodeDecodeError</span><span class="s2">:</span>
+                <span class="s1">msg </span><span class="s2">+= </span><span class="s3">&quot;OMITTED BINARY DATA&quot;</span>
+            <span class="s0"># END handle encoding</span>
+            <span class="s1">msg </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">---&quot;</span>
+        <span class="s0"># END diff info</span>
+
+        <span class="s4">return </span><span class="s1">h </span><span class="s2">+ </span><span class="s1">msg</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">a_path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">a_rawpath</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">, </span><span class="s3">&quot;replace&quot;</span><span class="s2">) </span><span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">a_rawpath </span><span class="s4">else None</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">b_path</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">b_rawpath</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">, </span><span class="s3">&quot;replace&quot;</span><span class="s2">) </span><span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">b_rawpath </span><span class="s4">else None</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">rename_from</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_rename_from</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">, </span><span class="s3">&quot;replace&quot;</span><span class="s2">) </span><span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_rename_from </span><span class="s4">else None</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">rename_to</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_rename_to</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">, </span><span class="s3">&quot;replace&quot;</span><span class="s2">) </span><span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">raw_rename_to </span><span class="s4">else None</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">renamed</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Deprecated, use :attr:`renamed_file` instead. 
+ 
+        :return: 
+            ``True`` if the blob of our diff has been renamed 
+ 
+        :note: 
+            This property is deprecated. 
+            Please use the :attr:`renamed_file` property instead. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">warnings</span><span class="s2">.</span><span class="s1">warn</span><span class="s2">(</span>
+            <span class="s3">&quot;Diff.renamed is deprecated, use Diff.renamed_file instead&quot;</span><span class="s2">,</span>
+            <span class="s1">DeprecationWarning</span><span class="s2">,</span>
+            <span class="s1">stacklevel</span><span class="s2">=</span><span class="s7">2</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">renamed_file</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">renamed_file</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;:return: ``True`` if the blob of our diff has been renamed&quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">rename_from </span><span class="s2">!= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">rename_to</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_pick_best_path</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">path_match</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">rename_match</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">path_fallback_match</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">) </span><span class="s1">-&gt; Optional</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">]:</span>
+        <span class="s4">if </span><span class="s1">path_match</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s1">decode_path</span><span class="s2">(</span><span class="s1">path_match</span><span class="s2">)</span>
+
+        <span class="s4">if </span><span class="s1">rename_match</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s1">decode_path</span><span class="s2">(</span><span class="s1">rename_match</span><span class="s2">, </span><span class="s1">has_ab_prefix</span><span class="s2">=</span><span class="s4">False</span><span class="s2">)</span>
+
+        <span class="s4">if </span><span class="s1">path_fallback_match</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s1">decode_path</span><span class="s2">(</span><span class="s1">path_fallback_match</span><span class="s2">)</span>
+
+        <span class="s4">return None</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_index_from_patch_format</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">proc</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s3">&quot;Popen&quot;</span><span class="s2">, </span><span class="s3">&quot;Git.AutoInterrupt&quot;</span><span class="s2">]) </span><span class="s1">-&gt; DiffIndex</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Create a new :class:`DiffIndex` from the given process output which must be 
+        in patch format. 
+ 
+        :param repo: 
+            The repository we are operating on. 
+ 
+        :param proc: 
+            :manpage:`git-diff(1)` process to read from 
+            (supports :class:`Git.AutoInterrupt &lt;git.cmd.Git.AutoInterrupt&gt;` wrapper). 
+ 
+        :return: 
+            :class:`DiffIndex` 
+        &quot;&quot;&quot;</span>
+
+        <span class="s0"># FIXME: Here SLURPING raw, need to re-phrase header-regexes linewise.</span>
+        <span class="s1">text_list</span><span class="s2">: </span><span class="s1">List</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">] = []</span>
+        <span class="s1">handle_process_output</span><span class="s2">(</span><span class="s1">proc</span><span class="s2">, </span><span class="s1">text_list</span><span class="s2">.</span><span class="s1">append</span><span class="s2">, </span><span class="s4">None</span><span class="s2">, </span><span class="s1">finalize_process</span><span class="s2">, </span><span class="s1">decode_streams</span><span class="s2">=</span><span class="s4">False</span><span class="s2">)</span>
+
+        <span class="s0"># For now, we have to bake the stream.</span>
+        <span class="s1">text </span><span class="s2">= </span><span class="s6">b&quot;&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">text_list</span><span class="s2">)</span>
+        <span class="s1">index</span><span class="s2">: </span><span class="s3">&quot;DiffIndex&quot; </span><span class="s2">= </span><span class="s1">DiffIndex</span><span class="s2">()</span>
+        <span class="s1">previous_header</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Match</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">], </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span>
+        <span class="s1">header</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Match</span><span class="s2">[</span><span class="s1">bytes</span><span class="s2">], </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span>
+        <span class="s1">a_path</span><span class="s2">, </span><span class="s1">b_path </span><span class="s2">= </span><span class="s4">None</span><span class="s2">, </span><span class="s4">None  </span><span class="s0"># For mypy.</span>
+        <span class="s1">a_mode</span><span class="s2">, </span><span class="s1">b_mode </span><span class="s2">= </span><span class="s4">None</span><span class="s2">, </span><span class="s4">None  </span><span class="s0"># For mypy.</span>
+        <span class="s4">for </span><span class="s1">_header </span><span class="s4">in </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">re_header</span><span class="s2">.</span><span class="s1">finditer</span><span class="s2">(</span><span class="s1">text</span><span class="s2">):</span>
+            <span class="s2">(</span>
+                <span class="s1">a_path_fallback</span><span class="s2">,</span>
+                <span class="s1">b_path_fallback</span><span class="s2">,</span>
+                <span class="s1">old_mode</span><span class="s2">,</span>
+                <span class="s1">new_mode</span><span class="s2">,</span>
+                <span class="s1">rename_from</span><span class="s2">,</span>
+                <span class="s1">rename_to</span><span class="s2">,</span>
+                <span class="s1">new_file_mode</span><span class="s2">,</span>
+                <span class="s1">deleted_file_mode</span><span class="s2">,</span>
+                <span class="s1">copied_file_name</span><span class="s2">,</span>
+                <span class="s1">a_blob_id</span><span class="s2">,</span>
+                <span class="s1">b_blob_id</span><span class="s2">,</span>
+                <span class="s1">b_mode</span><span class="s2">,</span>
+                <span class="s1">a_path</span><span class="s2">,</span>
+                <span class="s1">b_path</span><span class="s2">,</span>
+            <span class="s2">) = </span><span class="s1">_header</span><span class="s2">.</span><span class="s1">groups</span><span class="s2">()</span>
+
+            <span class="s1">new_file</span><span class="s2">, </span><span class="s1">deleted_file</span><span class="s2">, </span><span class="s1">copied_file </span><span class="s2">= (</span>
+                <span class="s1">bool</span><span class="s2">(</span><span class="s1">new_file_mode</span><span class="s2">),</span>
+                <span class="s1">bool</span><span class="s2">(</span><span class="s1">deleted_file_mode</span><span class="s2">),</span>
+                <span class="s1">bool</span><span class="s2">(</span><span class="s1">copied_file_name</span><span class="s2">),</span>
+            <span class="s2">)</span>
+
+            <span class="s1">a_path </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_pick_best_path</span><span class="s2">(</span><span class="s1">a_path</span><span class="s2">, </span><span class="s1">rename_from</span><span class="s2">, </span><span class="s1">a_path_fallback</span><span class="s2">)</span>
+            <span class="s1">b_path </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_pick_best_path</span><span class="s2">(</span><span class="s1">b_path</span><span class="s2">, </span><span class="s1">rename_to</span><span class="s2">, </span><span class="s1">b_path_fallback</span><span class="s2">)</span>
+
+            <span class="s0"># Our only means to find the actual text is to see what has not been matched</span>
+            <span class="s0"># by our regex, and then retro-actively assign it to our index.</span>
+            <span class="s4">if </span><span class="s1">previous_header </span><span class="s4">is not None</span><span class="s2">:</span>
+                <span class="s1">index</span><span class="s2">[-</span><span class="s7">1</span><span class="s2">].</span><span class="s1">diff </span><span class="s2">= </span><span class="s1">text</span><span class="s2">[</span><span class="s1">previous_header</span><span class="s2">.</span><span class="s1">end</span><span class="s2">() : </span><span class="s1">_header</span><span class="s2">.</span><span class="s1">start</span><span class="s2">()]</span>
+            <span class="s0"># END assign actual diff</span>
+
+            <span class="s0"># Make sure the mode is set if the path is set. Otherwise the resulting blob</span>
+            <span class="s0"># is invalid. We just use the one mode we should have parsed.</span>
+            <span class="s1">a_mode </span><span class="s2">= </span><span class="s1">old_mode </span><span class="s4">or </span><span class="s1">deleted_file_mode </span><span class="s4">or </span><span class="s2">(</span><span class="s1">a_path </span><span class="s4">and </span><span class="s2">(</span><span class="s1">b_mode </span><span class="s4">or </span><span class="s1">new_mode </span><span class="s4">or </span><span class="s1">new_file_mode</span><span class="s2">))</span>
+            <span class="s1">b_mode </span><span class="s2">= </span><span class="s1">b_mode </span><span class="s4">or </span><span class="s1">new_mode </span><span class="s4">or </span><span class="s1">new_file_mode </span><span class="s4">or </span><span class="s2">(</span><span class="s1">b_path </span><span class="s4">and </span><span class="s1">a_mode</span><span class="s2">)</span>
+            <span class="s1">index</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span>
+                <span class="s1">Diff</span><span class="s2">(</span>
+                    <span class="s1">repo</span><span class="s2">,</span>
+                    <span class="s1">a_path</span><span class="s2">,</span>
+                    <span class="s1">b_path</span><span class="s2">,</span>
+                    <span class="s1">a_blob_id </span><span class="s4">and </span><span class="s1">a_blob_id</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">),</span>
+                    <span class="s1">b_blob_id </span><span class="s4">and </span><span class="s1">b_blob_id</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">),</span>
+                    <span class="s1">a_mode </span><span class="s4">and </span><span class="s1">a_mode</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">),</span>
+                    <span class="s1">b_mode </span><span class="s4">and </span><span class="s1">b_mode</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">),</span>
+                    <span class="s1">new_file</span><span class="s2">,</span>
+                    <span class="s1">deleted_file</span><span class="s2">,</span>
+                    <span class="s1">copied_file</span><span class="s2">,</span>
+                    <span class="s1">rename_from</span><span class="s2">,</span>
+                    <span class="s1">rename_to</span><span class="s2">,</span>
+                    <span class="s4">None</span><span class="s2">,</span>
+                    <span class="s4">None</span><span class="s2">,</span>
+                    <span class="s4">None</span><span class="s2">,</span>
+                <span class="s2">)</span>
+            <span class="s2">)</span>
+
+            <span class="s1">previous_header </span><span class="s2">= </span><span class="s1">_header</span>
+            <span class="s1">header </span><span class="s2">= </span><span class="s1">_header</span>
+        <span class="s0"># END for each header we parse</span>
+        <span class="s4">if </span><span class="s1">index </span><span class="s4">and </span><span class="s1">header</span><span class="s2">:</span>
+            <span class="s1">index</span><span class="s2">[-</span><span class="s7">1</span><span class="s2">].</span><span class="s1">diff </span><span class="s2">= </span><span class="s1">text</span><span class="s2">[</span><span class="s1">header</span><span class="s2">.</span><span class="s1">end</span><span class="s2">() :]</span>
+        <span class="s0"># END assign last diff</span>
+
+        <span class="s4">return </span><span class="s1">index</span>
+
+    <span class="s2">@</span><span class="s1">staticmethod</span>
+    <span class="s4">def </span><span class="s1">_handle_diff_line</span><span class="s2">(</span><span class="s1">lines_bytes</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">index</span><span class="s2">: </span><span class="s1">DiffIndex</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s4">None</span><span class="s2">:</span>
+        <span class="s1">lines </span><span class="s2">= </span><span class="s1">lines_bytes</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">)</span>
+
+        <span class="s0"># Discard everything before the first colon, and the colon itself.</span>
+        <span class="s1">_</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">lines </span><span class="s2">= </span><span class="s1">lines</span><span class="s2">.</span><span class="s1">partition</span><span class="s2">(</span><span class="s3">&quot;:&quot;</span><span class="s2">)</span>
+
+        <span class="s4">for </span><span class="s1">line </span><span class="s4">in </span><span class="s1">lines</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\x00</span><span class="s3">:&quot;</span><span class="s2">):</span>
+            <span class="s4">if not </span><span class="s1">line</span><span class="s2">:</span>
+                <span class="s0"># The line data is empty, skip.</span>
+                <span class="s4">continue</span>
+            <span class="s1">meta</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">path </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">partition</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\x00</span><span class="s3">&quot;</span><span class="s2">)</span>
+            <span class="s1">path </span><span class="s2">= </span><span class="s1">path</span><span class="s2">.</span><span class="s1">rstrip</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\x00</span><span class="s3">&quot;</span><span class="s2">)</span>
+            <span class="s1">a_blob_id</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]</span>
+            <span class="s1">b_blob_id</span><span class="s2">: </span><span class="s1">Optional</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]</span>
+            <span class="s1">old_mode</span><span class="s2">, </span><span class="s1">new_mode</span><span class="s2">, </span><span class="s1">a_blob_id</span><span class="s2">, </span><span class="s1">b_blob_id</span><span class="s2">, </span><span class="s1">_change_type </span><span class="s2">= </span><span class="s1">meta</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">None</span><span class="s2">, </span><span class="s7">4</span><span class="s2">)</span>
+            <span class="s0"># Change type can be R100</span>
+            <span class="s0"># R: status letter</span>
+            <span class="s0"># 100: score (in case of copy and rename)</span>
+            <span class="s1">change_type</span><span class="s2">: </span><span class="s1">Lit_change_type </span><span class="s2">= </span><span class="s1">cast</span><span class="s2">(</span><span class="s1">Lit_change_type</span><span class="s2">, </span><span class="s1">_change_type</span><span class="s2">[</span><span class="s7">0</span><span class="s2">])</span>
+            <span class="s1">score_str </span><span class="s2">= </span><span class="s3">&quot;&quot;</span><span class="s2">.</span><span class="s1">join</span><span class="s2">(</span><span class="s1">_change_type</span><span class="s2">[</span><span class="s7">1</span><span class="s2">:])</span>
+            <span class="s1">score </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">score_str</span><span class="s2">) </span><span class="s4">if </span><span class="s1">score_str</span><span class="s2">.</span><span class="s1">isdigit</span><span class="s2">() </span><span class="s4">else None</span>
+            <span class="s1">path </span><span class="s2">= </span><span class="s1">path</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+            <span class="s1">a_path </span><span class="s2">= </span><span class="s1">path</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">)</span>
+            <span class="s1">b_path </span><span class="s2">= </span><span class="s1">path</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">)</span>
+            <span class="s1">deleted_file </span><span class="s2">= </span><span class="s4">False</span>
+            <span class="s1">new_file </span><span class="s2">= </span><span class="s4">False</span>
+            <span class="s1">copied_file </span><span class="s2">= </span><span class="s4">False</span>
+            <span class="s1">rename_from </span><span class="s2">= </span><span class="s4">None</span>
+            <span class="s1">rename_to </span><span class="s2">= </span><span class="s4">None</span>
+
+            <span class="s0"># NOTE: We cannot conclude from the existence of a blob to change type,</span>
+            <span class="s0"># as diffs with the working do not have blobs yet.</span>
+            <span class="s4">if </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;D&quot;</span><span class="s2">:</span>
+                <span class="s1">b_blob_id </span><span class="s2">= </span><span class="s4">None  </span><span class="s0"># Optional[str]</span>
+                <span class="s1">deleted_file </span><span class="s2">= </span><span class="s4">True</span>
+            <span class="s4">elif </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;A&quot;</span><span class="s2">:</span>
+                <span class="s1">a_blob_id </span><span class="s2">= </span><span class="s4">None</span>
+                <span class="s1">new_file </span><span class="s2">= </span><span class="s4">True</span>
+            <span class="s4">elif </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;C&quot;</span><span class="s2">:</span>
+                <span class="s1">copied_file </span><span class="s2">= </span><span class="s4">True</span>
+                <span class="s1">a_path_str</span><span class="s2">, </span><span class="s1">b_path_str </span><span class="s2">= </span><span class="s1">path</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\x00</span><span class="s3">&quot;</span><span class="s2">, </span><span class="s7">1</span><span class="s2">)</span>
+                <span class="s1">a_path </span><span class="s2">= </span><span class="s1">a_path_str</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">)</span>
+                <span class="s1">b_path </span><span class="s2">= </span><span class="s1">b_path_str</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">)</span>
+            <span class="s4">elif </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;R&quot;</span><span class="s2">:</span>
+                <span class="s1">a_path_str</span><span class="s2">, </span><span class="s1">b_path_str </span><span class="s2">= </span><span class="s1">path</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\x00</span><span class="s3">&quot;</span><span class="s2">, </span><span class="s7">1</span><span class="s2">)</span>
+                <span class="s1">a_path </span><span class="s2">= </span><span class="s1">a_path_str</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">)</span>
+                <span class="s1">b_path </span><span class="s2">= </span><span class="s1">b_path_str</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">defenc</span><span class="s2">)</span>
+                <span class="s1">rename_from</span><span class="s2">, </span><span class="s1">rename_to </span><span class="s2">= </span><span class="s1">a_path</span><span class="s2">, </span><span class="s1">b_path</span>
+            <span class="s4">elif </span><span class="s1">change_type </span><span class="s2">== </span><span class="s3">&quot;T&quot;</span><span class="s2">:</span>
+                <span class="s0"># Nothing to do.</span>
+                <span class="s4">pass</span>
+            <span class="s0"># END add/remove handling</span>
+
+            <span class="s1">diff </span><span class="s2">= </span><span class="s1">Diff</span><span class="s2">(</span>
+                <span class="s1">repo</span><span class="s2">,</span>
+                <span class="s1">a_path</span><span class="s2">,</span>
+                <span class="s1">b_path</span><span class="s2">,</span>
+                <span class="s1">a_blob_id</span><span class="s2">,</span>
+                <span class="s1">b_blob_id</span><span class="s2">,</span>
+                <span class="s1">old_mode</span><span class="s2">,</span>
+                <span class="s1">new_mode</span><span class="s2">,</span>
+                <span class="s1">new_file</span><span class="s2">,</span>
+                <span class="s1">deleted_file</span><span class="s2">,</span>
+                <span class="s1">copied_file</span><span class="s2">,</span>
+                <span class="s1">rename_from</span><span class="s2">,</span>
+                <span class="s1">rename_to</span><span class="s2">,</span>
+                <span class="s3">&quot;&quot;</span><span class="s2">,</span>
+                <span class="s1">change_type</span><span class="s2">,</span>
+                <span class="s1">score</span><span class="s2">,</span>
+            <span class="s2">)</span>
+            <span class="s1">index</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">diff</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_index_from_raw_format</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">proc</span><span class="s2">: </span><span class="s3">&quot;Popen&quot;</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;DiffIndex&quot;</span><span class="s2">:</span>
+        <span class="s5">&quot;&quot;&quot;Create a new :class:`DiffIndex` from the given process output which must be 
+        in raw format. 
+ 
+        :param repo: 
+            The repository we are operating on. 
+ 
+        :param proc: 
+            Process to read output from. 
+ 
+        :return: 
+            :class:`DiffIndex` 
+        &quot;&quot;&quot;</span>
+        <span class="s0"># handles</span>
+        <span class="s0"># :100644 100644 687099101... 37c5e30c8... M    .gitignore</span>
+
+        <span class="s1">index</span><span class="s2">: </span><span class="s3">&quot;DiffIndex&quot; </span><span class="s2">= </span><span class="s1">DiffIndex</span><span class="s2">()</span>
+        <span class="s1">handle_process_output</span><span class="s2">(</span>
+            <span class="s1">proc</span><span class="s2">,</span>
+            <span class="s4">lambda </span><span class="s1">byt</span><span class="s2">: </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_handle_diff_line</span><span class="s2">(</span><span class="s1">byt</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">, </span><span class="s1">index</span><span class="s2">),</span>
+            <span class="s4">None</span><span class="s2">,</span>
+            <span class="s1">finalize_process</span><span class="s2">,</span>
+            <span class="s1">decode_streams</span><span class="s2">=</span><span class="s4">False</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+        <span class="s4">return </span><span class="s1">index</span>
+</pre>
+</body>
+</html>

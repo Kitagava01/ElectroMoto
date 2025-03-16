@@ -1,0 +1,754 @@
+<html>
+<head>
+<title>stream.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+stream.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2010, 2011 Sebastian Thiel (byronimo@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitDB and is released under</span>
+<span class="s0"># the New BSD License: https://opensource.org/license/bsd-3-clause/</span>
+
+<span class="s2">from </span><span class="s1">io </span><span class="s2">import </span><span class="s1">BytesIO</span>
+
+<span class="s2">import </span><span class="s1">mmap</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">zlib</span>
+
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">fun </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">msb_size</span><span class="s3">,</span>
+    <span class="s1">stream_copy</span><span class="s3">,</span>
+    <span class="s1">apply_delta_data</span><span class="s3">,</span>
+    <span class="s1">connect_deltas</span><span class="s3">,</span>
+    <span class="s1">delta_types</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">allocate_memory</span><span class="s3">,</span>
+    <span class="s1">LazyMixin</span><span class="s3">,</span>
+    <span class="s1">make_sha</span><span class="s3">,</span>
+    <span class="s1">write</span><span class="s3">,</span>
+    <span class="s1">close</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">const </span><span class="s2">import </span><span class="s1">NULL_BYTE</span><span class="s3">, </span><span class="s1">BYTE_SPACE</span>
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">utils</span><span class="s3">.</span><span class="s1">encoding </span><span class="s2">import </span><span class="s1">force_bytes</span>
+
+<span class="s1">has_perf_mod </span><span class="s3">= </span><span class="s2">False</span>
+<span class="s2">try</span><span class="s3">:</span>
+    <span class="s2">from </span><span class="s1">gitdb_speedups</span><span class="s3">.</span><span class="s1">_perf </span><span class="s2">import </span><span class="s1">apply_delta </span><span class="s2">as </span><span class="s1">c_apply_delta</span>
+    <span class="s1">has_perf_mod </span><span class="s3">= </span><span class="s2">True</span>
+<span class="s2">except </span><span class="s1">ImportError</span><span class="s3">:</span>
+    <span class="s2">pass</span>
+
+<span class="s1">__all__ </span><span class="s3">= (</span><span class="s4">'DecompressMemMapReader'</span><span class="s3">, </span><span class="s4">'FDCompressedSha1Writer'</span><span class="s3">, </span><span class="s4">'DeltaApplyReader'</span><span class="s3">,</span>
+           <span class="s4">'Sha1Writer'</span><span class="s3">, </span><span class="s4">'FlexibleSha1Writer'</span><span class="s3">, </span><span class="s4">'ZippedStoreShaWriter'</span><span class="s3">, </span><span class="s4">'FDCompressedSha1Writer'</span><span class="s3">,</span>
+           <span class="s4">'FDStream'</span><span class="s3">, </span><span class="s4">'NullStream'</span><span class="s3">)</span>
+
+
+<span class="s0">#{ RO Streams</span>
+
+<span class="s2">class </span><span class="s1">DecompressMemMapReader</span><span class="s3">(</span><span class="s1">LazyMixin</span><span class="s3">):</span>
+
+    <span class="s5">&quot;&quot;&quot;Reads data in chunks from a memory map and decompresses it. The client sees 
+    only the uncompressed data, respective file-like read calls are handling on-demand 
+    buffered decompression accordingly 
+ 
+    A constraint on the total size of bytes is activated, simulating 
+    a logical file within a possibly larger physical memory area 
+ 
+    To read efficiently, you clearly don't want to read individual bytes, instead, 
+    read a few kilobytes at least. 
+ 
+    **Note:** The chunk-size should be carefully selected as it will involve quite a bit 
+        of string copying due to the way the zlib is implemented. Its very wasteful, 
+        hence we try to find a good tradeoff between allocation time and number of 
+        times we actually allocate. An own zlib implementation would be good here 
+        to better support streamed reading - it would only need to keep the mmap 
+        and decompress it into chunks, that's all ... &quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= (</span><span class="s4">'_m'</span><span class="s3">, </span><span class="s4">'_zip'</span><span class="s3">, </span><span class="s4">'_buf'</span><span class="s3">, </span><span class="s4">'_buflen'</span><span class="s3">, </span><span class="s4">'_br'</span><span class="s3">, </span><span class="s4">'_cws'</span><span class="s3">, </span><span class="s4">'_cwe'</span><span class="s3">, </span><span class="s4">'_s'</span><span class="s3">, </span><span class="s4">'_close'</span><span class="s3">,</span>
+                 <span class="s4">'_cbr'</span><span class="s3">, </span><span class="s4">'_phi'</span><span class="s3">)</span>
+
+    <span class="s1">max_read_size </span><span class="s3">= </span><span class="s6">512 </span><span class="s3">* </span><span class="s6">1024        </span><span class="s0"># currently unused</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">m</span><span class="s3">, </span><span class="s1">close_on_deletion</span><span class="s3">, </span><span class="s1">size</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;Initialize with mmap for stream reading 
+        :param m: must be content data - use new if you have object data and no size&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_m </span><span class="s3">= </span><span class="s1">m</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_zip </span><span class="s3">= </span><span class="s1">zlib</span><span class="s3">.</span><span class="s1">decompressobj</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_buf </span><span class="s3">= </span><span class="s2">None                        </span><span class="s0"># buffer of decompressed bytes</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_buflen </span><span class="s3">= </span><span class="s6">0                        </span><span class="s0"># length of bytes in buffer</span>
+        <span class="s2">if </span><span class="s1">size </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_s </span><span class="s3">= </span><span class="s1">size                      </span><span class="s0"># size of uncompressed data to read in total</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">= </span><span class="s6">0                            </span><span class="s0"># num uncompressed bytes read</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_cws </span><span class="s3">= </span><span class="s6">0                           </span><span class="s0"># start byte of compression window</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe </span><span class="s3">= </span><span class="s6">0                           </span><span class="s0"># end byte of compression window</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_cbr </span><span class="s3">= </span><span class="s6">0                           </span><span class="s0"># number of compressed bytes read</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_phi </span><span class="s3">= </span><span class="s2">False                       </span><span class="s0"># is True if we parsed the header info</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_close </span><span class="s3">= </span><span class="s1">close_on_deletion         </span><span class="s0"># close the memmap on deletion ?</span>
+
+    <span class="s2">def </span><span class="s1">_set_cache_</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">attr</span><span class="s3">):</span>
+        <span class="s2">assert </span><span class="s1">attr </span><span class="s3">== </span><span class="s4">'_s'</span>
+        <span class="s0"># only happens for size, which is a marker to indicate we still</span>
+        <span class="s0"># have to parse the header from the stream</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_parse_header_info</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">__del__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_parse_header_info</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;If this stream contains object data, parse the header info and skip the 
+        stream to a point where each read will yield object content 
+ 
+        :return: parsed type_string, size&quot;&quot;&quot;</span>
+        <span class="s0"># read header</span>
+        <span class="s0"># should really be enough, cgit uses 8192 I believe</span>
+        <span class="s0"># And for good reason !! This needs to be that high for the header to be read correctly in all cases</span>
+        <span class="s1">maxb </span><span class="s3">= </span><span class="s6">8192</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_s </span><span class="s3">= </span><span class="s1">maxb</span>
+        <span class="s1">hdr </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">maxb</span><span class="s3">)</span>
+        <span class="s1">hdrend </span><span class="s3">= </span><span class="s1">hdr</span><span class="s3">.</span><span class="s1">find</span><span class="s3">(</span><span class="s1">NULL_BYTE</span><span class="s3">)</span>
+        <span class="s1">typ</span><span class="s3">, </span><span class="s1">size </span><span class="s3">= </span><span class="s1">hdr</span><span class="s3">[:</span><span class="s1">hdrend</span><span class="s3">].</span><span class="s1">split</span><span class="s3">(</span><span class="s1">BYTE_SPACE</span><span class="s3">)</span>
+        <span class="s1">size </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s1">size</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_s </span><span class="s3">= </span><span class="s1">size</span>
+
+        <span class="s0"># adjust internal state to match actual header length that we ignore</span>
+        <span class="s0"># The buffer will be depleted first on future reads</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s1">hdrend </span><span class="s3">+= </span><span class="s6">1</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_buf </span><span class="s3">= </span><span class="s1">BytesIO</span><span class="s3">(</span><span class="s1">hdr</span><span class="s3">[</span><span class="s1">hdrend</span><span class="s3">:])</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_buflen </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">hdr</span><span class="s3">) - </span><span class="s1">hdrend</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_phi </span><span class="s3">= </span><span class="s2">True</span>
+
+        <span class="s2">return </span><span class="s1">typ</span><span class="s3">, </span><span class="s1">size</span>
+
+    <span class="s0">#{ Interface</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">new</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">m</span><span class="s3">, </span><span class="s1">close_on_deletion</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;Create a new DecompressMemMapReader instance for acting as a read-only stream 
+        This method parses the object header from m and returns the parsed 
+        type and size, as well as the created stream instance. 
+ 
+        :param m: memory map on which to operate. It must be object data ( header + contents ) 
+        :param close_on_deletion: if True, the memory map will be closed once we are 
+            being deleted&quot;&quot;&quot;</span>
+        <span class="s1">inst </span><span class="s3">= </span><span class="s1">DecompressMemMapReader</span><span class="s3">(</span><span class="s1">m</span><span class="s3">, </span><span class="s1">close_on_deletion</span><span class="s3">, </span><span class="s6">0</span><span class="s3">)</span>
+        <span class="s1">typ</span><span class="s3">, </span><span class="s1">size </span><span class="s3">= </span><span class="s1">inst</span><span class="s3">.</span><span class="s1">_parse_header_info</span><span class="s3">()</span>
+        <span class="s2">return </span><span class="s1">typ</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">inst</span>
+
+    <span class="s2">def </span><span class="s1">data</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;:return: random access compatible data we are working on&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_m</span>
+
+    <span class="s2">def </span><span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;Close our underlying stream of compressed bytes if this was allowed during initialization 
+        :return: True if we closed the underlying stream 
+        :note: can be called safely 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_close</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_m</span><span class="s3">, </span><span class="s4">'close'</span><span class="s3">):</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_m</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_close </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s0"># END handle resource freeing</span>
+
+    <span class="s2">def </span><span class="s1">compressed_bytes_read</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: number of compressed bytes read. This includes the bytes it 
+            took to decompress the header ( if there was one )&quot;&quot;&quot;</span>
+        <span class="s0"># ABSTRACT: When decompressing a byte stream, it can be that the first</span>
+        <span class="s0"># x bytes which were requested match the first x bytes in the loosely</span>
+        <span class="s0"># compressed datastream. This is the worst-case assumption that the reader</span>
+        <span class="s0"># does, it assumes that it will get at least X bytes from X compressed bytes</span>
+        <span class="s0"># in call cases.</span>
+        <span class="s0"># The caveat is that the object, according to our known uncompressed size,</span>
+        <span class="s0"># is already complete, but there are still some bytes left in the compressed</span>
+        <span class="s0"># stream that contribute to the amount of compressed bytes.</span>
+        <span class="s0"># How can we know that we are truly done, and have read all bytes we need</span>
+        <span class="s0"># to read ?</span>
+        <span class="s0"># Without help, we cannot know, as we need to obtain the status of the</span>
+        <span class="s0"># decompression. If it is not finished, we need to decompress more data</span>
+        <span class="s0"># until it is finished, to yield the actual number of compressed bytes</span>
+        <span class="s0"># belonging to the decompressed object</span>
+        <span class="s0"># We are using a custom zlib module for this, if its not present,</span>
+        <span class="s0"># we try to put in additional bytes up for decompression if feasible</span>
+        <span class="s0"># and check for the unused_data.</span>
+
+        <span class="s0"># Only scrub the stream forward if we are officially done with the</span>
+        <span class="s0"># bytes we were to have.</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">== </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_s </span><span class="s2">and not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zip</span><span class="s3">.</span><span class="s1">unused_data</span><span class="s3">:</span>
+            <span class="s0"># manipulate the bytes-read to allow our own read method to continue</span>
+            <span class="s0"># but keep the window at its current position</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zip</span><span class="s3">, </span><span class="s4">'status'</span><span class="s3">):</span>
+                <span class="s2">while </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zip</span><span class="s3">.</span><span class="s1">status </span><span class="s3">== </span><span class="s1">zlib</span><span class="s3">.</span><span class="s1">Z_OK</span><span class="s3">:</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">mmap</span><span class="s3">.</span><span class="s1">PAGESIZE</span><span class="s3">)</span>
+                <span class="s0"># END scrub-loop custom zlib</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s0"># pass in additional pages, until we have unused data</span>
+                <span class="s2">while not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zip</span><span class="s3">.</span><span class="s1">unused_data </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cbr </span><span class="s3">!= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_m</span><span class="s3">):</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">mmap</span><span class="s3">.</span><span class="s1">PAGESIZE</span><span class="s3">)</span>
+                <span class="s0"># END scrub-loop default zlib</span>
+            <span class="s0"># END handle stream scrubbing</span>
+
+            <span class="s0"># reset bytes read, just to be sure</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_s</span>
+        <span class="s0"># END handle stream scrubbing</span>
+
+        <span class="s0"># unused data ends up in the unconsumed tail, which was removed</span>
+        <span class="s0"># from the count already</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cbr</span>
+
+    <span class="s0">#} END interface</span>
+
+    <span class="s2">def </span><span class="s1">seek</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">whence</span><span class="s3">=</span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">os</span><span class="s3">, </span><span class="s4">'SEEK_SET'</span><span class="s3">, </span><span class="s6">0</span><span class="s3">)):</span>
+        <span class="s5">&quot;&quot;&quot;Allows to reset the stream to restart reading 
+        :raise ValueError: If offset and whence are not 0&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">offset </span><span class="s3">!= </span><span class="s6">0 </span><span class="s2">or </span><span class="s1">whence </span><span class="s3">!= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">os</span><span class="s3">, </span><span class="s4">'SEEK_SET'</span><span class="s3">, </span><span class="s6">0</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Can only seek to position 0&quot;</span><span class="s3">)</span>
+        <span class="s0"># END handle offset</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_zip </span><span class="s3">= </span><span class="s1">zlib</span><span class="s3">.</span><span class="s1">decompressobj</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cws </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cbr </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_phi</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_phi </span><span class="s3">= </span><span class="s2">False</span>
+            <span class="s2">del</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_s</span><span class="s3">)        </span><span class="s0"># trigger header parsing on first access</span>
+        <span class="s0"># END skip header</span>
+
+    <span class="s2">def </span><span class="s1">read</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">size</span><span class="s3">=-</span><span class="s6">1</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">size </span><span class="s3">&lt; </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s1">size </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_s </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_br</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">size </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">size</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_s </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_br</span><span class="s3">)</span>
+        <span class="s0"># END clamp size</span>
+
+        <span class="s2">if </span><span class="s1">size </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s7">b''</span>
+        <span class="s0"># END handle depletion</span>
+
+        <span class="s0"># deplete the buffer, then just continue using the decompress object</span>
+        <span class="s0"># which has an own buffer. We just need this to transparently parse the</span>
+        <span class="s0"># header from the zlib stream</span>
+        <span class="s1">dat </span><span class="s3">= </span><span class="s7">b''</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_buf</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_buflen </span><span class="s3">&gt;= </span><span class="s1">size</span><span class="s3">:</span>
+                <span class="s0"># have enough data</span>
+                <span class="s1">dat </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_buf</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">size</span><span class="s3">)</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_buflen </span><span class="s3">-= </span><span class="s1">size</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">+= </span><span class="s1">size</span>
+                <span class="s2">return </span><span class="s1">dat</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">dat </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_buf</span><span class="s3">.</span><span class="s1">read</span><span class="s3">()      </span><span class="s0"># ouch, duplicates data</span>
+                <span class="s1">size </span><span class="s3">-= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_buflen</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">+= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_buflen</span>
+
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_buflen </span><span class="s3">= </span><span class="s6">0</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_buf </span><span class="s3">= </span><span class="s2">None</span>
+            <span class="s0"># END handle buffer len</span>
+        <span class="s0"># END handle buffer</span>
+
+        <span class="s0"># decompress some data</span>
+        <span class="s0"># Abstract: zlib needs to operate on chunks of our memory map ( which may</span>
+        <span class="s0"># be large ), as it will otherwise and always fill in the 'unconsumed_tail'</span>
+        <span class="s0"># attribute which possible reads our whole map to the end, forcing</span>
+        <span class="s0"># everything to be read from disk even though just a portion was requested.</span>
+        <span class="s0"># As this would be a nogo, we workaround it by passing only chunks of data,</span>
+        <span class="s0"># moving the window into the memory map along as we decompress, which keeps</span>
+        <span class="s0"># the tail smaller than our chunk-size. This causes 'only' the chunk to be</span>
+        <span class="s0"># copied once, and another copy of a part of it when it creates the unconsumed</span>
+        <span class="s0"># tail. We have to use it to hand in the appropriate amount of bytes during</span>
+        <span class="s0"># the next read.</span>
+        <span class="s1">tail </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zip</span><span class="s3">.</span><span class="s1">unconsumed_tail</span>
+        <span class="s2">if </span><span class="s1">tail</span><span class="s3">:</span>
+            <span class="s0"># move the window, make it as large as size demands. For code-clarity,</span>
+            <span class="s0"># we just take the chunk from our map again instead of reusing the unconsumed</span>
+            <span class="s0"># tail. The latter one would safe some memory copying, but we could end up</span>
+            <span class="s0"># with not getting enough data uncompressed, so we had to sort that out as well.</span>
+            <span class="s0"># Now we just assume the worst case, hence the data is uncompressed and the window</span>
+            <span class="s0"># needs to be as large as the uncompressed bytes we want to read.</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_cws </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe </span><span class="s3">- </span><span class="s1">len</span><span class="s3">(</span><span class="s1">tail</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cws </span><span class="s3">+ </span><span class="s1">size</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">cws </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cws</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_cws </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe </span><span class="s3">= </span><span class="s1">cws </span><span class="s3">+ </span><span class="s1">size</span>
+        <span class="s0"># END handle tail</span>
+
+        <span class="s0"># if window is too small, make it larger so zip can decompress something</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cws </span><span class="s3">&lt; </span><span class="s6">8</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cws </span><span class="s3">+ </span><span class="s6">8</span>
+        <span class="s0"># END adjust winsize</span>
+
+        <span class="s0"># takes a slice, but doesn't copy the data, it says ...</span>
+        <span class="s1">indata </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_m</span><span class="s3">[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cws</span><span class="s3">:</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe</span><span class="s3">]</span>
+
+        <span class="s0"># get the actual window end to be sure we don't use it for computations</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_cwe </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_cws </span><span class="s3">+ </span><span class="s1">len</span><span class="s3">(</span><span class="s1">indata</span><span class="s3">)</span>
+        <span class="s1">dcompdat </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zip</span><span class="s3">.</span><span class="s1">decompress</span><span class="s3">(</span><span class="s1">indata</span><span class="s3">, </span><span class="s1">size</span><span class="s3">)</span>
+        <span class="s0"># update the amount of compressed bytes read</span>
+        <span class="s0"># We feed possibly overlapping chunks, which is why the unconsumed tail</span>
+        <span class="s0"># has to be taken into consideration, as well as the unused data</span>
+        <span class="s0"># if we hit the end of the stream</span>
+        <span class="s0"># NOTE: Behavior changed in PY2.7 onward, which requires special handling to make the tests work properly.</span>
+        <span class="s0"># They are thorough, and I assume it is truly working.</span>
+        <span class="s0"># Why is this logic as convoluted as it is ? Please look at the table in</span>
+        <span class="s0"># https://github.com/gitpython-developers/gitdb/issues/19 to learn about the test-results.</span>
+        <span class="s0"># Basically, on py2.6, you want to use branch 1, whereas on all other python version, the second branch</span>
+        <span class="s0"># will be the one that works.</span>
+        <span class="s0"># However, the zlib VERSIONs as well as the platform check is used to further match the entries in the</span>
+        <span class="s0"># table in the github issue. This is it ... it was the only way I could make this work everywhere.</span>
+        <span class="s0"># IT's CERTAINLY GOING TO BITE US IN THE FUTURE ... .</span>
+        <span class="s2">if </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">zlib</span><span class="s3">, </span><span class="s4">'ZLIB_RUNTIME_VERSION'</span><span class="s3">, </span><span class="s1">zlib</span><span class="s3">.</span><span class="s1">ZLIB_VERSION</span><span class="s3">) </span><span class="s2">in </span><span class="s3">(</span><span class="s4">'1.2.7'</span><span class="s3">, </span><span class="s4">'1.2.5'</span><span class="s3">) </span><span class="s2">and not </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">platform </span><span class="s3">== </span><span class="s4">'darwin'</span><span class="s3">:</span>
+            <span class="s1">unused_datalen </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zip</span><span class="s3">.</span><span class="s1">unconsumed_tail</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">unused_datalen </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zip</span><span class="s3">.</span><span class="s1">unconsumed_tail</span><span class="s3">) + </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_zip</span><span class="s3">.</span><span class="s1">unused_data</span><span class="s3">)</span>
+        <span class="s0"># # end handle very special case ...</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_cbr </span><span class="s3">+= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">indata</span><span class="s3">) - </span><span class="s1">unused_datalen</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">+= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">dcompdat</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">dat</span><span class="s3">:</span>
+            <span class="s1">dcompdat </span><span class="s3">= </span><span class="s1">dat </span><span class="s3">+ </span><span class="s1">dcompdat</span>
+        <span class="s0"># END prepend our cached data</span>
+
+        <span class="s0"># it can happen, depending on the compression, that we get less bytes</span>
+        <span class="s0"># than ordered as it needs the final portion of the data as well.</span>
+        <span class="s0"># Recursively resolve that.</span>
+        <span class="s0"># Note: dcompdat can be empty even though we still appear to have bytes</span>
+        <span class="s0"># to read, if we are called by compressed_bytes_read - it manipulates</span>
+        <span class="s0"># us to empty the stream</span>
+        <span class="s2">if </span><span class="s1">dcompdat </span><span class="s2">and </span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">dcompdat</span><span class="s3">) - </span><span class="s1">len</span><span class="s3">(</span><span class="s1">dat</span><span class="s3">)) &lt; </span><span class="s1">size </span><span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">&lt; </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_s</span><span class="s3">:</span>
+            <span class="s1">dcompdat </span><span class="s3">+= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">size </span><span class="s3">- </span><span class="s1">len</span><span class="s3">(</span><span class="s1">dcompdat</span><span class="s3">))</span>
+        <span class="s0"># END handle special case</span>
+        <span class="s2">return </span><span class="s1">dcompdat</span>
+
+
+<span class="s2">class </span><span class="s1">DeltaApplyReader</span><span class="s3">(</span><span class="s1">LazyMixin</span><span class="s3">):</span>
+
+    <span class="s5">&quot;&quot;&quot;A reader which dynamically applies pack deltas to a base object, keeping the 
+    memory demands to a minimum. 
+ 
+    The size of the final object is only obtainable once all deltas have been 
+    applied, unless it is retrieved from a pack index. 
+ 
+    The uncompressed Delta has the following layout (MSB being a most significant 
+    bit encoded dynamic size): 
+ 
+    * MSB Source Size - the size of the base against which the delta was created 
+    * MSB Target Size - the size of the resulting data after the delta was applied 
+    * A list of one byte commands (cmd) which are followed by a specific protocol: 
+ 
+     * cmd &amp; 0x80 - copy delta_data[offset:offset+size] 
+ 
+      * Followed by an encoded offset into the delta data 
+      * Followed by an encoded size of the chunk to copy 
+ 
+     *  cmd &amp; 0x7f - insert 
+ 
+      * insert cmd bytes from the delta buffer into the output stream 
+ 
+     * cmd == 0 - invalid operation ( or error in delta stream ) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= (</span>
+        <span class="s4">&quot;_bstream&quot;</span><span class="s3">,             </span><span class="s0"># base stream to which to apply the deltas</span>
+        <span class="s4">&quot;_dstreams&quot;</span><span class="s3">,            </span><span class="s0"># tuple of delta stream readers</span>
+        <span class="s4">&quot;_mm_target&quot;</span><span class="s3">,           </span><span class="s0"># memory map of the delta-applied data</span>
+        <span class="s4">&quot;_size&quot;</span><span class="s3">,                </span><span class="s0"># actual number of bytes in _mm_target</span>
+        <span class="s4">&quot;_br&quot;                   </span><span class="s0"># number of bytes read</span>
+    <span class="s3">)</span>
+
+    <span class="s0">#{ Configuration</span>
+    <span class="s1">k_max_memory_move </span><span class="s3">= </span><span class="s6">250 </span><span class="s3">* </span><span class="s6">1000 </span><span class="s3">* </span><span class="s6">1000</span>
+    <span class="s0">#} END configuration</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">stream_list</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;Initialize this instance with a list of streams, the first stream being 
+        the delta to apply on top of all following deltas, the last stream being the 
+        base object onto which to apply the deltas&quot;&quot;&quot;</span>
+        <span class="s2">assert </span><span class="s1">len</span><span class="s3">(</span><span class="s1">stream_list</span><span class="s3">) &gt; </span><span class="s6">1</span><span class="s3">, </span><span class="s4">&quot;Need at least one delta and one base stream&quot;</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_bstream </span><span class="s3">= </span><span class="s1">stream_list</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">]</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_dstreams </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">stream_list</span><span class="s3">[:-</span><span class="s6">1</span><span class="s3">])</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">= </span><span class="s6">0</span>
+
+    <span class="s2">def </span><span class="s1">_set_cache_too_slow_without_c</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">attr</span><span class="s3">):</span>
+        <span class="s0"># the direct algorithm is fastest and most direct if there is only one</span>
+        <span class="s0"># delta. Also, the extra overhead might not be worth it for items smaller</span>
+        <span class="s0"># than X - definitely the case in python, every function call costs</span>
+        <span class="s0"># huge amounts of time</span>
+        <span class="s0"># if len(self._dstreams) * self._bstream.size &lt; self.k_max_memory_move:</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_dstreams</span><span class="s3">) == </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_set_cache_brute_</span><span class="s3">(</span><span class="s1">attr</span><span class="s3">)</span>
+
+        <span class="s0"># Aggregate all deltas into one delta in reverse order. Hence we take</span>
+        <span class="s0"># the last delta, and reverse-merge its ancestor delta, until we receive</span>
+        <span class="s0"># the final delta data stream.</span>
+        <span class="s1">dcl </span><span class="s3">= </span><span class="s1">connect_deltas</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_dstreams</span><span class="s3">)</span>
+
+        <span class="s0"># call len directly, as the (optional) c version doesn't implement the sequence</span>
+        <span class="s0"># protocol</span>
+        <span class="s2">if </span><span class="s1">dcl</span><span class="s3">.</span><span class="s1">rbound</span><span class="s3">() == </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_mm_target </span><span class="s3">= </span><span class="s1">allocate_memory</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+            <span class="s2">return</span>
+        <span class="s0"># END handle empty list</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">= </span><span class="s1">dcl</span><span class="s3">.</span><span class="s1">rbound</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_mm_target </span><span class="s3">= </span><span class="s1">allocate_memory</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size</span><span class="s3">)</span>
+
+        <span class="s1">bbuf </span><span class="s3">= </span><span class="s1">allocate_memory</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_bstream</span><span class="s3">.</span><span class="s1">size</span><span class="s3">)</span>
+        <span class="s1">stream_copy</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_bstream</span><span class="s3">.</span><span class="s1">read</span><span class="s3">, </span><span class="s1">bbuf</span><span class="s3">.</span><span class="s1">write</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_bstream</span><span class="s3">.</span><span class="s1">size</span><span class="s3">, </span><span class="s6">256 </span><span class="s3">* </span><span class="s1">mmap</span><span class="s3">.</span><span class="s1">PAGESIZE</span><span class="s3">)</span>
+
+        <span class="s0"># APPLY CHUNKS</span>
+        <span class="s1">write </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_mm_target</span><span class="s3">.</span><span class="s1">write</span>
+        <span class="s1">dcl</span><span class="s3">.</span><span class="s1">apply</span><span class="s3">(</span><span class="s1">bbuf</span><span class="s3">, </span><span class="s1">write</span><span class="s3">)</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_mm_target</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_set_cache_brute_</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">attr</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;If we are here, we apply the actual deltas&quot;&quot;&quot;</span>
+        <span class="s0"># TODO: There should be a special case if there is only one stream</span>
+        <span class="s0"># Then the default-git algorithm should perform a tad faster, as the</span>
+        <span class="s0"># delta is not peaked into, causing less overhead.</span>
+        <span class="s1">buffer_info_list </span><span class="s3">= </span><span class="s1">list</span><span class="s3">()</span>
+        <span class="s1">max_target_size </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">for </span><span class="s1">dstream </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_dstreams</span><span class="s3">:</span>
+            <span class="s1">buf </span><span class="s3">= </span><span class="s1">dstream</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s6">512</span><span class="s3">)         </span><span class="s0"># read the header information + X</span>
+            <span class="s1">offset</span><span class="s3">, </span><span class="s1">src_size </span><span class="s3">= </span><span class="s1">msb_size</span><span class="s3">(</span><span class="s1">buf</span><span class="s3">)</span>
+            <span class="s1">offset</span><span class="s3">, </span><span class="s1">target_size </span><span class="s3">= </span><span class="s1">msb_size</span><span class="s3">(</span><span class="s1">buf</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">)</span>
+            <span class="s1">buffer_info_list</span><span class="s3">.</span><span class="s1">append</span><span class="s3">((</span><span class="s1">buf</span><span class="s3">[</span><span class="s1">offset</span><span class="s3">:], </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">src_size</span><span class="s3">, </span><span class="s1">target_size</span><span class="s3">))</span>
+            <span class="s1">max_target_size </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s1">max_target_size</span><span class="s3">, </span><span class="s1">target_size</span><span class="s3">)</span>
+        <span class="s0"># END for each delta stream</span>
+
+        <span class="s0"># sanity check - the first delta to apply should have the same source</span>
+        <span class="s0"># size as our actual base stream</span>
+        <span class="s1">base_size </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_bstream</span><span class="s3">.</span><span class="s1">size</span>
+        <span class="s1">target_size </span><span class="s3">= </span><span class="s1">max_target_size</span>
+
+        <span class="s0"># if we have more than 1 delta to apply, we will swap buffers, hence we must</span>
+        <span class="s0"># assure that all buffers we use are large enough to hold all the results</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_dstreams</span><span class="s3">) &gt; </span><span class="s6">1</span><span class="s3">:</span>
+            <span class="s1">base_size </span><span class="s3">= </span><span class="s1">target_size </span><span class="s3">= </span><span class="s1">max</span><span class="s3">(</span><span class="s1">base_size</span><span class="s3">, </span><span class="s1">max_target_size</span><span class="s3">)</span>
+        <span class="s0"># END adjust buffer sizes</span>
+
+        <span class="s0"># Allocate private memory map big enough to hold the first base buffer</span>
+        <span class="s0"># We need random access to it</span>
+        <span class="s1">bbuf </span><span class="s3">= </span><span class="s1">allocate_memory</span><span class="s3">(</span><span class="s1">base_size</span><span class="s3">)</span>
+        <span class="s1">stream_copy</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_bstream</span><span class="s3">.</span><span class="s1">read</span><span class="s3">, </span><span class="s1">bbuf</span><span class="s3">.</span><span class="s1">write</span><span class="s3">, </span><span class="s1">base_size</span><span class="s3">, </span><span class="s6">256 </span><span class="s3">* </span><span class="s1">mmap</span><span class="s3">.</span><span class="s1">PAGESIZE</span><span class="s3">)</span>
+
+        <span class="s0"># allocate memory map large enough for the largest (intermediate) target</span>
+        <span class="s0"># We will use it as scratch space for all delta ops. If the final</span>
+        <span class="s0"># target buffer is smaller than our allocated space, we just use parts</span>
+        <span class="s0"># of it upon return.</span>
+        <span class="s1">tbuf </span><span class="s3">= </span><span class="s1">allocate_memory</span><span class="s3">(</span><span class="s1">target_size</span><span class="s3">)</span>
+
+        <span class="s0"># for each delta to apply, memory map the decompressed delta and</span>
+        <span class="s0"># work on the op-codes to reconstruct everything.</span>
+        <span class="s0"># For the actual copying, we use a seek and write pattern of buffer</span>
+        <span class="s0"># slices.</span>
+        <span class="s1">final_target_size </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">for </span><span class="s3">(</span><span class="s1">dbuf</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">src_size</span><span class="s3">, </span><span class="s1">target_size</span><span class="s3">), </span><span class="s1">dstream </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">reversed</span><span class="s3">(</span><span class="s1">buffer_info_list</span><span class="s3">), </span><span class="s1">reversed</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_dstreams</span><span class="s3">)):</span>
+            <span class="s0"># allocate a buffer to hold all delta data - fill in the data for</span>
+            <span class="s0"># fast access. We do this as we know that reading individual bytes</span>
+            <span class="s0"># from our stream would be slower than necessary ( although possible )</span>
+            <span class="s0"># The dbuf buffer contains commands after the first two MSB sizes, the</span>
+            <span class="s0"># offset specifies the amount of bytes read to get the sizes.</span>
+            <span class="s1">ddata </span><span class="s3">= </span><span class="s1">allocate_memory</span><span class="s3">(</span><span class="s1">dstream</span><span class="s3">.</span><span class="s1">size </span><span class="s3">- </span><span class="s1">offset</span><span class="s3">)</span>
+            <span class="s1">ddata</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">dbuf</span><span class="s3">)</span>
+            <span class="s0"># read the rest from the stream. The size we give is larger than necessary</span>
+            <span class="s1">stream_copy</span><span class="s3">(</span><span class="s1">dstream</span><span class="s3">.</span><span class="s1">read</span><span class="s3">, </span><span class="s1">ddata</span><span class="s3">.</span><span class="s1">write</span><span class="s3">, </span><span class="s1">dstream</span><span class="s3">.</span><span class="s1">size</span><span class="s3">, </span><span class="s6">256 </span><span class="s3">* </span><span class="s1">mmap</span><span class="s3">.</span><span class="s1">PAGESIZE</span><span class="s3">)</span>
+
+            <span class="s0">#######################################################################</span>
+            <span class="s2">if </span><span class="s4">'c_apply_delta' </span><span class="s2">in </span><span class="s1">globals</span><span class="s3">():</span>
+                <span class="s1">c_apply_delta</span><span class="s3">(</span><span class="s1">bbuf</span><span class="s3">, </span><span class="s1">ddata</span><span class="s3">, </span><span class="s1">tbuf</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">apply_delta_data</span><span class="s3">(</span><span class="s1">bbuf</span><span class="s3">, </span><span class="s1">src_size</span><span class="s3">, </span><span class="s1">ddata</span><span class="s3">, </span><span class="s1">len</span><span class="s3">(</span><span class="s1">ddata</span><span class="s3">), </span><span class="s1">tbuf</span><span class="s3">.</span><span class="s1">write</span><span class="s3">)</span>
+            <span class="s0">#######################################################################</span>
+
+            <span class="s0"># finally, swap out source and target buffers. The target is now the</span>
+            <span class="s0"># base for the next delta to apply</span>
+            <span class="s1">bbuf</span><span class="s3">, </span><span class="s1">tbuf </span><span class="s3">= </span><span class="s1">tbuf</span><span class="s3">, </span><span class="s1">bbuf</span>
+            <span class="s1">bbuf</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+            <span class="s1">tbuf</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+            <span class="s1">final_target_size </span><span class="s3">= </span><span class="s1">target_size</span>
+        <span class="s0"># END for each delta to apply</span>
+
+        <span class="s0"># its already seeked to 0, constrain it to the actual size</span>
+        <span class="s0"># NOTE: in the end of the loop, it swaps buffers, hence our target buffer</span>
+        <span class="s0"># is not tbuf, but bbuf !</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_mm_target </span><span class="s3">= </span><span class="s1">bbuf</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">= </span><span class="s1">final_target_size</span>
+
+    <span class="s0">#{ Configuration</span>
+    <span class="s2">if not </span><span class="s1">has_perf_mod</span><span class="s3">:</span>
+        <span class="s1">_set_cache_ </span><span class="s3">= </span><span class="s1">_set_cache_brute_</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">_set_cache_ </span><span class="s3">= </span><span class="s1">_set_cache_too_slow_without_c</span>
+
+    <span class="s0">#} END configuration</span>
+
+    <span class="s2">def </span><span class="s1">read</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">count</span><span class="s3">=</span><span class="s6">0</span><span class="s3">):</span>
+        <span class="s1">bl </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_br      </span><span class="s0"># bytes left</span>
+        <span class="s2">if </span><span class="s1">count </span><span class="s3">&lt; </span><span class="s6">1 </span><span class="s2">or </span><span class="s1">count </span><span class="s3">&gt; </span><span class="s1">bl</span><span class="s3">:</span>
+            <span class="s1">count </span><span class="s3">= </span><span class="s1">bl</span>
+        <span class="s0"># NOTE: we could check for certain size limits, and possibly</span>
+        <span class="s0"># return buffers instead of strings to prevent byte copying</span>
+        <span class="s1">data </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_mm_target</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">count</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">+= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">data</span>
+
+    <span class="s2">def </span><span class="s1">seek</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">whence</span><span class="s3">=</span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">os</span><span class="s3">, </span><span class="s4">'SEEK_SET'</span><span class="s3">, </span><span class="s6">0</span><span class="s3">)):</span>
+        <span class="s5">&quot;&quot;&quot;Allows to reset the stream to restart reading 
+ 
+        :raise ValueError: If offset and whence are not 0&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">offset </span><span class="s3">!= </span><span class="s6">0 </span><span class="s2">or </span><span class="s1">whence </span><span class="s3">!= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">os</span><span class="s3">, </span><span class="s4">'SEEK_SET'</span><span class="s3">, </span><span class="s6">0</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Can only seek to position 0&quot;</span><span class="s3">)</span>
+        <span class="s0"># END handle offset</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_br </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_mm_target</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+
+    <span class="s0">#{ Interface</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">new</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">stream_list</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        Convert the given list of streams into a stream which resolves deltas 
+        when reading from it. 
+ 
+        :param stream_list: two or more stream objects, first stream is a Delta 
+            to the object that you want to resolve, followed by N additional delta 
+            streams. The list's last stream must be a non-delta stream. 
+ 
+        :return: Non-Delta OPackStream object whose stream can be used to obtain 
+            the decompressed resolved data 
+        :raise ValueError: if the stream list cannot be handled&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">stream_list</span><span class="s3">) &lt; </span><span class="s6">2</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Need at least two streams&quot;</span><span class="s3">)</span>
+        <span class="s0"># END single object special handling</span>
+
+        <span class="s2">if </span><span class="s1">stream_list</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">].</span><span class="s1">type_id </span><span class="s2">in </span><span class="s1">delta_types</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span>
+                <span class="s4">&quot;Cannot resolve deltas if there is no base object stream, last one was type: %s&quot; </span><span class="s3">% </span><span class="s1">stream_list</span><span class="s3">[-</span><span class="s6">1</span><span class="s3">].</span><span class="s1">type</span><span class="s3">)</span>
+        <span class="s0"># END check stream</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">(</span><span class="s1">stream_list</span><span class="s3">)</span>
+
+    <span class="s0">#} END interface</span>
+
+    <span class="s0">#{ OInfo like Interface</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_bstream</span><span class="s3">.</span><span class="s1">type</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">type_id</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_bstream</span><span class="s3">.</span><span class="s1">type_id</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;:return: number of uncompressed bytes in the stream&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size</span>
+
+    <span class="s0">#} END oinfo like interface</span>
+
+
+<span class="s0">#} END RO streams</span>
+
+
+<span class="s0">#{ W Streams</span>
+
+<span class="s2">class </span><span class="s1">Sha1Writer</span><span class="s3">:</span>
+
+    <span class="s5">&quot;&quot;&quot;Simple stream writer which produces a sha whenever you like as it degests 
+    everything it is supposed to write&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= </span><span class="s4">&quot;sha1&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">sha1 </span><span class="s3">= </span><span class="s1">make_sha</span><span class="s3">()</span>
+
+    <span class="s0">#{ Stream Interface</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">data</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;:raise IOError: If not all bytes could be written 
+        :param data: byte object 
+        :return: length of incoming data&quot;&quot;&quot;</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">sha1</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+
+    <span class="s0"># END stream interface</span>
+
+    <span class="s0">#{ Interface</span>
+
+    <span class="s2">def </span><span class="s1">sha</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">as_hex</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;:return: sha so far 
+        :param as_hex: if True, sha will be hex-encoded, binary otherwise&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">as_hex</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">sha1</span><span class="s3">.</span><span class="s1">hexdigest</span><span class="s3">()</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">sha1</span><span class="s3">.</span><span class="s1">digest</span><span class="s3">()</span>
+
+    <span class="s0">#} END interface</span>
+
+
+<span class="s2">class </span><span class="s1">FlexibleSha1Writer</span><span class="s3">(</span><span class="s1">Sha1Writer</span><span class="s3">):</span>
+
+    <span class="s5">&quot;&quot;&quot;Writer producing a sha1 while passing on the written bytes to the given 
+    write function&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= </span><span class="s4">'writer'</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">writer</span><span class="s3">):</span>
+        <span class="s1">Sha1Writer</span><span class="s3">.</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">writer </span><span class="s3">= </span><span class="s1">writer</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">data</span><span class="s3">):</span>
+        <span class="s1">Sha1Writer</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">writer</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">ZippedStoreShaWriter</span><span class="s3">(</span><span class="s1">Sha1Writer</span><span class="s3">):</span>
+
+    <span class="s5">&quot;&quot;&quot;Remembers everything someone writes to it and generates a sha&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= (</span><span class="s4">'buf'</span><span class="s3">, </span><span class="s4">'zip'</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">Sha1Writer</span><span class="s3">.</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">buf </span><span class="s3">= </span><span class="s1">BytesIO</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">zip </span><span class="s3">= </span><span class="s1">zlib</span><span class="s3">.</span><span class="s1">compressobj</span><span class="s3">(</span><span class="s1">zlib</span><span class="s3">.</span><span class="s1">Z_BEST_SPEED</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__getattr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">attr</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">buf</span><span class="s3">, </span><span class="s1">attr</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">data</span><span class="s3">):</span>
+        <span class="s1">alen </span><span class="s3">= </span><span class="s1">Sha1Writer</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">buf</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">zip</span><span class="s3">.</span><span class="s1">compress</span><span class="s3">(</span><span class="s1">data</span><span class="s3">))</span>
+
+        <span class="s2">return </span><span class="s1">alen</span>
+
+    <span class="s2">def </span><span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">buf</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">zip</span><span class="s3">.</span><span class="s1">flush</span><span class="s3">())</span>
+
+    <span class="s2">def </span><span class="s1">seek</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">whence</span><span class="s3">=</span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">os</span><span class="s3">, </span><span class="s4">'SEEK_SET'</span><span class="s3">, </span><span class="s6">0</span><span class="s3">)):</span>
+        <span class="s5">&quot;&quot;&quot;Seeking currently only supports to rewind written data 
+        Multiple writes are not supported&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">offset </span><span class="s3">!= </span><span class="s6">0 </span><span class="s2">or </span><span class="s1">whence </span><span class="s3">!= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">os</span><span class="s3">, </span><span class="s4">'SEEK_SET'</span><span class="s3">, </span><span class="s6">0</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Can only seek to position 0&quot;</span><span class="s3">)</span>
+        <span class="s0"># END handle offset</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">buf</span><span class="s3">.</span><span class="s1">seek</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">getvalue</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;:return: string value from the current stream position to the end&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">buf</span><span class="s3">.</span><span class="s1">getvalue</span><span class="s3">()</span>
+
+
+<span class="s2">class </span><span class="s1">FDCompressedSha1Writer</span><span class="s3">(</span><span class="s1">Sha1Writer</span><span class="s3">):</span>
+
+    <span class="s5">&quot;&quot;&quot;Digests data written to it, making the sha available, then compress the 
+    data and write it to the file descriptor 
+ 
+    **Note:** operates on raw file descriptors 
+    **Note:** for this to work, you have to use the close-method of this instance&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= (</span><span class="s4">&quot;fd&quot;</span><span class="s3">, </span><span class="s4">&quot;sha1&quot;</span><span class="s3">, </span><span class="s4">&quot;zip&quot;</span><span class="s3">)</span>
+
+    <span class="s0"># default exception</span>
+    <span class="s1">exc </span><span class="s3">= </span><span class="s1">IOError</span><span class="s3">(</span><span class="s4">&quot;Failed to write all bytes to filedescriptor&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">fd</span><span class="s3">):</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">fd </span><span class="s3">= </span><span class="s1">fd</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">zip </span><span class="s3">= </span><span class="s1">zlib</span><span class="s3">.</span><span class="s1">compressobj</span><span class="s3">(</span><span class="s1">zlib</span><span class="s3">.</span><span class="s1">Z_BEST_SPEED</span><span class="s3">)</span>
+
+    <span class="s0">#{ Stream Interface</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">data</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;:raise IOError: If not all bytes could be written 
+        :return: length of incoming data&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">sha1</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s1">cdata </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">zip</span><span class="s3">.</span><span class="s1">compress</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s1">bytes_written </span><span class="s3">= </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">fd</span><span class="s3">, </span><span class="s1">cdata</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">bytes_written </span><span class="s3">!= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">cdata</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">self</span><span class="s3">.</span><span class="s1">exc</span>
+
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">remainder </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">zip</span><span class="s3">.</span><span class="s1">flush</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">fd</span><span class="s3">, </span><span class="s1">remainder</span><span class="s3">) != </span><span class="s1">len</span><span class="s3">(</span><span class="s1">remainder</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">self</span><span class="s3">.</span><span class="s1">exc</span>
+        <span class="s2">return </span><span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">fd</span><span class="s3">)</span>
+
+    <span class="s0">#} END stream interface</span>
+
+
+<span class="s2">class </span><span class="s1">FDStream</span><span class="s3">:</span>
+
+    <span class="s5">&quot;&quot;&quot;A simple wrapper providing the most basic functions on a file descriptor 
+    with the fileobject interface. Cannot use os.fdopen as the resulting stream 
+    takes ownership&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= (</span><span class="s4">&quot;_fd&quot;</span><span class="s3">, </span><span class="s4">'_pos'</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">fd</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_fd </span><span class="s3">= </span><span class="s1">fd</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_pos </span><span class="s3">= </span><span class="s6">0</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">data</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_pos </span><span class="s3">+= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+        <span class="s1">os</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fd</span><span class="s3">, </span><span class="s1">data</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">read</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">count</span><span class="s3">=</span><span class="s6">0</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">count </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">count </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">getsize</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_filepath</span><span class="s3">)</span>
+        <span class="s0"># END handle read everything</span>
+
+        <span class="s1">bytes </span><span class="s3">= </span><span class="s1">os</span><span class="s3">.</span><span class="s1">read</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fd</span><span class="s3">, </span><span class="s1">count</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_pos </span><span class="s3">+= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">bytes</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">bytes</span>
+
+    <span class="s2">def </span><span class="s1">fileno</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fd</span>
+
+    <span class="s2">def </span><span class="s1">tell</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_pos</span>
+
+    <span class="s2">def </span><span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fd</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">NullStream</span><span class="s3">:</span>
+
+    <span class="s5">&quot;&quot;&quot;A stream that does nothing but providing a stream interface. 
+    Use it like /dev/null&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">read</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">size</span><span class="s3">=</span><span class="s6">0</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s4">''</span>
+
+    <span class="s2">def </span><span class="s1">close</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">pass</span>
+
+    <span class="s2">def </span><span class="s1">write</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">data</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">)</span>
+
+
+<span class="s0">#} END W streams</span>
+</pre>
+</body>
+</html>

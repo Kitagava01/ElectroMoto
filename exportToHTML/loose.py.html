@@ -1,0 +1,277 @@
+<html>
+<head>
+<title>loose.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+loose.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2010, 2011 Sebastian Thiel (byronimo@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitDB and is released under</span>
+<span class="s0"># the New BSD License: https://opensource.org/license/bsd-3-clause/</span>
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">FileDBBase</span><span class="s3">,</span>
+    <span class="s1">ObjectDBR</span><span class="s3">,</span>
+    <span class="s1">ObjectDBW</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">exc </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">BadObject</span><span class="s3">,</span>
+    <span class="s1">AmbiguousObjectName</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">stream </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">DecompressMemMapReader</span><span class="s3">,</span>
+    <span class="s1">FDCompressedSha1Writer</span><span class="s3">,</span>
+    <span class="s1">FDStream</span><span class="s3">,</span>
+    <span class="s1">Sha1Writer</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">OStream</span><span class="s3">,</span>
+    <span class="s1">OInfo</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">file_contents_ro_filepath</span><span class="s3">,</span>
+    <span class="s1">ENOENT</span><span class="s3">,</span>
+    <span class="s1">hex_to_bin</span><span class="s3">,</span>
+    <span class="s1">bin_to_hex</span><span class="s3">,</span>
+    <span class="s1">exists</span><span class="s3">,</span>
+    <span class="s1">chmod</span><span class="s3">,</span>
+    <span class="s1">isfile</span><span class="s3">,</span>
+    <span class="s1">remove</span><span class="s3">,</span>
+    <span class="s1">rename</span><span class="s3">,</span>
+    <span class="s1">dirname</span><span class="s3">,</span>
+    <span class="s1">basename</span><span class="s3">,</span>
+    <span class="s1">join</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">fun </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">chunk_size</span><span class="s3">,</span>
+    <span class="s1">loose_object_header_info</span><span class="s3">,</span>
+    <span class="s1">write_object</span><span class="s3">,</span>
+    <span class="s1">stream_copy</span>
+<span class="s3">)</span>
+
+<span class="s2">from </span><span class="s1">gitdb</span><span class="s3">.</span><span class="s1">utils</span><span class="s3">.</span><span class="s1">encoding </span><span class="s2">import </span><span class="s1">force_bytes</span>
+
+<span class="s2">import </span><span class="s1">tempfile</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">sys</span>
+
+
+<span class="s1">__all__ </span><span class="s3">= (</span><span class="s4">'LooseObjectDB'</span><span class="s3">, )</span>
+
+
+<span class="s2">class </span><span class="s1">LooseObjectDB</span><span class="s3">(</span><span class="s1">FileDBBase</span><span class="s3">, </span><span class="s1">ObjectDBR</span><span class="s3">, </span><span class="s1">ObjectDBW</span><span class="s3">):</span>
+
+    <span class="s5">&quot;&quot;&quot;A database which operates on loose object files&quot;&quot;&quot;</span>
+
+    <span class="s0"># CONFIGURATION</span>
+    <span class="s0"># chunks in which data will be copied between streams</span>
+    <span class="s1">stream_chunk_size </span><span class="s3">= </span><span class="s1">chunk_size</span>
+
+    <span class="s0"># On windows we need to keep it writable, otherwise it cannot be removed</span>
+    <span class="s0"># either</span>
+    <span class="s1">new_objects_mode </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s4">&quot;444&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">os</span><span class="s3">.</span><span class="s1">name </span><span class="s3">== </span><span class="s4">'nt'</span><span class="s3">:</span>
+        <span class="s1">new_objects_mode </span><span class="s3">= </span><span class="s1">int</span><span class="s3">(</span><span class="s4">&quot;644&quot;</span><span class="s3">, </span><span class="s6">8</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">root_path</span><span class="s3">):</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">root_path</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_hexsha_to_file </span><span class="s3">= </span><span class="s1">dict</span><span class="s3">()</span>
+        <span class="s0"># Additional Flags - might be set to 0 after the first failure</span>
+        <span class="s0"># Depending on the root, this might work for some mounts, for others not, which</span>
+        <span class="s0"># is why it is per instance</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_fd_open_flags </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">os</span><span class="s3">, </span><span class="s4">'O_NOATIME'</span><span class="s3">, </span><span class="s6">0</span><span class="s3">)</span>
+
+    <span class="s0">#{ Interface</span>
+    <span class="s2">def </span><span class="s1">object_path</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">hexsha</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: path at which the object with the given hexsha would be stored, 
+            relative to the database root&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">join</span><span class="s3">(</span><span class="s1">hexsha</span><span class="s3">[:</span><span class="s6">2</span><span class="s3">], </span><span class="s1">hexsha</span><span class="s3">[</span><span class="s6">2</span><span class="s3">:])</span>
+
+    <span class="s2">def </span><span class="s1">readable_db_object_path</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">hexsha</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: readable object path to the object identified by hexsha 
+        :raise BadObject: If the object file does not exist&quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_hexsha_to_file</span><span class="s3">[</span><span class="s1">hexsha</span><span class="s3">]</span>
+        <span class="s2">except </span><span class="s1">KeyError</span><span class="s3">:</span>
+            <span class="s2">pass</span>
+        <span class="s0"># END ignore cache misses</span>
+
+        <span class="s0"># try filesystem</span>
+        <span class="s1">path </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">db_path</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">object_path</span><span class="s3">(</span><span class="s1">hexsha</span><span class="s3">))</span>
+        <span class="s2">if </span><span class="s1">exists</span><span class="s3">(</span><span class="s1">path</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_hexsha_to_file</span><span class="s3">[</span><span class="s1">hexsha</span><span class="s3">] = </span><span class="s1">path</span>
+            <span class="s2">return </span><span class="s1">path</span>
+        <span class="s0"># END handle cache</span>
+        <span class="s2">raise </span><span class="s1">BadObject</span><span class="s3">(</span><span class="s1">hexsha</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">partial_to_complete_sha_hex</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">partial_hexsha</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;:return: 20 byte binary sha1 string which matches the given name uniquely 
+        :param name: hexadecimal partial name (bytes or ascii string) 
+        :raise AmbiguousObjectName: 
+        :raise BadObject: &quot;&quot;&quot;</span>
+        <span class="s1">candidate </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">for </span><span class="s1">binsha </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">sha_iter</span><span class="s3">():</span>
+            <span class="s2">if </span><span class="s1">bin_to_hex</span><span class="s3">(</span><span class="s1">binsha</span><span class="s3">).</span><span class="s1">startswith</span><span class="s3">(</span><span class="s1">force_bytes</span><span class="s3">(</span><span class="s1">partial_hexsha</span><span class="s3">)):</span>
+                <span class="s0"># it can't ever find the same object twice</span>
+                <span class="s2">if </span><span class="s1">candidate </span><span class="s2">is not None</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">AmbiguousObjectName</span><span class="s3">(</span><span class="s1">partial_hexsha</span><span class="s3">)</span>
+                <span class="s1">candidate </span><span class="s3">= </span><span class="s1">binsha</span>
+        <span class="s0"># END for each object</span>
+        <span class="s2">if </span><span class="s1">candidate </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">raise </span><span class="s1">BadObject</span><span class="s3">(</span><span class="s1">partial_hexsha</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">candidate</span>
+
+    <span class="s0">#} END interface</span>
+
+    <span class="s2">def </span><span class="s1">_map_loose_object</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">sha</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot; 
+        :return: memory map of that file to allow random read access 
+        :raise BadObject: if object could not be located&quot;&quot;&quot;</span>
+        <span class="s1">db_path </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">db_path</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">object_path</span><span class="s3">(</span><span class="s1">bin_to_hex</span><span class="s3">(</span><span class="s1">sha</span><span class="s3">)))</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">file_contents_ro_filepath</span><span class="s3">(</span><span class="s1">db_path</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fd_open_flags</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">OSError </span><span class="s2">as </span><span class="s1">e</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">e</span><span class="s3">.</span><span class="s1">errno </span><span class="s3">!= </span><span class="s1">ENOENT</span><span class="s3">:</span>
+                <span class="s0"># try again without noatime</span>
+                <span class="s2">try</span><span class="s3">:</span>
+                    <span class="s2">return </span><span class="s1">file_contents_ro_filepath</span><span class="s3">(</span><span class="s1">db_path</span><span class="s3">)</span>
+                <span class="s2">except </span><span class="s1">OSError </span><span class="s2">as </span><span class="s1">new_e</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">BadObject</span><span class="s3">(</span><span class="s1">sha</span><span class="s3">) </span><span class="s2">from </span><span class="s1">new_e</span>
+                <span class="s0"># didn't work because of our flag, don't try it again</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_fd_open_flags </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">raise </span><span class="s1">BadObject</span><span class="s3">(</span><span class="s1">sha</span><span class="s3">) </span><span class="s2">from </span><span class="s1">e</span>
+            <span class="s0"># END handle error</span>
+        <span class="s0"># END exception handling</span>
+
+    <span class="s2">def </span><span class="s1">set_ostream</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">stream</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;:raise TypeError: if the stream does not support the Sha1Writer interface&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">stream </span><span class="s2">is not None and not </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">stream</span><span class="s3">, </span><span class="s1">Sha1Writer</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">TypeError</span><span class="s3">(</span><span class="s4">&quot;Output stream musst support the %s interface&quot; </span><span class="s3">% </span><span class="s1">Sha1Writer</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">super</span><span class="s3">().</span><span class="s1">set_ostream</span><span class="s3">(</span><span class="s1">stream</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">info</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">sha</span><span class="s3">):</span>
+        <span class="s1">m </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_map_loose_object</span><span class="s3">(</span><span class="s1">sha</span><span class="s3">)</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">typ</span><span class="s3">, </span><span class="s1">size </span><span class="s3">= </span><span class="s1">loose_object_header_info</span><span class="s3">(</span><span class="s1">m</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">OInfo</span><span class="s3">(</span><span class="s1">sha</span><span class="s3">, </span><span class="s1">typ</span><span class="s3">, </span><span class="s1">size</span><span class="s3">)</span>
+        <span class="s2">finally</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">m</span><span class="s3">, </span><span class="s4">'close'</span><span class="s3">):</span>
+                <span class="s1">m</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+        <span class="s0"># END assure release of system resources</span>
+
+    <span class="s2">def </span><span class="s1">stream</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">sha</span><span class="s3">):</span>
+        <span class="s1">m </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_map_loose_object</span><span class="s3">(</span><span class="s1">sha</span><span class="s3">)</span>
+        <span class="s1">type</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">stream </span><span class="s3">= </span><span class="s1">DecompressMemMapReader</span><span class="s3">.</span><span class="s1">new</span><span class="s3">(</span><span class="s1">m</span><span class="s3">, </span><span class="s1">close_on_deletion</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">OStream</span><span class="s3">(</span><span class="s1">sha</span><span class="s3">, </span><span class="s1">type</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">stream</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">has_object</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">sha</span><span class="s3">):</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">readable_db_object_path</span><span class="s3">(</span><span class="s1">bin_to_hex</span><span class="s3">(</span><span class="s1">sha</span><span class="s3">))</span>
+            <span class="s2">return True</span>
+        <span class="s2">except </span><span class="s1">BadObject</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+        <span class="s0"># END check existence</span>
+
+    <span class="s2">def </span><span class="s1">store</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">istream</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;note: The sha we produce will be hex by nature&quot;&quot;&quot;</span>
+        <span class="s1">tmp_path </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">writer </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">ostream</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">writer </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s0"># open a tmp file to write the data to</span>
+            <span class="s1">fd</span><span class="s3">, </span><span class="s1">tmp_path </span><span class="s3">= </span><span class="s1">tempfile</span><span class="s3">.</span><span class="s1">mkstemp</span><span class="s3">(</span><span class="s1">prefix</span><span class="s3">=</span><span class="s4">'obj'</span><span class="s3">, </span><span class="s1">dir</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_root_path</span><span class="s3">)</span>
+
+            <span class="s2">if </span><span class="s1">istream</span><span class="s3">.</span><span class="s1">binsha </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s1">writer </span><span class="s3">= </span><span class="s1">FDCompressedSha1Writer</span><span class="s3">(</span><span class="s1">fd</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">writer </span><span class="s3">= </span><span class="s1">FDStream</span><span class="s3">(</span><span class="s1">fd</span><span class="s3">)</span>
+            <span class="s0"># END handle direct stream copies</span>
+        <span class="s0"># END handle custom writer</span>
+
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">istream</span><span class="s3">.</span><span class="s1">binsha </span><span class="s2">is not None</span><span class="s3">:</span>
+                    <span class="s0"># copy as much as possible, the actual uncompressed item size might</span>
+                    <span class="s0"># be smaller than the compressed version</span>
+                    <span class="s1">stream_copy</span><span class="s3">(</span><span class="s1">istream</span><span class="s3">.</span><span class="s1">read</span><span class="s3">, </span><span class="s1">writer</span><span class="s3">.</span><span class="s1">write</span><span class="s3">, </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">maxsize</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">stream_chunk_size</span><span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s0"># write object with header, we have to make a new one</span>
+                    <span class="s1">write_object</span><span class="s3">(</span><span class="s1">istream</span><span class="s3">.</span><span class="s1">type</span><span class="s3">, </span><span class="s1">istream</span><span class="s3">.</span><span class="s1">size</span><span class="s3">, </span><span class="s1">istream</span><span class="s3">.</span><span class="s1">read</span><span class="s3">, </span><span class="s1">writer</span><span class="s3">.</span><span class="s1">write</span><span class="s3">,</span>
+                                 <span class="s1">chunk_size</span><span class="s3">=</span><span class="s1">self</span><span class="s3">.</span><span class="s1">stream_chunk_size</span><span class="s3">)</span>
+                <span class="s0"># END handle direct stream copies</span>
+            <span class="s2">finally</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">tmp_path</span><span class="s3">:</span>
+                    <span class="s1">writer</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+            <span class="s0"># END assure target stream is closed</span>
+        <span class="s2">except</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">tmp_path</span><span class="s3">:</span>
+                <span class="s1">os</span><span class="s3">.</span><span class="s1">remove</span><span class="s3">(</span><span class="s1">tmp_path</span><span class="s3">)</span>
+            <span class="s2">raise</span>
+        <span class="s0"># END assure tmpfile removal on error</span>
+
+        <span class="s1">hexsha </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">istream</span><span class="s3">.</span><span class="s1">binsha</span><span class="s3">:</span>
+            <span class="s1">hexsha </span><span class="s3">= </span><span class="s1">istream</span><span class="s3">.</span><span class="s1">hexsha</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">hexsha </span><span class="s3">= </span><span class="s1">writer</span><span class="s3">.</span><span class="s1">sha</span><span class="s3">(</span><span class="s1">as_hex</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+        <span class="s0"># END handle sha</span>
+
+        <span class="s2">if </span><span class="s1">tmp_path</span><span class="s3">:</span>
+            <span class="s1">obj_path </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">db_path</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">object_path</span><span class="s3">(</span><span class="s1">hexsha</span><span class="s3">))</span>
+            <span class="s1">obj_dir </span><span class="s3">= </span><span class="s1">dirname</span><span class="s3">(</span><span class="s1">obj_path</span><span class="s3">)</span>
+            <span class="s1">os</span><span class="s3">.</span><span class="s1">makedirs</span><span class="s3">(</span><span class="s1">obj_dir</span><span class="s3">, </span><span class="s1">exist_ok</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s0"># END handle destination directory</span>
+            <span class="s0"># rename onto existing doesn't work on NTFS</span>
+            <span class="s2">if </span><span class="s1">isfile</span><span class="s3">(</span><span class="s1">obj_path</span><span class="s3">):</span>
+                <span class="s1">remove</span><span class="s3">(</span><span class="s1">tmp_path</span><span class="s3">)</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">rename</span><span class="s3">(</span><span class="s1">tmp_path</span><span class="s3">, </span><span class="s1">obj_path</span><span class="s3">)</span>
+            <span class="s0"># end rename only if needed</span>
+
+            <span class="s0"># make sure its readable for all ! It started out as rw-- tmp file</span>
+            <span class="s0"># but needs to be rwrr</span>
+            <span class="s1">chmod</span><span class="s3">(</span><span class="s1">obj_path</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">new_objects_mode</span><span class="s3">)</span>
+        <span class="s0"># END handle dry_run</span>
+
+        <span class="s1">istream</span><span class="s3">.</span><span class="s1">binsha </span><span class="s3">= </span><span class="s1">hex_to_bin</span><span class="s3">(</span><span class="s1">hexsha</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">istream</span>
+
+    <span class="s2">def </span><span class="s1">sha_iter</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0"># find all files which look like an object, extract sha from there</span>
+        <span class="s2">for </span><span class="s1">root</span><span class="s3">, </span><span class="s1">dirs</span><span class="s3">, </span><span class="s1">files </span><span class="s2">in </span><span class="s1">os</span><span class="s3">.</span><span class="s1">walk</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">root_path</span><span class="s3">()):</span>
+            <span class="s1">root_base </span><span class="s3">= </span><span class="s1">basename</span><span class="s3">(</span><span class="s1">root</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">root_base</span><span class="s3">) != </span><span class="s6">2</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+
+            <span class="s2">for </span><span class="s1">f </span><span class="s2">in </span><span class="s1">files</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">f</span><span class="s3">) != </span><span class="s6">38</span><span class="s3">:</span>
+                    <span class="s2">continue</span>
+                <span class="s2">yield </span><span class="s1">hex_to_bin</span><span class="s3">(</span><span class="s1">root_base </span><span class="s3">+ </span><span class="s1">f</span><span class="s3">)</span>
+            <span class="s0"># END for each file</span>
+        <span class="s0"># END for each walk iteration</span>
+
+    <span class="s2">def </span><span class="s1">size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">len</span><span class="s3">(</span><span class="s1">tuple</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">sha_iter</span><span class="s3">()))</span>
+</pre>
+</body>
+</html>

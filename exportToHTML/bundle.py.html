@@ -1,0 +1,72 @@
+<html>
+<head>
+<title>bundle.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+bundle.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">virtualenv</span><span class="s2">.</span><span class="s1">seed</span><span class="s2">.</span><span class="s1">wheels</span><span class="s2">.</span><span class="s1">embed </span><span class="s0">import </span><span class="s1">get_embed_wheel</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">periodic_update </span><span class="s0">import </span><span class="s1">periodic_update</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">util </span><span class="s0">import </span><span class="s1">Version</span><span class="s2">, </span><span class="s1">Wheel</span><span class="s2">, </span><span class="s1">discover_wheels</span>
+
+
+<span class="s0">def </span><span class="s1">from_bundle</span><span class="s2">(</span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">version</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">, </span><span class="s1">search_dirs</span><span class="s2">, </span><span class="s1">app_data</span><span class="s2">, </span><span class="s1">do_periodic_update</span><span class="s2">, </span><span class="s1">env</span><span class="s2">):  </span><span class="s3"># noqa: PLR0913</span>
+    <span class="s4">&quot;&quot;&quot;Load the bundled wheel to a cache directory.&quot;&quot;&quot;</span>
+    <span class="s1">of_version </span><span class="s2">= </span><span class="s1">Version</span><span class="s2">.</span><span class="s1">of_version</span><span class="s2">(</span><span class="s1">version</span><span class="s2">)</span>
+    <span class="s1">wheel </span><span class="s2">= </span><span class="s1">load_embed_wheel</span><span class="s2">(</span><span class="s1">app_data</span><span class="s2">, </span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">, </span><span class="s1">of_version</span><span class="s2">)</span>
+
+    <span class="s0">if </span><span class="s1">version </span><span class="s2">!= </span><span class="s1">Version</span><span class="s2">.</span><span class="s1">embed</span><span class="s2">:</span>
+        <span class="s3"># 2. check if we have upgraded embed</span>
+        <span class="s0">if </span><span class="s1">app_data</span><span class="s2">.</span><span class="s1">can_update</span><span class="s2">:</span>
+            <span class="s1">per </span><span class="s2">= </span><span class="s1">do_periodic_update</span>
+            <span class="s1">wheel </span><span class="s2">= </span><span class="s1">periodic_update</span><span class="s2">(</span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">of_version</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">, </span><span class="s1">wheel</span><span class="s2">, </span><span class="s1">search_dirs</span><span class="s2">, </span><span class="s1">app_data</span><span class="s2">, </span><span class="s1">per</span><span class="s2">, </span><span class="s1">env</span><span class="s2">)</span>
+
+        <span class="s3"># 3. acquire from extra search dir</span>
+        <span class="s1">found_wheel </span><span class="s2">= </span><span class="s1">from_dir</span><span class="s2">(</span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">of_version</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">, </span><span class="s1">search_dirs</span><span class="s2">)</span>
+        <span class="s0">if </span><span class="s1">found_wheel </span><span class="s0">is not None and </span><span class="s2">(</span><span class="s1">wheel </span><span class="s0">is None or </span><span class="s1">found_wheel</span><span class="s2">.</span><span class="s1">version_tuple </span><span class="s2">&gt; </span><span class="s1">wheel</span><span class="s2">.</span><span class="s1">version_tuple</span><span class="s2">):</span>
+            <span class="s1">wheel </span><span class="s2">= </span><span class="s1">found_wheel</span>
+    <span class="s0">return </span><span class="s1">wheel</span>
+
+
+<span class="s0">def </span><span class="s1">load_embed_wheel</span><span class="s2">(</span><span class="s1">app_data</span><span class="s2">, </span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">, </span><span class="s1">version</span><span class="s2">):</span>
+    <span class="s1">wheel </span><span class="s2">= </span><span class="s1">get_embed_wheel</span><span class="s2">(</span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">)</span>
+    <span class="s0">if </span><span class="s1">wheel </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s1">version_match </span><span class="s2">= </span><span class="s1">version </span><span class="s2">== </span><span class="s1">wheel</span><span class="s2">.</span><span class="s1">version</span>
+        <span class="s0">if </span><span class="s1">version </span><span class="s0">is None or </span><span class="s1">version_match</span><span class="s2">:</span>
+            <span class="s0">with </span><span class="s1">app_data</span><span class="s2">.</span><span class="s1">ensure_extracted</span><span class="s2">(</span><span class="s1">wheel</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s0">lambda</span><span class="s2">: </span><span class="s1">app_data</span><span class="s2">.</span><span class="s1">house</span><span class="s2">) </span><span class="s0">as </span><span class="s1">wheel_path</span><span class="s2">:</span>
+                <span class="s1">wheel </span><span class="s2">= </span><span class="s1">Wheel</span><span class="s2">(</span><span class="s1">wheel_path</span><span class="s2">)</span>
+        <span class="s0">else</span><span class="s2">:  </span><span class="s3"># if version does not match ignore</span>
+            <span class="s1">wheel </span><span class="s2">= </span><span class="s0">None</span>
+    <span class="s0">return </span><span class="s1">wheel</span>
+
+
+<span class="s0">def </span><span class="s1">from_dir</span><span class="s2">(</span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">version</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">, </span><span class="s1">directories</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;Load a compatible wheel from a given folder.&quot;&quot;&quot;</span>
+    <span class="s0">for </span><span class="s1">folder </span><span class="s0">in </span><span class="s1">directories</span><span class="s2">:</span>
+        <span class="s0">for </span><span class="s1">wheel </span><span class="s0">in </span><span class="s1">discover_wheels</span><span class="s2">(</span><span class="s1">folder</span><span class="s2">, </span><span class="s1">distribution</span><span class="s2">, </span><span class="s1">version</span><span class="s2">, </span><span class="s1">for_py_version</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">wheel</span>
+    <span class="s0">return None</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s5">&quot;from_bundle&quot;</span><span class="s2">,</span>
+    <span class="s5">&quot;load_embed_wheel&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<html>
+<head>
+<title>buf.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+buf.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;Module with a simple buffer implementation using the memory manager&quot;&quot;&quot;</span>
+<span class="s2">import </span><span class="s1">sys</span>
+
+<span class="s1">__all__ </span><span class="s3">= [</span><span class="s4">&quot;SlidingWindowMapBuffer&quot;</span><span class="s3">]</span>
+
+
+<span class="s2">class </span><span class="s1">SlidingWindowMapBuffer</span><span class="s3">:</span>
+
+    <span class="s0">&quot;&quot;&quot;A buffer like object which allows direct byte-wise object and slicing into 
+    memory of a mapped file. The mapping is controlled by the provided cursor. 
+ 
+    The buffer is relative, that is if you map an offset, index 0 will map to the 
+    first byte at the offset you used during initialization or begin_access 
+ 
+    **Note:** Although this type effectively hides the fact that there are mapped windows 
+    underneath, it can unfortunately not be used in any non-pure python method which 
+    needs a buffer or string&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= (</span>
+        <span class="s4">'_c'</span><span class="s3">,           </span><span class="s5"># our cursor</span>
+        <span class="s4">'_size'</span><span class="s3">,        </span><span class="s5"># our supposed size</span>
+    <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">cursor</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">size</span><span class="s3">=</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">maxsize</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">=</span><span class="s6">0</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Initialize the instance to operate on the given cursor. 
+        :param cursor: if not None, the associated cursor to the file you want to access 
+            If None, you have call begin_access before using the buffer and provide a cursor 
+        :param offset: absolute offset in bytes 
+        :param size: the total size of the mapping. Defaults to the maximum possible size 
+            From that point on, the __len__ of the buffer will be the given size or the file size. 
+            If the size is larger than the mappable area, you can only access the actually available 
+            area, although the length of the buffer is reported to be your given size. 
+            Hence it is in your own interest to provide a proper size ! 
+        :param flags: Additional flags to be passed to os.open 
+        :raise ValueError: if the buffer could not achieve a valid state&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_c </span><span class="s3">= </span><span class="s1">cursor</span>
+        <span class="s2">if </span><span class="s1">cursor </span><span class="s2">and not </span><span class="s1">self</span><span class="s3">.</span><span class="s1">begin_access</span><span class="s3">(</span><span class="s1">cursor</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Failed to allocate the buffer - probably the given offset is out of bounds&quot;</span><span class="s3">)</span>
+        <span class="s5"># END handle offset</span>
+
+    <span class="s2">def </span><span class="s1">__del__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">end_access</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">__enter__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">__exit__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">exc_type</span><span class="s3">, </span><span class="s1">exc_value</span><span class="s3">, </span><span class="s1">traceback</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">end_access</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">__len__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size</span>
+
+    <span class="s2">def </span><span class="s1">__getitem__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">i</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">i</span><span class="s3">, </span><span class="s1">slice</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__getslice__</span><span class="s3">(</span><span class="s1">i</span><span class="s3">.</span><span class="s1">start </span><span class="s2">or </span><span class="s6">0</span><span class="s3">, </span><span class="s1">i</span><span class="s3">.</span><span class="s1">stop </span><span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size</span><span class="s3">)</span>
+        <span class="s1">c </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_c</span>
+        <span class="s2">assert </span><span class="s1">c</span><span class="s3">.</span><span class="s1">is_valid</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">i </span><span class="s3">&lt; </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">i </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">+ </span><span class="s1">i</span>
+        <span class="s2">if not </span><span class="s1">c</span><span class="s3">.</span><span class="s1">includes_ofs</span><span class="s3">(</span><span class="s1">i</span><span class="s3">):</span>
+            <span class="s1">c</span><span class="s3">.</span><span class="s1">use_region</span><span class="s3">(</span><span class="s1">i</span><span class="s3">, </span><span class="s6">1</span><span class="s3">)</span>
+        <span class="s5"># END handle region usage</span>
+        <span class="s2">return </span><span class="s1">c</span><span class="s3">.</span><span class="s1">buffer</span><span class="s3">()[</span><span class="s1">i </span><span class="s3">- </span><span class="s1">c</span><span class="s3">.</span><span class="s1">ofs_begin</span><span class="s3">()]</span>
+
+    <span class="s2">def </span><span class="s1">__getslice__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">i</span><span class="s3">, </span><span class="s1">j</span><span class="s3">):</span>
+        <span class="s1">c </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_c</span>
+        <span class="s5"># fast path, slice fully included - safes a concatenate operation and</span>
+        <span class="s5"># should be the default</span>
+        <span class="s2">assert </span><span class="s1">c</span><span class="s3">.</span><span class="s1">is_valid</span><span class="s3">()</span>
+        <span class="s2">if </span><span class="s1">i </span><span class="s3">&lt; </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">i </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">+ </span><span class="s1">i</span>
+        <span class="s2">if </span><span class="s1">j </span><span class="s3">== </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">maxsize</span><span class="s3">:</span>
+            <span class="s1">j </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size</span>
+        <span class="s2">if </span><span class="s1">j </span><span class="s3">&lt; </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">j </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">+ </span><span class="s1">j</span>
+        <span class="s2">if </span><span class="s3">(</span><span class="s1">c</span><span class="s3">.</span><span class="s1">ofs_begin</span><span class="s3">() &lt;= </span><span class="s1">i</span><span class="s3">) </span><span class="s2">and </span><span class="s3">(</span><span class="s1">j </span><span class="s3">&lt; </span><span class="s1">c</span><span class="s3">.</span><span class="s1">ofs_end</span><span class="s3">()):</span>
+            <span class="s1">b </span><span class="s3">= </span><span class="s1">c</span><span class="s3">.</span><span class="s1">ofs_begin</span><span class="s3">()</span>
+            <span class="s2">return </span><span class="s1">c</span><span class="s3">.</span><span class="s1">buffer</span><span class="s3">()[</span><span class="s1">i </span><span class="s3">- </span><span class="s1">b</span><span class="s3">:</span><span class="s1">j </span><span class="s3">- </span><span class="s1">b</span><span class="s3">]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">l </span><span class="s3">= </span><span class="s1">j </span><span class="s3">- </span><span class="s1">i                 </span><span class="s5"># total length</span>
+            <span class="s1">ofs </span><span class="s3">= </span><span class="s1">i</span>
+            <span class="s5"># It's fastest to keep tokens and join later, especially in py3, which was 7 times slower</span>
+            <span class="s5"># in the previous iteration of this code</span>
+            <span class="s1">md </span><span class="s3">= </span><span class="s1">list</span><span class="s3">()</span>
+            <span class="s2">while </span><span class="s1">l</span><span class="s3">:</span>
+                <span class="s1">c</span><span class="s3">.</span><span class="s1">use_region</span><span class="s3">(</span><span class="s1">ofs</span><span class="s3">, </span><span class="s1">l</span><span class="s3">)</span>
+                <span class="s2">assert </span><span class="s1">c</span><span class="s3">.</span><span class="s1">is_valid</span><span class="s3">()</span>
+                <span class="s1">d </span><span class="s3">= </span><span class="s1">c</span><span class="s3">.</span><span class="s1">buffer</span><span class="s3">()[:</span><span class="s1">l</span><span class="s3">]</span>
+                <span class="s1">ofs </span><span class="s3">+= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">d</span><span class="s3">)</span>
+                <span class="s1">l </span><span class="s3">-= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">d</span><span class="s3">)</span>
+                <span class="s5"># Make sure we don't keep references, as c.use_region() might attempt to free resources, but</span>
+                <span class="s5"># can't unless we use pure bytes</span>
+                <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">d</span><span class="s3">, </span><span class="s4">'tobytes'</span><span class="s3">):</span>
+                    <span class="s1">d </span><span class="s3">= </span><span class="s1">d</span><span class="s3">.</span><span class="s1">tobytes</span><span class="s3">()</span>
+                <span class="s1">md</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">d</span><span class="s3">)</span>
+            <span class="s5"># END while there are bytes to read</span>
+            <span class="s2">return </span><span class="s7">b''</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s1">md</span><span class="s3">)</span>
+        <span class="s5"># END fast or slow path</span>
+    <span class="s5">#{ Interface</span>
+
+    <span class="s2">def </span><span class="s1">begin_access</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">cursor</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">size</span><span class="s3">=</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">maxsize</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">=</span><span class="s6">0</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Call this before the first use of this instance. The method was already 
+        called by the constructor in case sufficient information was provided. 
+ 
+        For more information no the parameters, see the __init__ method 
+        :param path: if cursor is None the existing one will be used. 
+        :return: True if the buffer can be used&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">cursor</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_c </span><span class="s3">= </span><span class="s1">cursor</span>
+        <span class="s5"># END update our cursor</span>
+
+        <span class="s5"># reuse existing cursors if possible</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_c </span><span class="s2">is not None and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_c</span><span class="s3">.</span><span class="s1">is_associated</span><span class="s3">():</span>
+            <span class="s1">res </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_c</span><span class="s3">.</span><span class="s1">use_region</span><span class="s3">(</span><span class="s1">offset</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">).</span><span class="s1">is_valid</span><span class="s3">()</span>
+            <span class="s2">if </span><span class="s1">res</span><span class="s3">:</span>
+                <span class="s5"># if given size is too large or default, we computer a proper size</span>
+                <span class="s5"># If its smaller, we assume the combination between offset and size</span>
+                <span class="s5"># as chosen by the user is correct and use it !</span>
+                <span class="s5"># If not, the user is in trouble.</span>
+                <span class="s2">if </span><span class="s1">size </span><span class="s3">&gt; </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_c</span><span class="s3">.</span><span class="s1">file_size</span><span class="s3">():</span>
+                    <span class="s1">size </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_c</span><span class="s3">.</span><span class="s1">file_size</span><span class="s3">() - </span><span class="s1">offset</span>
+                <span class="s5"># END handle size</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">= </span><span class="s1">size</span>
+            <span class="s5"># END set size</span>
+            <span class="s2">return </span><span class="s1">res</span>
+        <span class="s5"># END use our cursor</span>
+        <span class="s2">return False</span>
+
+    <span class="s2">def </span><span class="s1">end_access</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Call this method once you are done using the instance. It is automatically 
+        called on destruction, and should be called just in time to allow system 
+        resources to be freed. 
+ 
+        Once you called end_access, you must call begin access before reusing this instance!&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_c </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_c</span><span class="s3">.</span><span class="s1">unuse_region</span><span class="s3">()</span>
+        <span class="s5"># END unuse region</span>
+
+    <span class="s2">def </span><span class="s1">cursor</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: the currently set cursor which provides access to the data&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_c</span>
+
+    <span class="s5">#}END interface</span>
+</pre>
+</body>
+</html>

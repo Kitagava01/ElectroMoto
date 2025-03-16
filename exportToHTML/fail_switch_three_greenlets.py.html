@@ -1,0 +1,67 @@
+<html>
+<head>
+<title>fail_switch_three_greenlets.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+fail_switch_three_greenlets.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Uses a trace function to switch greenlets at unexpected times. 
+ 
+In the trace function, we switch from the current greenlet to another 
+greenlet, which switches 
+&quot;&quot;&quot;</span>
+<span class="s2">import </span><span class="s1">greenlet</span>
+
+<span class="s1">g1 </span><span class="s3">= </span><span class="s2">None</span>
+<span class="s1">g2 </span><span class="s3">= </span><span class="s2">None</span>
+
+<span class="s1">switch_to_g2 </span><span class="s3">= </span><span class="s2">False</span>
+
+<span class="s2">def </span><span class="s1">tracefunc</span><span class="s3">(*</span><span class="s1">args</span><span class="s3">):</span>
+    <span class="s1">print</span><span class="s3">(</span><span class="s4">'TRACE'</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">)</span>
+    <span class="s2">global </span><span class="s1">switch_to_g2</span>
+    <span class="s2">if </span><span class="s1">switch_to_g2</span><span class="s3">:</span>
+        <span class="s1">switch_to_g2 </span><span class="s3">= </span><span class="s2">False</span>
+        <span class="s1">g2</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">()</span>
+    <span class="s1">print</span><span class="s3">(</span><span class="s4">'</span><span class="s2">\t</span><span class="s4">LEAVE TRACE'</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">g1_run</span><span class="s3">():</span>
+    <span class="s1">print</span><span class="s3">(</span><span class="s4">'In g1_run'</span><span class="s3">)</span>
+    <span class="s2">global </span><span class="s1">switch_to_g2</span>
+    <span class="s1">switch_to_g2 </span><span class="s3">= </span><span class="s2">True</span>
+    <span class="s1">from_parent </span><span class="s3">= </span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">getcurrent</span><span class="s3">().</span><span class="s1">parent</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">()</span>
+    <span class="s1">print</span><span class="s3">(</span><span class="s4">'Return to g1_run'</span><span class="s3">)</span>
+    <span class="s1">print</span><span class="s3">(</span><span class="s4">'From parent'</span><span class="s3">, </span><span class="s1">from_parent</span><span class="s3">)</span>
+
+<span class="s2">def </span><span class="s1">g2_run</span><span class="s3">():</span>
+    <span class="s5">#g1.switch()</span>
+    <span class="s1">greenlet</span><span class="s3">.</span><span class="s1">getcurrent</span><span class="s3">().</span><span class="s1">parent</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">()</span>
+
+<span class="s1">greenlet</span><span class="s3">.</span><span class="s1">settrace</span><span class="s3">(</span><span class="s1">tracefunc</span><span class="s3">)</span>
+
+<span class="s1">g1 </span><span class="s3">= </span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">greenlet</span><span class="s3">(</span><span class="s1">g1_run</span><span class="s3">)</span>
+<span class="s1">g2 </span><span class="s3">= </span><span class="s1">greenlet</span><span class="s3">.</span><span class="s1">greenlet</span><span class="s3">(</span><span class="s1">g2_run</span><span class="s3">)</span>
+
+<span class="s5"># This switch didn't actually finish!</span>
+<span class="s5"># And if it did, it would raise TypeError</span>
+<span class="s5"># because g1_run() doesn't take any arguments.</span>
+<span class="s1">g1</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">(</span><span class="s6">1</span><span class="s3">)</span>
+<span class="s1">print</span><span class="s3">(</span><span class="s4">'Back in main'</span><span class="s3">)</span>
+<span class="s1">g1</span><span class="s3">.</span><span class="s1">switch</span><span class="s3">(</span><span class="s6">2</span><span class="s3">)</span>
+</pre>
+</body>
+</html>

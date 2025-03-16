@@ -1,0 +1,143 @@
+<html>
+<head>
+<title>topological.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #5f826b; font-style: italic;}
+.s3 { color: #cf8e6d;}
+.s4 { color: #bcbec4;}
+.s5 { color: #6aab73;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+topological.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># util/topological.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+
+<span class="s2">&quot;&quot;&quot;Topological sorting algorithms.&quot;&quot;&quot;</span>
+
+<span class="s3">from </span><span class="s1">__future__ </span><span class="s3">import </span><span class="s1">annotations</span>
+
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Any</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Collection</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">DefaultDict</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Iterable</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Iterator</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Sequence</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Set</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Tuple</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">TypeVar</span>
+
+<span class="s3">from </span><span class="s4">.. </span><span class="s3">import </span><span class="s1">util</span>
+<span class="s3">from </span><span class="s4">..</span><span class="s1">exc </span><span class="s3">import </span><span class="s1">CircularDependencyError</span>
+
+<span class="s1">_T </span><span class="s4">= </span><span class="s1">TypeVar</span><span class="s4">(</span><span class="s5">&quot;_T&quot;</span><span class="s4">, </span><span class="s1">bound</span><span class="s4">=</span><span class="s1">Any</span><span class="s4">)</span>
+
+<span class="s1">__all__ </span><span class="s4">= [</span><span class="s5">&quot;sort&quot;</span><span class="s4">, </span><span class="s5">&quot;sort_as_subsets&quot;</span><span class="s4">, </span><span class="s5">&quot;find_cycles&quot;</span><span class="s4">]</span>
+
+
+<span class="s3">def </span><span class="s1">sort_as_subsets</span><span class="s4">(</span>
+    <span class="s1">tuples</span><span class="s4">: </span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">, </span><span class="s1">_T</span><span class="s4">]], </span><span class="s1">allitems</span><span class="s4">: </span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]</span>
+<span class="s4">) </span><span class="s1">-&gt; Iterator</span><span class="s4">[</span><span class="s1">Sequence</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]]:</span>
+    <span class="s1">edges</span><span class="s4">: </span><span class="s1">DefaultDict</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">, </span><span class="s1">Set</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]] = </span><span class="s1">util</span><span class="s4">.</span><span class="s1">defaultdict</span><span class="s4">(</span><span class="s1">set</span><span class="s4">)</span>
+    <span class="s3">for </span><span class="s1">parent</span><span class="s4">, </span><span class="s1">child </span><span class="s3">in </span><span class="s1">tuples</span><span class="s4">:</span>
+        <span class="s1">edges</span><span class="s4">[</span><span class="s1">child</span><span class="s4">].</span><span class="s1">add</span><span class="s4">(</span><span class="s1">parent</span><span class="s4">)</span>
+
+    <span class="s1">todo </span><span class="s4">= </span><span class="s1">list</span><span class="s4">(</span><span class="s1">allitems</span><span class="s4">)</span>
+    <span class="s1">todo_set </span><span class="s4">= </span><span class="s1">set</span><span class="s4">(</span><span class="s1">allitems</span><span class="s4">)</span>
+
+    <span class="s3">while </span><span class="s1">todo_set</span><span class="s4">:</span>
+        <span class="s1">output </span><span class="s4">= []</span>
+        <span class="s3">for </span><span class="s1">node </span><span class="s3">in </span><span class="s1">todo</span><span class="s4">:</span>
+            <span class="s3">if </span><span class="s1">todo_set</span><span class="s4">.</span><span class="s1">isdisjoint</span><span class="s4">(</span><span class="s1">edges</span><span class="s4">[</span><span class="s1">node</span><span class="s4">]):</span>
+                <span class="s1">output</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">node</span><span class="s4">)</span>
+
+        <span class="s3">if not </span><span class="s1">output</span><span class="s4">:</span>
+            <span class="s3">raise </span><span class="s1">CircularDependencyError</span><span class="s4">(</span>
+                <span class="s5">&quot;Circular dependency detected.&quot;</span><span class="s4">,</span>
+                <span class="s1">find_cycles</span><span class="s4">(</span><span class="s1">tuples</span><span class="s4">, </span><span class="s1">allitems</span><span class="s4">),</span>
+                <span class="s1">_gen_edges</span><span class="s4">(</span><span class="s1">edges</span><span class="s4">),</span>
+            <span class="s4">)</span>
+
+        <span class="s1">todo_set</span><span class="s4">.</span><span class="s1">difference_update</span><span class="s4">(</span><span class="s1">output</span><span class="s4">)</span>
+        <span class="s1">todo </span><span class="s4">= [</span><span class="s1">t </span><span class="s3">for </span><span class="s1">t </span><span class="s3">in </span><span class="s1">todo </span><span class="s3">if </span><span class="s1">t </span><span class="s3">in </span><span class="s1">todo_set</span><span class="s4">]</span>
+        <span class="s3">yield </span><span class="s1">output</span>
+
+
+<span class="s3">def </span><span class="s1">sort</span><span class="s4">(</span>
+    <span class="s1">tuples</span><span class="s4">: </span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">, </span><span class="s1">_T</span><span class="s4">]],</span>
+    <span class="s1">allitems</span><span class="s4">: </span><span class="s1">Collection</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">],</span>
+    <span class="s1">deterministic_order</span><span class="s4">: </span><span class="s1">bool </span><span class="s4">= </span><span class="s3">True</span><span class="s4">,</span>
+<span class="s4">) </span><span class="s1">-&gt; Iterator</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]:</span>
+    <span class="s2">&quot;&quot;&quot;sort the given list of items by dependency. 
+ 
+    'tuples' is a list of tuples representing a partial ordering. 
+ 
+    deterministic_order is no longer used, the order is now always 
+    deterministic given the order of &quot;allitems&quot;.    the flag is there 
+    for backwards compatibility with Alembic. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s3">for </span><span class="s1">set_ </span><span class="s3">in </span><span class="s1">sort_as_subsets</span><span class="s4">(</span><span class="s1">tuples</span><span class="s4">, </span><span class="s1">allitems</span><span class="s4">):</span>
+        <span class="s3">yield from </span><span class="s1">set_</span>
+
+
+<span class="s3">def </span><span class="s1">find_cycles</span><span class="s4">(</span>
+    <span class="s1">tuples</span><span class="s4">: </span><span class="s1">Iterable</span><span class="s4">[</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">, </span><span class="s1">_T</span><span class="s4">]], </span><span class="s1">allitems</span><span class="s4">: </span><span class="s1">Iterable</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]</span>
+<span class="s4">) </span><span class="s1">-&gt; Set</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]:</span>
+    <span class="s0"># adapted from:</span>
+    <span class="s0"># https://neopythonic.blogspot.com/2009/01/detecting-cycles-in-directed-graph.html</span>
+
+    <span class="s1">edges</span><span class="s4">: </span><span class="s1">DefaultDict</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">, </span><span class="s1">Set</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]] = </span><span class="s1">util</span><span class="s4">.</span><span class="s1">defaultdict</span><span class="s4">(</span><span class="s1">set</span><span class="s4">)</span>
+    <span class="s3">for </span><span class="s1">parent</span><span class="s4">, </span><span class="s1">child </span><span class="s3">in </span><span class="s1">tuples</span><span class="s4">:</span>
+        <span class="s1">edges</span><span class="s4">[</span><span class="s1">parent</span><span class="s4">].</span><span class="s1">add</span><span class="s4">(</span><span class="s1">child</span><span class="s4">)</span>
+    <span class="s1">nodes_to_test </span><span class="s4">= </span><span class="s1">set</span><span class="s4">(</span><span class="s1">edges</span><span class="s4">)</span>
+
+    <span class="s1">output </span><span class="s4">= </span><span class="s1">set</span><span class="s4">()</span>
+
+    <span class="s0"># we'd like to find all nodes that are</span>
+    <span class="s0"># involved in cycles, so we do the full</span>
+    <span class="s0"># pass through the whole thing for each</span>
+    <span class="s0"># node in the original list.</span>
+
+    <span class="s0"># we can go just through parent edge nodes.</span>
+    <span class="s0"># if a node is only a child and never a parent,</span>
+    <span class="s0"># by definition it can't be part of a cycle.  same</span>
+    <span class="s0"># if it's not in the edges at all.</span>
+    <span class="s3">for </span><span class="s1">node </span><span class="s3">in </span><span class="s1">nodes_to_test</span><span class="s4">:</span>
+        <span class="s1">stack </span><span class="s4">= [</span><span class="s1">node</span><span class="s4">]</span>
+        <span class="s1">todo </span><span class="s4">= </span><span class="s1">nodes_to_test</span><span class="s4">.</span><span class="s1">difference</span><span class="s4">(</span><span class="s1">stack</span><span class="s4">)</span>
+        <span class="s3">while </span><span class="s1">stack</span><span class="s4">:</span>
+            <span class="s1">top </span><span class="s4">= </span><span class="s1">stack</span><span class="s4">[-</span><span class="s6">1</span><span class="s4">]</span>
+            <span class="s3">for </span><span class="s1">node </span><span class="s3">in </span><span class="s1">edges</span><span class="s4">[</span><span class="s1">top</span><span class="s4">]:</span>
+                <span class="s3">if </span><span class="s1">node </span><span class="s3">in </span><span class="s1">stack</span><span class="s4">:</span>
+                    <span class="s1">cyc </span><span class="s4">= </span><span class="s1">stack</span><span class="s4">[</span><span class="s1">stack</span><span class="s4">.</span><span class="s1">index</span><span class="s4">(</span><span class="s1">node</span><span class="s4">) :]</span>
+                    <span class="s1">todo</span><span class="s4">.</span><span class="s1">difference_update</span><span class="s4">(</span><span class="s1">cyc</span><span class="s4">)</span>
+                    <span class="s1">output</span><span class="s4">.</span><span class="s1">update</span><span class="s4">(</span><span class="s1">cyc</span><span class="s4">)</span>
+
+                <span class="s3">if </span><span class="s1">node </span><span class="s3">in </span><span class="s1">todo</span><span class="s4">:</span>
+                    <span class="s1">stack</span><span class="s4">.</span><span class="s1">append</span><span class="s4">(</span><span class="s1">node</span><span class="s4">)</span>
+                    <span class="s1">todo</span><span class="s4">.</span><span class="s1">remove</span><span class="s4">(</span><span class="s1">node</span><span class="s4">)</span>
+                    <span class="s3">break</span>
+            <span class="s3">else</span><span class="s4">:</span>
+                <span class="s1">node </span><span class="s4">= </span><span class="s1">stack</span><span class="s4">.</span><span class="s1">pop</span><span class="s4">()</span>
+    <span class="s3">return </span><span class="s1">output</span>
+
+
+<span class="s3">def </span><span class="s1">_gen_edges</span><span class="s4">(</span><span class="s1">edges</span><span class="s4">: </span><span class="s1">DefaultDict</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">, </span><span class="s1">Set</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">]]) </span><span class="s1">-&gt; Set</span><span class="s4">[</span><span class="s1">Tuple</span><span class="s4">[</span><span class="s1">_T</span><span class="s4">, </span><span class="s1">_T</span><span class="s4">]]:</span>
+    <span class="s3">return </span><span class="s4">{(</span><span class="s1">right</span><span class="s4">, </span><span class="s1">left</span><span class="s4">) </span><span class="s3">for </span><span class="s1">left </span><span class="s3">in </span><span class="s1">edges </span><span class="s3">for </span><span class="s1">right </span><span class="s3">in </span><span class="s1">edges</span><span class="s4">[</span><span class="s1">left</span><span class="s4">]}</span>
+</pre>
+</body>
+</html>

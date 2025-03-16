@@ -1,0 +1,87 @@
+<html>
+<head>
+<title>pyenv_cfg.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+pyenv_cfg.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">OrderedDict</span>
+
+
+<span class="s0">class </span><span class="s1">PyEnvCfg</span><span class="s2">:</span>
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">content</span><span class="s2">, </span><span class="s1">path</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">content </span><span class="s2">= </span><span class="s1">content</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">path </span><span class="s2">= </span><span class="s1">path</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">from_folder</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">folder</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">from_file</span><span class="s2">(</span><span class="s1">folder </span><span class="s2">/ </span><span class="s3">&quot;pyvenv.cfg&quot;</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s0">def </span><span class="s1">from_file</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">path</span><span class="s2">):</span>
+        <span class="s1">content </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_read_values</span><span class="s2">(</span><span class="s1">path</span><span class="s2">) </span><span class="s0">if </span><span class="s1">path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">() </span><span class="s0">else </span><span class="s1">OrderedDict</span><span class="s2">()</span>
+        <span class="s0">return </span><span class="s1">PyEnvCfg</span><span class="s2">(</span><span class="s1">content</span><span class="s2">, </span><span class="s1">path</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">staticmethod</span>
+    <span class="s0">def </span><span class="s1">_read_values</span><span class="s2">(</span><span class="s1">path</span><span class="s2">):</span>
+        <span class="s1">content </span><span class="s2">= </span><span class="s1">OrderedDict</span><span class="s2">()</span>
+        <span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">path</span><span class="s2">.</span><span class="s1">read_text</span><span class="s2">(</span><span class="s1">encoding</span><span class="s2">=</span><span class="s3">&quot;utf-8&quot;</span><span class="s2">).</span><span class="s1">splitlines</span><span class="s2">():</span>
+            <span class="s1">equals_at </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">index</span><span class="s2">(</span><span class="s3">&quot;=&quot;</span><span class="s2">)</span>
+            <span class="s1">key </span><span class="s2">= </span><span class="s1">line</span><span class="s2">[:</span><span class="s1">equals_at</span><span class="s2">].</span><span class="s1">strip</span><span class="s2">()</span>
+            <span class="s1">value </span><span class="s2">= </span><span class="s1">line</span><span class="s2">[</span><span class="s1">equals_at </span><span class="s2">+ </span><span class="s4">1 </span><span class="s2">:].</span><span class="s1">strip</span><span class="s2">()</span>
+            <span class="s1">content</span><span class="s2">[</span><span class="s1">key</span><span class="s2">] = </span><span class="s1">value</span>
+        <span class="s0">return </span><span class="s1">content</span>
+
+    <span class="s0">def </span><span class="s1">write</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">logging</span><span class="s2">.</span><span class="s1">debug</span><span class="s2">(</span><span class="s3">&quot;write %s&quot;</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s1">text </span><span class="s2">= </span><span class="s3">&quot;&quot;</span>
+        <span class="s0">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">value </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">content</span><span class="s2">.</span><span class="s1">items</span><span class="s2">():</span>
+            <span class="s1">normalized_value </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">realpath</span><span class="s2">(</span><span class="s1">value</span><span class="s2">) </span><span class="s0">if </span><span class="s1">value </span><span class="s0">and </span><span class="s1">os</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">exists</span><span class="s2">(</span><span class="s1">value</span><span class="s2">) </span><span class="s0">else </span><span class="s1">value</span>
+            <span class="s1">line </span><span class="s2">= </span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">key</span><span class="s0">} </span><span class="s3">= </span><span class="s0">{</span><span class="s1">normalized_value</span><span class="s0">}</span><span class="s3">&quot;</span>
+            <span class="s1">logging</span><span class="s2">.</span><span class="s1">debug</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s0">\t</span><span class="s3">%s&quot;</span><span class="s2">, </span><span class="s1">line</span><span class="s2">)</span>
+            <span class="s1">text </span><span class="s2">+= </span><span class="s1">line</span>
+            <span class="s1">text </span><span class="s2">+= </span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot;</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">.</span><span class="s1">write_text</span><span class="s2">(</span><span class="s1">text</span><span class="s2">, </span><span class="s1">encoding</span><span class="s2">=</span><span class="s3">&quot;utf-8&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">refresh</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">content </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_read_values</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">content</span>
+
+    <span class="s0">def </span><span class="s1">__setitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">, </span><span class="s1">value</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">content</span><span class="s2">[</span><span class="s1">key</span><span class="s2">] = </span><span class="s1">value</span>
+
+    <span class="s0">def </span><span class="s1">__getitem__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">key</span><span class="s2">):</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">content</span><span class="s2">[</span><span class="s1">key</span><span class="s2">]</span>
+
+    <span class="s0">def </span><span class="s1">__contains__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">item</span><span class="s2">) </span><span class="s1">-&gt; bool</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s1">item </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">content</span>
+
+    <span class="s0">def </span><span class="s1">update</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">content</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">other</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">__repr__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s0">return </span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">__class__</span><span class="s2">.</span><span class="s1">__name__</span><span class="s0">}</span><span class="s3">(path=</span><span class="s0">{</span><span class="s1">self</span><span class="s2">.</span><span class="s1">path</span><span class="s0">}</span><span class="s3">)&quot;</span>
+
+
+<span class="s1">__all__ </span><span class="s2">= [</span>
+    <span class="s3">&quot;PyEnvCfg&quot;</span><span class="s2">,</span>
+<span class="s2">]</span>
+</pre>
+</body>
+</html>

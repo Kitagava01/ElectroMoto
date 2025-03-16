@@ -1,0 +1,923 @@
+<html>
+<head>
+<title>commit.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #cf8e6d;}
+.s5 { color: #2aacb8;}
+.s6 { color: #5f826b; font-style: italic;}
+.s7 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+commit.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright (C) 2008, 2009 Michael Trier (mtrier@gmail.com) and contributors</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of GitPython and is released under the</span>
+<span class="s0"># 3-Clause BSD License: https://opensource.org/license/bsd-3-clause/</span>
+
+<span class="s1">__all__ </span><span class="s2">= [</span><span class="s3">&quot;Commit&quot;</span><span class="s2">]</span>
+
+<span class="s4">from </span><span class="s1">collections </span><span class="s4">import </span><span class="s1">defaultdict</span>
+<span class="s4">import </span><span class="s1">datetime</span>
+<span class="s4">from </span><span class="s1">io </span><span class="s4">import </span><span class="s1">BytesIO</span>
+<span class="s4">import </span><span class="s1">logging</span>
+<span class="s4">import </span><span class="s1">os</span>
+<span class="s4">import </span><span class="s1">re</span>
+<span class="s4">from </span><span class="s1">subprocess </span><span class="s4">import </span><span class="s1">Popen</span><span class="s2">, </span><span class="s1">PIPE</span>
+<span class="s4">import </span><span class="s1">sys</span>
+<span class="s4">from </span><span class="s1">time </span><span class="s4">import </span><span class="s1">altzone</span><span class="s2">, </span><span class="s1">daylight</span><span class="s2">, </span><span class="s1">localtime</span><span class="s2">, </span><span class="s1">time</span><span class="s2">, </span><span class="s1">timezone</span>
+<span class="s4">import </span><span class="s1">warnings</span>
+
+<span class="s4">from </span><span class="s1">gitdb </span><span class="s4">import </span><span class="s1">IStream</span>
+
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">cmd </span><span class="s4">import </span><span class="s1">Git</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">diff </span><span class="s4">import </span><span class="s1">Diffable</span>
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">util </span><span class="s4">import </span><span class="s1">Actor</span><span class="s2">, </span><span class="s1">Stats</span><span class="s2">, </span><span class="s1">finalize_process</span><span class="s2">, </span><span class="s1">hex_to_bin</span>
+
+<span class="s4">from </span><span class="s2">. </span><span class="s4">import </span><span class="s1">base</span>
+<span class="s4">from </span><span class="s2">.</span><span class="s1">tree </span><span class="s4">import </span><span class="s1">Tree</span>
+<span class="s4">from </span><span class="s2">.</span><span class="s1">util </span><span class="s4">import </span><span class="s2">(</span>
+    <span class="s1">Serializable</span><span class="s2">,</span>
+    <span class="s1">TraversableIterableObj</span><span class="s2">,</span>
+    <span class="s1">altz_to_utctz_str</span><span class="s2">,</span>
+    <span class="s1">from_timestamp</span><span class="s2">,</span>
+    <span class="s1">parse_actor_and_date</span><span class="s2">,</span>
+    <span class="s1">parse_date</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s0"># typing ------------------------------------------------------------------</span>
+
+<span class="s4">from </span><span class="s1">typing </span><span class="s4">import </span><span class="s2">(</span>
+    <span class="s1">Any</span><span class="s2">,</span>
+    <span class="s1">Dict</span><span class="s2">,</span>
+    <span class="s1">IO</span><span class="s2">,</span>
+    <span class="s1">Iterator</span><span class="s2">,</span>
+    <span class="s1">List</span><span class="s2">,</span>
+    <span class="s1">Sequence</span><span class="s2">,</span>
+    <span class="s1">Tuple</span><span class="s2">,</span>
+    <span class="s1">TYPE_CHECKING</span><span class="s2">,</span>
+    <span class="s1">Union</span><span class="s2">,</span>
+    <span class="s1">cast</span><span class="s2">,</span>
+<span class="s2">)</span>
+
+<span class="s4">if </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">version_info </span><span class="s2">&gt;= (</span><span class="s5">3</span><span class="s2">, </span><span class="s5">8</span><span class="s2">):</span>
+    <span class="s4">from </span><span class="s1">typing </span><span class="s4">import </span><span class="s1">Literal</span>
+<span class="s4">else</span><span class="s2">:</span>
+    <span class="s4">from </span><span class="s1">typing_extensions </span><span class="s4">import </span><span class="s1">Literal</span>
+
+<span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">types </span><span class="s4">import </span><span class="s1">PathLike</span>
+
+<span class="s4">if </span><span class="s1">TYPE_CHECKING</span><span class="s2">:</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">refs </span><span class="s4">import </span><span class="s1">SymbolicReference</span>
+    <span class="s4">from </span><span class="s1">git</span><span class="s2">.</span><span class="s1">repo </span><span class="s4">import </span><span class="s1">Repo</span>
+
+<span class="s0"># ------------------------------------------------------------------------</span>
+
+<span class="s1">_logger </span><span class="s2">= </span><span class="s1">logging</span><span class="s2">.</span><span class="s1">getLogger</span><span class="s2">(</span><span class="s1">__name__</span><span class="s2">)</span>
+
+
+<span class="s4">class </span><span class="s1">Commit</span><span class="s2">(</span><span class="s1">base</span><span class="s2">.</span><span class="s1">Object</span><span class="s2">, </span><span class="s1">TraversableIterableObj</span><span class="s2">, </span><span class="s1">Diffable</span><span class="s2">, </span><span class="s1">Serializable</span><span class="s2">):</span>
+    <span class="s6">&quot;&quot;&quot;Wraps a git commit object. 
+ 
+    See :manpage:`gitglossary(7)` on &quot;commit object&quot;: 
+    https://git-scm.com/docs/gitglossary#def_commit_object 
+ 
+    :note: 
+        This class will act lazily on some of its attributes and will query the value on 
+        demand only if it involves calling the git binary. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0"># ENVIRONMENT VARIABLES</span>
+    <span class="s0"># Read when creating new commits.</span>
+    <span class="s1">env_author_date </span><span class="s2">= </span><span class="s3">&quot;GIT_AUTHOR_DATE&quot;</span>
+    <span class="s1">env_committer_date </span><span class="s2">= </span><span class="s3">&quot;GIT_COMMITTER_DATE&quot;</span>
+
+    <span class="s0"># CONFIGURATION KEYS</span>
+    <span class="s1">conf_encoding </span><span class="s2">= </span><span class="s3">&quot;i18n.commitencoding&quot;</span>
+
+    <span class="s0"># INVARIANTS</span>
+    <span class="s1">default_encoding </span><span class="s2">= </span><span class="s3">&quot;UTF-8&quot;</span>
+
+    <span class="s1">type</span><span class="s2">: </span><span class="s1">Literal</span><span class="s2">[</span><span class="s3">&quot;commit&quot;</span><span class="s2">] = </span><span class="s3">&quot;commit&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s2">= (</span>
+        <span class="s3">&quot;tree&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;author&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;authored_date&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;author_tz_offset&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;committer&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;committed_date&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;committer_tz_offset&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;message&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;parents&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;encoding&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;gpgsig&quot;</span><span class="s2">,</span>
+    <span class="s2">)</span>
+
+    <span class="s1">_id_attribute_ </span><span class="s2">= </span><span class="s3">&quot;hexsha&quot;</span>
+
+    <span class="s1">parents</span><span class="s2">: </span><span class="s1">Sequence</span><span class="s2">[</span><span class="s3">&quot;Commit&quot;</span><span class="s2">]</span>
+
+    <span class="s4">def </span><span class="s1">__init__</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">,</span>
+        <span class="s1">binsha</span><span class="s2">: </span><span class="s1">bytes</span><span class="s2">,</span>
+        <span class="s1">tree</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Tree</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">author</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Actor</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">authored_date</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">int</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">author_tz_offset</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">float</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">committer</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Actor</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">committed_date</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">int</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">committer_tz_offset</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">float</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">message</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">parents</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Sequence</span><span class="s2">[</span><span class="s3">&quot;Commit&quot;</span><span class="s2">], </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">encoding</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">gpgsig</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s4">None</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s4">None</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Instantiate a new :class:`Commit`. All keyword arguments taking ``None`` as 
+        default will be implicitly set on first query. 
+ 
+        :param binsha: 
+            20 byte sha1. 
+ 
+        :param tree: 
+            A :class:`~git.objects.tree.Tree` object. 
+ 
+        :param author: 
+            The author :class:`~git.util.Actor` object. 
+ 
+        :param authored_date: int_seconds_since_epoch 
+            The authored DateTime - use :func:`time.gmtime` to convert it into a 
+            different format. 
+ 
+        :param author_tz_offset: int_seconds_west_of_utc 
+            The timezone that the `authored_date` is in. 
+ 
+        :param committer: 
+            The committer string, as an :class:`~git.util.Actor` object. 
+ 
+        :param committed_date: int_seconds_since_epoch 
+            The committed DateTime - use :func:`time.gmtime` to convert it into a 
+            different format. 
+ 
+        :param committer_tz_offset: int_seconds_west_of_utc 
+            The timezone that the `committed_date` is in. 
+ 
+        :param message: string 
+            The commit message. 
+ 
+        :param encoding: string 
+            Encoding of the message, defaults to UTF-8. 
+ 
+        :param parents: 
+            List or tuple of :class:`Commit` objects which are our parent(s) in the 
+            commit dependency graph. 
+ 
+        :return: 
+            :class:`Commit` 
+ 
+        :note: 
+            Timezone information is in the same format and in the same sign as what 
+            :func:`time.altzone` returns. The sign is inverted compared to git's UTC 
+            timezone. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">super</span><span class="s2">().</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">binsha</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">binsha </span><span class="s2">= </span><span class="s1">binsha</span>
+        <span class="s4">if </span><span class="s1">tree </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s4">assert </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">tree</span><span class="s2">, </span><span class="s1">Tree</span><span class="s2">), </span><span class="s3">&quot;Tree needs to be a Tree instance, was %s&quot; </span><span class="s2">% </span><span class="s1">type</span><span class="s2">(</span><span class="s1">tree</span><span class="s2">)</span>
+        <span class="s4">if </span><span class="s1">tree </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">tree </span><span class="s2">= </span><span class="s1">tree</span>
+        <span class="s4">if </span><span class="s1">author </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">author </span><span class="s2">= </span><span class="s1">author</span>
+        <span class="s4">if </span><span class="s1">authored_date </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">authored_date </span><span class="s2">= </span><span class="s1">authored_date</span>
+        <span class="s4">if </span><span class="s1">author_tz_offset </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">author_tz_offset </span><span class="s2">= </span><span class="s1">author_tz_offset</span>
+        <span class="s4">if </span><span class="s1">committer </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">committer </span><span class="s2">= </span><span class="s1">committer</span>
+        <span class="s4">if </span><span class="s1">committed_date </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">committed_date </span><span class="s2">= </span><span class="s1">committed_date</span>
+        <span class="s4">if </span><span class="s1">committer_tz_offset </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">committer_tz_offset </span><span class="s2">= </span><span class="s1">committer_tz_offset</span>
+        <span class="s4">if </span><span class="s1">message </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">message </span><span class="s2">= </span><span class="s1">message</span>
+        <span class="s4">if </span><span class="s1">parents </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">parents </span><span class="s2">= </span><span class="s1">parents</span>
+        <span class="s4">if </span><span class="s1">encoding </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">encoding </span><span class="s2">= </span><span class="s1">encoding</span>
+        <span class="s4">if </span><span class="s1">gpgsig </span><span class="s4">is not None</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">gpgsig </span><span class="s2">= </span><span class="s1">gpgsig</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_get_intermediate_items</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">commit</span><span class="s2">: </span><span class="s3">&quot;Commit&quot;</span><span class="s2">) </span><span class="s1">-&gt; Tuple</span><span class="s2">[</span><span class="s3">&quot;Commit&quot;</span><span class="s2">, ...]:</span>
+        <span class="s4">return </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">commit</span><span class="s2">.</span><span class="s1">parents</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_calculate_sha_</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">commit</span><span class="s2">: </span><span class="s3">&quot;Commit&quot;</span><span class="s2">) </span><span class="s1">-&gt; bytes</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Calculate the sha of a commit. 
+ 
+        :param repo: 
+            :class:`~git.repo.base.Repo` object the commit should be part of. 
+ 
+        :param commit: 
+            :class:`Commit` object for which to generate the sha. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s1">stream </span><span class="s2">= </span><span class="s1">BytesIO</span><span class="s2">()</span>
+        <span class="s1">commit</span><span class="s2">.</span><span class="s1">_serialize</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">)</span>
+        <span class="s1">streamlen </span><span class="s2">= </span><span class="s1">stream</span><span class="s2">.</span><span class="s1">tell</span><span class="s2">()</span>
+        <span class="s1">stream</span><span class="s2">.</span><span class="s1">seek</span><span class="s2">(</span><span class="s5">0</span><span class="s2">)</span>
+
+        <span class="s1">istream </span><span class="s2">= </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">odb</span><span class="s2">.</span><span class="s1">store</span><span class="s2">(</span><span class="s1">IStream</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">.</span><span class="s1">type</span><span class="s2">, </span><span class="s1">streamlen</span><span class="s2">, </span><span class="s1">stream</span><span class="s2">))</span>
+        <span class="s4">return </span><span class="s1">istream</span><span class="s2">.</span><span class="s1">binsha</span>
+
+    <span class="s4">def </span><span class="s1">replace</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;Commit&quot;</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Create new commit object from an existing commit object. 
+ 
+        Any values provided as keyword arguments will replace the corresponding 
+        attribute in the new object. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s1">attrs </span><span class="s2">= {</span><span class="s1">k</span><span class="s2">: </span><span class="s1">getattr</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">k</span><span class="s2">) </span><span class="s4">for </span><span class="s1">k </span><span class="s4">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__slots__</span><span class="s2">}</span>
+
+        <span class="s4">for </span><span class="s1">attrname </span><span class="s4">in </span><span class="s1">kwargs</span><span class="s2">:</span>
+            <span class="s4">if </span><span class="s1">attrname </span><span class="s4">not in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__slots__</span><span class="s2">:</span>
+                <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;invalid attribute name&quot;</span><span class="s2">)</span>
+
+        <span class="s1">attrs</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s1">new_commit </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__class__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">NULL_BIN_SHA</span><span class="s2">, **</span><span class="s1">attrs</span><span class="s2">)</span>
+        <span class="s1">new_commit</span><span class="s2">.</span><span class="s1">binsha </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_calculate_sha_</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">new_commit</span><span class="s2">)</span>
+
+        <span class="s4">return </span><span class="s1">new_commit</span>
+
+    <span class="s4">def </span><span class="s1">_set_cache_</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">attr</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s4">None</span><span class="s2">:</span>
+        <span class="s4">if </span><span class="s1">attr </span><span class="s4">in </span><span class="s1">Commit</span><span class="s2">.</span><span class="s1">__slots__</span><span class="s2">:</span>
+            <span class="s0"># Read the data in a chunk, its faster - then provide a file wrapper.</span>
+            <span class="s1">_binsha</span><span class="s2">, </span><span class="s1">_typename</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">size</span><span class="s2">, </span><span class="s1">stream </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">odb</span><span class="s2">.</span><span class="s1">stream</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">binsha</span><span class="s2">)</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">_deserialize</span><span class="s2">(</span><span class="s1">BytesIO</span><span class="s2">(</span><span class="s1">stream</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()))</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s1">super</span><span class="s2">().</span><span class="s1">_set_cache_</span><span class="s2">(</span><span class="s1">attr</span><span class="s2">)</span>
+        <span class="s0"># END handle attrs</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">authored_datetime</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; datetime</span><span class="s2">.</span><span class="s1">datetime</span><span class="s2">:</span>
+        <span class="s4">return </span><span class="s1">from_timestamp</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">authored_date</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">author_tz_offset</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">committed_datetime</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; datetime</span><span class="s2">.</span><span class="s1">datetime</span><span class="s2">:</span>
+        <span class="s4">return </span><span class="s1">from_timestamp</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">committed_date</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">committer_tz_offset</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">summary</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">bytes</span><span class="s2">]:</span>
+        <span class="s6">&quot;&quot;&quot;:return: First line of the commit message&quot;&quot;&quot;</span>
+        <span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">&quot;</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)[</span><span class="s5">0</span><span class="s2">]</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s7">b&quot;</span><span class="s4">\n</span><span class="s7">&quot;</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)[</span><span class="s5">0</span><span class="s2">]</span>
+
+    <span class="s4">def </span><span class="s1">count</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">paths</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s1">Sequence</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">]] = </span><span class="s3">&quot;&quot;</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; int</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Count the number of commits reachable from this commit. 
+ 
+        :param paths: 
+            An optional path or a list of paths restricting the return value to commits 
+            actually containing the paths. 
+ 
+        :param kwargs: 
+            Additional options to be passed to :manpage:`git-rev-list(1)`. They must not 
+            alter the output style of the command, or parsing will yield incorrect 
+            results. 
+ 
+        :return: 
+            An int defining the number of reachable commits 
+        &quot;&quot;&quot;</span>
+        <span class="s0"># Yes, it makes a difference whether empty paths are given or not in our case as</span>
+        <span class="s0"># the empty paths version will ignore merge commits for some reason.</span>
+        <span class="s4">if </span><span class="s1">paths</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">rev_list</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">hexsha</span><span class="s2">, </span><span class="s3">&quot;--&quot;</span><span class="s2">, </span><span class="s1">paths</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">).</span><span class="s1">splitlines</span><span class="s2">())</span>
+        <span class="s4">return </span><span class="s1">len</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">rev_list</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">hexsha</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">).</span><span class="s1">splitlines</span><span class="s2">())</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">name_rev</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot; 
+        :return: 
+            String describing the commits hex sha based on the closest 
+            `~git.refs.reference.Reference`. 
+ 
+        :note: 
+            Mostly useful for UI purposes. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">name_rev</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">iter_items</span><span class="s2">(</span>
+        <span class="s1">cls</span><span class="s2">,</span>
+        <span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">,</span>
+        <span class="s1">rev</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s3">&quot;Commit&quot;</span><span class="s2">, </span><span class="s3">&quot;SymbolicReference&quot;</span><span class="s2">],</span>
+        <span class="s1">paths</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s1">Sequence</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">]] = </span><span class="s3">&quot;&quot;</span><span class="s2">,</span>
+        <span class="s2">**</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; Iterator</span><span class="s2">[</span><span class="s3">&quot;Commit&quot;</span><span class="s2">]:</span>
+        <span class="s6">R&quot;&quot;&quot;Find all commits matching the given criteria. 
+ 
+        :param repo: 
+            The :class:`~git.repo.base.Repo`. 
+ 
+        :param rev: 
+            Revision specifier. See :manpage:`git-rev-parse(1)` for viable options. 
+ 
+        :param paths: 
+            An optional path or list of paths. If set only :class:`Commit`\s that 
+            include the path or paths will be considered. 
+ 
+        :param kwargs: 
+            Optional keyword arguments to :manpage:`git-rev-list(1)` where: 
+ 
+            * ``max_count`` is the maximum number of commits to fetch. 
+            * ``skip`` is the number of commits to skip. 
+            * ``since`` selects all commits since some date, e.g. ``&quot;1970-01-01&quot;``. 
+ 
+        :return: 
+            Iterator yielding :class:`Commit` items. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">if </span><span class="s3">&quot;pretty&quot; </span><span class="s4">in </span><span class="s1">kwargs</span><span class="s2">:</span>
+            <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">&quot;--pretty cannot be used as parsing expects single sha's only&quot;</span><span class="s2">)</span>
+        <span class="s0"># END handle pretty</span>
+
+        <span class="s0"># Use -- in all cases, to prevent possibility of ambiguous arguments.</span>
+        <span class="s0"># See https://github.com/gitpython-developers/GitPython/issues/264.</span>
+
+        <span class="s1">args_list</span><span class="s2">: </span><span class="s1">List</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">] = [</span><span class="s3">&quot;--&quot;</span><span class="s2">]</span>
+
+        <span class="s4">if </span><span class="s1">paths</span><span class="s2">:</span>
+            <span class="s1">paths_tup</span><span class="s2">: </span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, ...]</span>
+            <span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">paths</span><span class="s2">, (</span><span class="s1">str</span><span class="s2">, </span><span class="s1">os</span><span class="s2">.</span><span class="s1">PathLike</span><span class="s2">)):</span>
+                <span class="s1">paths_tup </span><span class="s2">= (</span><span class="s1">paths</span><span class="s2">,)</span>
+            <span class="s4">else</span><span class="s2">:</span>
+                <span class="s1">paths_tup </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">paths</span><span class="s2">)</span>
+
+            <span class="s1">args_list</span><span class="s2">.</span><span class="s1">extend</span><span class="s2">(</span><span class="s1">paths_tup</span><span class="s2">)</span>
+        <span class="s0"># END if paths</span>
+
+        <span class="s1">proc </span><span class="s2">= </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">rev_list</span><span class="s2">(</span><span class="s1">rev</span><span class="s2">, </span><span class="s1">args_list</span><span class="s2">, </span><span class="s1">as_process</span><span class="s2">=</span><span class="s4">True</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+        <span class="s4">return </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_iter_from_process_or_stream</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">proc</span><span class="s2">)</span>
+
+    <span class="s4">def </span><span class="s1">iter_parents</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">paths</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">, </span><span class="s1">Sequence</span><span class="s2">[</span><span class="s1">PathLike</span><span class="s2">]] = </span><span class="s3">&quot;&quot;</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">: </span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; Iterator</span><span class="s2">[</span><span class="s3">&quot;Commit&quot;</span><span class="s2">]:</span>
+        <span class="s6">R&quot;&quot;&quot;Iterate _all_ parents of this commit. 
+ 
+        :param paths: 
+            Optional path or list of paths limiting the :class:`Commit`\s to those that 
+            contain at least one of the paths. 
+ 
+        :param kwargs: 
+            All arguments allowed by :manpage:`git-rev-list(1)`. 
+ 
+        :return: 
+            Iterator yielding :class:`Commit` objects which are parents of ``self`` 
+        &quot;&quot;&quot;</span>
+        <span class="s0"># skip ourselves</span>
+        <span class="s1">skip </span><span class="s2">= </span><span class="s1">kwargs</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s3">&quot;skip&quot;</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)</span>
+        <span class="s4">if </span><span class="s1">skip </span><span class="s2">== </span><span class="s5">0</span><span class="s2">:  </span><span class="s0"># skip ourselves</span>
+            <span class="s1">skip </span><span class="s2">= </span><span class="s5">1</span>
+        <span class="s1">kwargs</span><span class="s2">[</span><span class="s3">&quot;skip&quot;</span><span class="s2">] = </span><span class="s1">skip</span>
+
+        <span class="s4">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">iter_items</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">self</span><span class="s2">, </span><span class="s1">paths</span><span class="s2">, **</span><span class="s1">kwargs</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">stats</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Stats</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Create a git stat from changes between this commit and its first parent 
+        or from all changes done if this is the very first commit. 
+ 
+        :return: 
+            :class:`Stats` 
+        &quot;&quot;&quot;</span>
+        <span class="s4">if not </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parents</span><span class="s2">:</span>
+            <span class="s1">text </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">diff_tree</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">hexsha</span><span class="s2">, </span><span class="s3">&quot;--&quot;</span><span class="s2">, </span><span class="s1">numstat</span><span class="s2">=</span><span class="s4">True</span><span class="s2">, </span><span class="s1">no_renames</span><span class="s2">=</span><span class="s4">True</span><span class="s2">, </span><span class="s1">root</span><span class="s2">=</span><span class="s4">True</span><span class="s2">)</span>
+            <span class="s1">text2 </span><span class="s2">= </span><span class="s3">&quot;&quot;</span>
+            <span class="s4">for </span><span class="s1">line </span><span class="s4">in </span><span class="s1">text</span><span class="s2">.</span><span class="s1">splitlines</span><span class="s2">()[</span><span class="s5">1</span><span class="s2">:]:</span>
+                <span class="s2">(</span><span class="s1">insertions</span><span class="s2">, </span><span class="s1">deletions</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">) = </span><span class="s1">line</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\t</span><span class="s3">&quot;</span><span class="s2">)</span>
+                <span class="s1">text2 </span><span class="s2">+= </span><span class="s3">&quot;%s</span><span class="s4">\t</span><span class="s3">%s</span><span class="s4">\t</span><span class="s3">%s</span><span class="s4">\n</span><span class="s3">&quot; </span><span class="s2">% (</span><span class="s1">insertions</span><span class="s2">, </span><span class="s1">deletions</span><span class="s2">, </span><span class="s1">filename</span><span class="s2">)</span>
+            <span class="s1">text </span><span class="s2">= </span><span class="s1">text2</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s1">text </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">diff</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">parents</span><span class="s2">[</span><span class="s5">0</span><span class="s2">].</span><span class="s1">hexsha</span><span class="s2">, </span><span class="s1">self</span><span class="s2">.</span><span class="s1">hexsha</span><span class="s2">, </span><span class="s3">&quot;--&quot;</span><span class="s2">, </span><span class="s1">numstat</span><span class="s2">=</span><span class="s4">True</span><span class="s2">, </span><span class="s1">no_renames</span><span class="s2">=</span><span class="s4">True</span><span class="s2">)</span>
+        <span class="s4">return </span><span class="s1">Stats</span><span class="s2">.</span><span class="s1">_list_from_string</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">text</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">trailers</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s6">&quot;&quot;&quot;Deprecated. Get the trailers of the message as a dictionary. 
+ 
+        :note: 
+            This property is deprecated, please use either :attr:`trailers_list` or 
+            :attr:`trailers_dict`. 
+ 
+        :return: 
+            Dictionary containing whitespace stripped trailer information. 
+            Only contains the latest instance of each trailer key. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">warnings</span><span class="s2">.</span><span class="s1">warn</span><span class="s2">(</span>
+            <span class="s3">&quot;Commit.trailers is deprecated, use Commit.trailers_list or Commit.trailers_dict instead&quot;</span><span class="s2">,</span>
+            <span class="s1">DeprecationWarning</span><span class="s2">,</span>
+            <span class="s1">stacklevel</span><span class="s2">=</span><span class="s5">2</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s4">return </span><span class="s2">{</span><span class="s1">k</span><span class="s2">: </span><span class="s1">v</span><span class="s2">[</span><span class="s5">0</span><span class="s2">] </span><span class="s4">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s4">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">trailers_dict</span><span class="s2">.</span><span class="s1">items</span><span class="s2">()}</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">trailers_list</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; List</span><span class="s2">[</span><span class="s1">Tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str</span><span class="s2">]]:</span>
+        <span class="s6">&quot;&quot;&quot;Get the trailers of the message as a list. 
+ 
+        Git messages can contain trailer information that are similar to :rfc:`822` 
+        e-mail headers. See :manpage:`git-interpret-trailers(1)`. 
+ 
+        This function calls ``git interpret-trailers --parse`` onto the message to 
+        extract the trailer information, returns the raw trailer data as a list. 
+ 
+        Valid message with trailer:: 
+ 
+            Subject line 
+ 
+            some body information 
+ 
+            another information 
+ 
+            key1: value1.1 
+            key1: value1.2 
+            key2 :    value 2 with inner spaces 
+ 
+        Returned list will look like this:: 
+ 
+            [ 
+                (&quot;key1&quot;, &quot;value1.1&quot;), 
+                (&quot;key1&quot;, &quot;value1.2&quot;), 
+                (&quot;key2&quot;, &quot;value 2 with inner spaces&quot;), 
+            ] 
+ 
+        :return: 
+            List containing key-value tuples of whitespace stripped trailer information. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">cmd </span><span class="s2">= [</span><span class="s3">&quot;git&quot;</span><span class="s2">, </span><span class="s3">&quot;interpret-trailers&quot;</span><span class="s2">, </span><span class="s3">&quot;--parse&quot;</span><span class="s2">]</span>
+        <span class="s1">proc</span><span class="s2">: </span><span class="s1">Git</span><span class="s2">.</span><span class="s1">AutoInterrupt </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">git</span><span class="s2">.</span><span class="s1">execute</span><span class="s2">(  </span><span class="s0"># type: ignore[call-overload]</span>
+            <span class="s1">cmd</span><span class="s2">,</span>
+            <span class="s1">as_process</span><span class="s2">=</span><span class="s4">True</span><span class="s2">,</span>
+            <span class="s1">istream</span><span class="s2">=</span><span class="s1">PIPE</span><span class="s2">,</span>
+        <span class="s2">)</span>
+        <span class="s1">trailer</span><span class="s2">: </span><span class="s1">str </span><span class="s2">= </span><span class="s1">proc</span><span class="s2">.</span><span class="s1">communicate</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">).</span><span class="s1">encode</span><span class="s2">())[</span><span class="s5">0</span><span class="s2">].</span><span class="s1">decode</span><span class="s2">(</span><span class="s3">&quot;utf8&quot;</span><span class="s2">)</span>
+        <span class="s1">trailer </span><span class="s2">= </span><span class="s1">trailer</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+
+        <span class="s4">if not </span><span class="s1">trailer</span><span class="s2">:</span>
+            <span class="s4">return </span><span class="s2">[]</span>
+
+        <span class="s1">trailer_list </span><span class="s2">= []</span>
+        <span class="s4">for </span><span class="s1">t </span><span class="s4">in </span><span class="s1">trailer</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">&quot;</span><span class="s2">):</span>
+            <span class="s1">key</span><span class="s2">, </span><span class="s1">val </span><span class="s2">= </span><span class="s1">t</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;:&quot;</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)</span>
+            <span class="s1">trailer_list</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s1">key</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">(), </span><span class="s1">val</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()))</span>
+
+        <span class="s4">return </span><span class="s1">trailer_list</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">trailers_dict</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; Dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">List</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]]:</span>
+        <span class="s6">&quot;&quot;&quot;Get the trailers of the message as a dictionary. 
+ 
+        Git messages can contain trailer information that are similar to :rfc:`822` 
+        e-mail headers. See :manpage:`git-interpret-trailers(1)`. 
+ 
+        This function calls ``git interpret-trailers --parse`` onto the message to 
+        extract the trailer information. The key value pairs are stripped of leading and 
+        trailing whitespaces before they get saved into a dictionary. 
+ 
+        Valid message with trailer:: 
+ 
+            Subject line 
+ 
+            some body information 
+ 
+            another information 
+ 
+            key1: value1.1 
+            key1: value1.2 
+            key2 :    value 2 with inner spaces 
+ 
+        Returned dictionary will look like this:: 
+ 
+            { 
+                &quot;key1&quot;: [&quot;value1.1&quot;, &quot;value1.2&quot;], 
+                &quot;key2&quot;: [&quot;value 2 with inner spaces&quot;], 
+            } 
+ 
+ 
+        :return: 
+            Dictionary containing whitespace stripped trailer information, mapping 
+            trailer keys to a list of their corresponding values. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">d </span><span class="s2">= </span><span class="s1">defaultdict</span><span class="s2">(</span><span class="s1">list</span><span class="s2">)</span>
+        <span class="s4">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">val </span><span class="s4">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">trailers_list</span><span class="s2">:</span>
+            <span class="s1">d</span><span class="s2">[</span><span class="s1">key</span><span class="s2">].</span><span class="s1">append</span><span class="s2">(</span><span class="s1">val</span><span class="s2">)</span>
+        <span class="s4">return </span><span class="s1">dict</span><span class="s2">(</span><span class="s1">d</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">_iter_from_process_or_stream</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">, </span><span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">, </span><span class="s1">proc_or_stream</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Popen</span><span class="s2">, </span><span class="s1">IO</span><span class="s2">]) </span><span class="s1">-&gt; Iterator</span><span class="s2">[</span><span class="s3">&quot;Commit&quot;</span><span class="s2">]:</span>
+        <span class="s6">&quot;&quot;&quot;Parse out commit information into a list of :class:`Commit` objects. 
+ 
+        We expect one line per commit, and parse the actual commit information directly 
+        from our lighting fast object database. 
+ 
+        :param proc: 
+            :manpage:`git-rev-list(1)` process instance - one sha per line. 
+ 
+        :return: 
+            Iterator supplying :class:`Commit` objects 
+        &quot;&quot;&quot;</span>
+
+        <span class="s0"># def is_proc(inp) -&gt; TypeGuard[Popen]:</span>
+        <span class="s0">#     return hasattr(proc_or_stream, 'wait') and not hasattr(proc_or_stream, 'readline')</span>
+
+        <span class="s0"># def is_stream(inp) -&gt; TypeGuard[IO]:</span>
+        <span class="s0">#     return hasattr(proc_or_stream, 'readline')</span>
+
+        <span class="s4">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">proc_or_stream</span><span class="s2">, </span><span class="s3">&quot;wait&quot;</span><span class="s2">):</span>
+            <span class="s1">proc_or_stream </span><span class="s2">= </span><span class="s1">cast</span><span class="s2">(</span><span class="s1">Popen</span><span class="s2">, </span><span class="s1">proc_or_stream</span><span class="s2">)</span>
+            <span class="s4">if </span><span class="s1">proc_or_stream</span><span class="s2">.</span><span class="s1">stdout </span><span class="s4">is not None</span><span class="s2">:</span>
+                <span class="s1">stream </span><span class="s2">= </span><span class="s1">proc_or_stream</span><span class="s2">.</span><span class="s1">stdout</span>
+        <span class="s4">elif </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">proc_or_stream</span><span class="s2">, </span><span class="s3">&quot;readline&quot;</span><span class="s2">):</span>
+            <span class="s1">proc_or_stream </span><span class="s2">= </span><span class="s1">cast</span><span class="s2">(</span><span class="s1">IO</span><span class="s2">, </span><span class="s1">proc_or_stream</span><span class="s2">)  </span><span class="s0"># type: ignore[redundant-cast]</span>
+            <span class="s1">stream </span><span class="s2">= </span><span class="s1">proc_or_stream</span>
+
+        <span class="s1">readline </span><span class="s2">= </span><span class="s1">stream</span><span class="s2">.</span><span class="s1">readline</span>
+        <span class="s4">while True</span><span class="s2">:</span>
+            <span class="s1">line </span><span class="s2">= </span><span class="s1">readline</span><span class="s2">()</span>
+            <span class="s4">if not </span><span class="s1">line</span><span class="s2">:</span>
+                <span class="s4">break</span>
+            <span class="s1">hexsha </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+            <span class="s4">if </span><span class="s1">len</span><span class="s2">(</span><span class="s1">hexsha</span><span class="s2">) &gt; </span><span class="s5">40</span><span class="s2">:</span>
+                <span class="s0"># Split additional information, as returned by bisect for instance.</span>
+                <span class="s1">hexsha</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">= </span><span class="s1">line</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s4">None</span><span class="s2">, </span><span class="s5">1</span><span class="s2">)</span>
+            <span class="s0"># END handle extra info</span>
+
+            <span class="s4">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">hexsha</span><span class="s2">) == </span><span class="s5">40</span><span class="s2">, </span><span class="s3">&quot;Invalid line: %s&quot; </span><span class="s2">% </span><span class="s1">hexsha</span>
+            <span class="s4">yield </span><span class="s1">cls</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">hex_to_bin</span><span class="s2">(</span><span class="s1">hexsha</span><span class="s2">))</span>
+        <span class="s0"># END for each line in stream</span>
+
+        <span class="s0"># TODO: Review this - it seems process handling got a bit out of control due to</span>
+        <span class="s0"># many developers trying to fix the open file handles issue.</span>
+        <span class="s4">if </span><span class="s1">hasattr</span><span class="s2">(</span><span class="s1">proc_or_stream</span><span class="s2">, </span><span class="s3">&quot;wait&quot;</span><span class="s2">):</span>
+            <span class="s1">proc_or_stream </span><span class="s2">= </span><span class="s1">cast</span><span class="s2">(</span><span class="s1">Popen</span><span class="s2">, </span><span class="s1">proc_or_stream</span><span class="s2">)</span>
+            <span class="s1">finalize_process</span><span class="s2">(</span><span class="s1">proc_or_stream</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">classmethod</span>
+    <span class="s4">def </span><span class="s1">create_from_tree</span><span class="s2">(</span>
+        <span class="s1">cls</span><span class="s2">,</span>
+        <span class="s1">repo</span><span class="s2">: </span><span class="s3">&quot;Repo&quot;</span><span class="s2">,</span>
+        <span class="s1">tree</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s1">Tree</span><span class="s2">, </span><span class="s1">str</span><span class="s2">],</span>
+        <span class="s1">message</span><span class="s2">: </span><span class="s1">str</span><span class="s2">,</span>
+        <span class="s1">parent_commits</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">List</span><span class="s2">[</span><span class="s3">&quot;Commit&quot;</span><span class="s2">]] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">head</span><span class="s2">: </span><span class="s1">bool </span><span class="s2">= </span><span class="s4">False</span><span class="s2">,</span>
+        <span class="s1">author</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">Actor</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">committer</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">Actor</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">author_date</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">datetime</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+        <span class="s1">commit_date</span><span class="s2">: </span><span class="s1">Union</span><span class="s2">[</span><span class="s4">None</span><span class="s2">, </span><span class="s1">str</span><span class="s2">, </span><span class="s1">datetime</span><span class="s2">.</span><span class="s1">datetime</span><span class="s2">] = </span><span class="s4">None</span><span class="s2">,</span>
+    <span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;Commit&quot;</span><span class="s2">:</span>
+        <span class="s6">&quot;&quot;&quot;Commit the given tree, creating a :class:`Commit` object. 
+ 
+        :param repo: 
+            :class:`~git.repo.base.Repo` object the commit should be part of. 
+ 
+        :param tree: 
+            :class:`~git.objects.tree.Tree` object or hex or bin sha. 
+            The tree of the new commit. 
+ 
+        :param message: 
+            Commit message. It may be an empty string if no message is provided. It will 
+            be converted to a string, in any case. 
+ 
+        :param parent_commits: 
+            Optional :class:`Commit` objects to use as parents for the new commit. If 
+            empty list, the commit will have no parents at all and become a root commit. 
+            If ``None``, the current head commit will be the parent of the new commit 
+            object. 
+ 
+        :param head: 
+            If ``True``, the HEAD will be advanced to the new commit automatically. 
+            Otherwise the HEAD will remain pointing on the previous commit. This could 
+            lead to undesired results when diffing files. 
+ 
+        :param author: 
+            The name of the author, optional. 
+            If unset, the repository configuration is used to obtain this value. 
+ 
+        :param committer: 
+            The name of the committer, optional. 
+            If unset, the repository configuration is used to obtain this value. 
+ 
+        :param author_date: 
+            The timestamp for the author field. 
+ 
+        :param commit_date: 
+            The timestamp for the committer field. 
+ 
+        :return: 
+            :class:`Commit` object representing the new commit. 
+ 
+        :note: 
+            Additional information about the committer and author are taken from the 
+            environment or from the git configuration. See :manpage:`git-commit-tree(1)` 
+            for more information. 
+        &quot;&quot;&quot;</span>
+        <span class="s4">if </span><span class="s1">parent_commits </span><span class="s4">is None</span><span class="s2">:</span>
+            <span class="s4">try</span><span class="s2">:</span>
+                <span class="s1">parent_commits </span><span class="s2">= [</span><span class="s1">repo</span><span class="s2">.</span><span class="s1">head</span><span class="s2">.</span><span class="s1">commit</span><span class="s2">]</span>
+            <span class="s4">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+                <span class="s0"># Empty repositories have no head commit.</span>
+                <span class="s1">parent_commits </span><span class="s2">= []</span>
+            <span class="s0"># END handle parent commits</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s4">for </span><span class="s1">p </span><span class="s4">in </span><span class="s1">parent_commits</span><span class="s2">:</span>
+                <span class="s4">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">p</span><span class="s2">, </span><span class="s1">cls</span><span class="s2">):</span>
+                    <span class="s4">raise </span><span class="s1">ValueError</span><span class="s2">(</span><span class="s3">f&quot;Parent commit '</span><span class="s4">{</span><span class="s1">p</span><span class="s4">!r}</span><span class="s3">' must be of type </span><span class="s4">{</span><span class="s1">cls</span><span class="s4">}</span><span class="s3">&quot;</span><span class="s2">)</span>
+            <span class="s0"># END check parent commit types</span>
+        <span class="s0"># END if parent commits are unset</span>
+
+        <span class="s0"># Retrieve all additional information, create a commit object, and serialize it.</span>
+        <span class="s0"># Generally:</span>
+        <span class="s0"># * Environment variables override configuration values.</span>
+        <span class="s0"># * Sensible defaults are set according to the git documentation.</span>
+
+        <span class="s0"># COMMITTER AND AUTHOR INFO</span>
+        <span class="s1">cr </span><span class="s2">= </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">config_reader</span><span class="s2">()</span>
+        <span class="s1">env </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">environ</span>
+
+        <span class="s1">committer </span><span class="s2">= </span><span class="s1">committer </span><span class="s4">or </span><span class="s1">Actor</span><span class="s2">.</span><span class="s1">committer</span><span class="s2">(</span><span class="s1">cr</span><span class="s2">)</span>
+        <span class="s1">author </span><span class="s2">= </span><span class="s1">author </span><span class="s4">or </span><span class="s1">Actor</span><span class="s2">.</span><span class="s1">author</span><span class="s2">(</span><span class="s1">cr</span><span class="s2">)</span>
+
+        <span class="s0"># PARSE THE DATES</span>
+        <span class="s1">unix_time </span><span class="s2">= </span><span class="s1">int</span><span class="s2">(</span><span class="s1">time</span><span class="s2">())</span>
+        <span class="s1">is_dst </span><span class="s2">= </span><span class="s1">daylight </span><span class="s4">and </span><span class="s1">localtime</span><span class="s2">().</span><span class="s1">tm_isdst </span><span class="s2">&gt; </span><span class="s5">0</span>
+        <span class="s1">offset </span><span class="s2">= </span><span class="s1">altzone </span><span class="s4">if </span><span class="s1">is_dst </span><span class="s4">else </span><span class="s1">timezone</span>
+
+        <span class="s1">author_date_str </span><span class="s2">= </span><span class="s1">env</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">.</span><span class="s1">env_author_date</span><span class="s2">, </span><span class="s3">&quot;&quot;</span><span class="s2">)</span>
+        <span class="s4">if </span><span class="s1">author_date</span><span class="s2">:</span>
+            <span class="s1">author_time</span><span class="s2">, </span><span class="s1">author_offset </span><span class="s2">= </span><span class="s1">parse_date</span><span class="s2">(</span><span class="s1">author_date</span><span class="s2">)</span>
+        <span class="s4">elif </span><span class="s1">author_date_str</span><span class="s2">:</span>
+            <span class="s1">author_time</span><span class="s2">, </span><span class="s1">author_offset </span><span class="s2">= </span><span class="s1">parse_date</span><span class="s2">(</span><span class="s1">author_date_str</span><span class="s2">)</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s1">author_time</span><span class="s2">, </span><span class="s1">author_offset </span><span class="s2">= </span><span class="s1">unix_time</span><span class="s2">, </span><span class="s1">offset</span>
+        <span class="s0"># END set author time</span>
+
+        <span class="s1">committer_date_str </span><span class="s2">= </span><span class="s1">env</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s1">cls</span><span class="s2">.</span><span class="s1">env_committer_date</span><span class="s2">, </span><span class="s3">&quot;&quot;</span><span class="s2">)</span>
+        <span class="s4">if </span><span class="s1">commit_date</span><span class="s2">:</span>
+            <span class="s1">committer_time</span><span class="s2">, </span><span class="s1">committer_offset </span><span class="s2">= </span><span class="s1">parse_date</span><span class="s2">(</span><span class="s1">commit_date</span><span class="s2">)</span>
+        <span class="s4">elif </span><span class="s1">committer_date_str</span><span class="s2">:</span>
+            <span class="s1">committer_time</span><span class="s2">, </span><span class="s1">committer_offset </span><span class="s2">= </span><span class="s1">parse_date</span><span class="s2">(</span><span class="s1">committer_date_str</span><span class="s2">)</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s1">committer_time</span><span class="s2">, </span><span class="s1">committer_offset </span><span class="s2">= </span><span class="s1">unix_time</span><span class="s2">, </span><span class="s1">offset</span>
+        <span class="s0"># END set committer time</span>
+
+        <span class="s0"># Assume UTF-8 encoding.</span>
+        <span class="s1">enc_section</span><span class="s2">, </span><span class="s1">enc_option </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">conf_encoding</span><span class="s2">.</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;.&quot;</span><span class="s2">)</span>
+        <span class="s1">conf_encoding </span><span class="s2">= </span><span class="s1">cr</span><span class="s2">.</span><span class="s1">get_value</span><span class="s2">(</span><span class="s1">enc_section</span><span class="s2">, </span><span class="s1">enc_option</span><span class="s2">, </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">default_encoding</span><span class="s2">)</span>
+        <span class="s4">if not </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">conf_encoding</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s4">raise </span><span class="s1">TypeError</span><span class="s2">(</span><span class="s3">&quot;conf_encoding could not be coerced to str&quot;</span><span class="s2">)</span>
+
+        <span class="s0"># If the tree is no object, make sure we create one - otherwise the created</span>
+        <span class="s0"># commit object is invalid.</span>
+        <span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">tree</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s1">tree </span><span class="s2">= </span><span class="s1">repo</span><span class="s2">.</span><span class="s1">tree</span><span class="s2">(</span><span class="s1">tree</span><span class="s2">)</span>
+        <span class="s0"># END tree conversion</span>
+
+        <span class="s0"># CREATE NEW COMMIT</span>
+        <span class="s1">new_commit </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">(</span>
+            <span class="s1">repo</span><span class="s2">,</span>
+            <span class="s1">cls</span><span class="s2">.</span><span class="s1">NULL_BIN_SHA</span><span class="s2">,</span>
+            <span class="s1">tree</span><span class="s2">,</span>
+            <span class="s1">author</span><span class="s2">,</span>
+            <span class="s1">author_time</span><span class="s2">,</span>
+            <span class="s1">author_offset</span><span class="s2">,</span>
+            <span class="s1">committer</span><span class="s2">,</span>
+            <span class="s1">committer_time</span><span class="s2">,</span>
+            <span class="s1">committer_offset</span><span class="s2">,</span>
+            <span class="s1">message</span><span class="s2">,</span>
+            <span class="s1">parent_commits</span><span class="s2">,</span>
+            <span class="s1">conf_encoding</span><span class="s2">,</span>
+        <span class="s2">)</span>
+
+        <span class="s1">new_commit</span><span class="s2">.</span><span class="s1">binsha </span><span class="s2">= </span><span class="s1">cls</span><span class="s2">.</span><span class="s1">_calculate_sha_</span><span class="s2">(</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">new_commit</span><span class="s2">)</span>
+
+        <span class="s4">if </span><span class="s1">head</span><span class="s2">:</span>
+            <span class="s0"># Need late import here, importing git at the very beginning throws as</span>
+            <span class="s0"># well...</span>
+            <span class="s4">import </span><span class="s1">git</span><span class="s2">.</span><span class="s1">refs</span>
+
+            <span class="s4">try</span><span class="s2">:</span>
+                <span class="s1">repo</span><span class="s2">.</span><span class="s1">head</span><span class="s2">.</span><span class="s1">set_commit</span><span class="s2">(</span><span class="s1">new_commit</span><span class="s2">, </span><span class="s1">logmsg</span><span class="s2">=</span><span class="s1">message</span><span class="s2">)</span>
+            <span class="s4">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+                <span class="s0"># head is not yet set to the ref our HEAD points to.</span>
+                <span class="s0"># Happens on first commit.</span>
+                <span class="s1">master </span><span class="s2">= </span><span class="s1">git</span><span class="s2">.</span><span class="s1">refs</span><span class="s2">.</span><span class="s1">Head</span><span class="s2">.</span><span class="s1">create</span><span class="s2">(</span>
+                    <span class="s1">repo</span><span class="s2">,</span>
+                    <span class="s1">repo</span><span class="s2">.</span><span class="s1">head</span><span class="s2">.</span><span class="s1">ref</span><span class="s2">,</span>
+                    <span class="s1">new_commit</span><span class="s2">,</span>
+                    <span class="s1">logmsg</span><span class="s2">=</span><span class="s3">&quot;commit (initial): %s&quot; </span><span class="s2">% </span><span class="s1">message</span><span class="s2">,</span>
+                <span class="s2">)</span>
+                <span class="s1">repo</span><span class="s2">.</span><span class="s1">head</span><span class="s2">.</span><span class="s1">set_reference</span><span class="s2">(</span><span class="s1">master</span><span class="s2">, </span><span class="s1">logmsg</span><span class="s2">=</span><span class="s3">&quot;commit: Switching to %s&quot; </span><span class="s2">% </span><span class="s1">master</span><span class="s2">)</span>
+            <span class="s0"># END handle empty repositories</span>
+        <span class="s0"># END advance head handling</span>
+
+        <span class="s4">return </span><span class="s1">new_commit</span>
+
+    <span class="s0"># { Serializable Implementation</span>
+
+    <span class="s4">def </span><span class="s1">_serialize</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">stream</span><span class="s2">: </span><span class="s1">BytesIO</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;Commit&quot;</span><span class="s2">:</span>
+        <span class="s1">write </span><span class="s2">= </span><span class="s1">stream</span><span class="s2">.</span><span class="s1">write</span>
+        <span class="s1">write</span><span class="s2">((</span><span class="s3">&quot;tree %s</span><span class="s4">\n</span><span class="s3">&quot; </span><span class="s2">% </span><span class="s1">self</span><span class="s2">.</span><span class="s1">tree</span><span class="s2">).</span><span class="s1">encode</span><span class="s2">(</span><span class="s3">&quot;ascii&quot;</span><span class="s2">))</span>
+        <span class="s4">for </span><span class="s1">p </span><span class="s4">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">parents</span><span class="s2">:</span>
+            <span class="s1">write</span><span class="s2">((</span><span class="s3">&quot;parent %s</span><span class="s4">\n</span><span class="s3">&quot; </span><span class="s2">% </span><span class="s1">p</span><span class="s2">).</span><span class="s1">encode</span><span class="s2">(</span><span class="s3">&quot;ascii&quot;</span><span class="s2">))</span>
+
+        <span class="s1">a </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">author</span>
+        <span class="s1">aname </span><span class="s2">= </span><span class="s1">a</span><span class="s2">.</span><span class="s1">name</span>
+        <span class="s1">c </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">committer</span>
+        <span class="s1">fmt </span><span class="s2">= </span><span class="s3">&quot;%s %s &lt;%s&gt; %s %s</span><span class="s4">\n</span><span class="s3">&quot;</span>
+        <span class="s1">write</span><span class="s2">(</span>
+            <span class="s2">(</span>
+                <span class="s1">fmt</span>
+                <span class="s2">% (</span>
+                    <span class="s3">&quot;author&quot;</span><span class="s2">,</span>
+                    <span class="s1">aname</span><span class="s2">,</span>
+                    <span class="s1">a</span><span class="s2">.</span><span class="s1">email</span><span class="s2">,</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">authored_date</span><span class="s2">,</span>
+                    <span class="s1">altz_to_utctz_str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">author_tz_offset</span><span class="s2">),</span>
+                <span class="s2">)</span>
+            <span class="s2">).</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">)</span>
+        <span class="s2">)</span>
+
+        <span class="s0"># Encode committer.</span>
+        <span class="s1">aname </span><span class="s2">= </span><span class="s1">c</span><span class="s2">.</span><span class="s1">name</span>
+        <span class="s1">write</span><span class="s2">(</span>
+            <span class="s2">(</span>
+                <span class="s1">fmt</span>
+                <span class="s2">% (</span>
+                    <span class="s3">&quot;committer&quot;</span><span class="s2">,</span>
+                    <span class="s1">aname</span><span class="s2">,</span>
+                    <span class="s1">c</span><span class="s2">.</span><span class="s1">email</span><span class="s2">,</span>
+                    <span class="s1">self</span><span class="s2">.</span><span class="s1">committed_date</span><span class="s2">,</span>
+                    <span class="s1">altz_to_utctz_str</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">committer_tz_offset</span><span class="s2">),</span>
+                <span class="s2">)</span>
+            <span class="s2">).</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">)</span>
+        <span class="s2">)</span>
+
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding </span><span class="s2">!= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">default_encoding</span><span class="s2">:</span>
+            <span class="s1">write</span><span class="s2">((</span><span class="s3">&quot;encoding %s</span><span class="s4">\n</span><span class="s3">&quot; </span><span class="s2">% </span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">).</span><span class="s1">encode</span><span class="s2">(</span><span class="s3">&quot;ascii&quot;</span><span class="s2">))</span>
+
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">__getattribute__</span><span class="s2">(</span><span class="s3">&quot;gpgsig&quot;</span><span class="s2">):</span>
+                <span class="s1">write</span><span class="s2">(</span><span class="s7">b&quot;gpgsig&quot;</span><span class="s2">)</span>
+                <span class="s4">for </span><span class="s1">sigline </span><span class="s4">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">gpgsig</span><span class="s2">.</span><span class="s1">rstrip</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">&quot;</span><span class="s2">).</span><span class="s1">split</span><span class="s2">(</span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">&quot;</span><span class="s2">):</span>
+                    <span class="s1">write</span><span class="s2">((</span><span class="s3">&quot; &quot; </span><span class="s2">+ </span><span class="s1">sigline </span><span class="s2">+ </span><span class="s3">&quot;</span><span class="s4">\n</span><span class="s3">&quot;</span><span class="s2">).</span><span class="s1">encode</span><span class="s2">(</span><span class="s3">&quot;ascii&quot;</span><span class="s2">))</span>
+        <span class="s4">except </span><span class="s1">AttributeError</span><span class="s2">:</span>
+            <span class="s4">pass</span>
+
+        <span class="s1">write</span><span class="s2">(</span><span class="s7">b&quot;</span><span class="s4">\n</span><span class="s7">&quot;</span><span class="s2">)</span>
+
+        <span class="s0"># Write plain bytes, be sure its encoded according to our encoding.</span>
+        <span class="s4">if </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">, </span><span class="s1">str</span><span class="s2">):</span>
+            <span class="s1">write</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">.</span><span class="s1">encode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">))</span>
+        <span class="s4">else</span><span class="s2">:</span>
+            <span class="s1">write</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">)</span>
+        <span class="s0"># END handle encoding</span>
+        <span class="s4">return </span><span class="s1">self</span>
+
+    <span class="s4">def </span><span class="s1">_deserialize</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">stream</span><span class="s2">: </span><span class="s1">BytesIO</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s3">&quot;Commit&quot;</span><span class="s2">:</span>
+        <span class="s1">readline </span><span class="s2">= </span><span class="s1">stream</span><span class="s2">.</span><span class="s1">readline</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">tree </span><span class="s2">= </span><span class="s1">Tree</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">hex_to_bin</span><span class="s2">(</span><span class="s1">readline</span><span class="s2">().</span><span class="s1">split</span><span class="s2">()[</span><span class="s5">1</span><span class="s2">]), </span><span class="s1">Tree</span><span class="s2">.</span><span class="s1">tree_id </span><span class="s2">&lt;&lt; </span><span class="s5">12</span><span class="s2">, </span><span class="s3">&quot;&quot;</span><span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">parents </span><span class="s2">= []</span>
+        <span class="s1">next_line </span><span class="s2">= </span><span class="s4">None</span>
+        <span class="s4">while True</span><span class="s2">:</span>
+            <span class="s1">parent_line </span><span class="s2">= </span><span class="s1">readline</span><span class="s2">()</span>
+            <span class="s4">if not </span><span class="s1">parent_line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s7">b&quot;parent&quot;</span><span class="s2">):</span>
+                <span class="s1">next_line </span><span class="s2">= </span><span class="s1">parent_line</span>
+                <span class="s4">break</span>
+            <span class="s0"># END abort reading parents</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">parents</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">)(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">repo</span><span class="s2">, </span><span class="s1">hex_to_bin</span><span class="s2">(</span><span class="s1">parent_line</span><span class="s2">.</span><span class="s1">split</span><span class="s2">()[-</span><span class="s5">1</span><span class="s2">].</span><span class="s1">decode</span><span class="s2">(</span><span class="s3">&quot;ascii&quot;</span><span class="s2">))))</span>
+        <span class="s0"># END for each parent line</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">parents </span><span class="s2">= </span><span class="s1">tuple</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">parents</span><span class="s2">)</span>
+
+        <span class="s0"># We don't know actual author encoding before we have parsed it, so keep the</span>
+        <span class="s0"># lines around.</span>
+        <span class="s1">author_line </span><span class="s2">= </span><span class="s1">next_line</span>
+        <span class="s1">committer_line </span><span class="s2">= </span><span class="s1">readline</span><span class="s2">()</span>
+
+        <span class="s0"># We might run into one or more mergetag blocks, skip those for now.</span>
+        <span class="s1">next_line </span><span class="s2">= </span><span class="s1">readline</span><span class="s2">()</span>
+        <span class="s4">while </span><span class="s1">next_line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s7">b&quot;mergetag &quot;</span><span class="s2">):</span>
+            <span class="s1">next_line </span><span class="s2">= </span><span class="s1">readline</span><span class="s2">()</span>
+            <span class="s4">while </span><span class="s1">next_line</span><span class="s2">.</span><span class="s1">startswith</span><span class="s2">(</span><span class="s7">b&quot; &quot;</span><span class="s2">):</span>
+                <span class="s1">next_line </span><span class="s2">= </span><span class="s1">readline</span><span class="s2">()</span>
+        <span class="s0"># END skip mergetags</span>
+
+        <span class="s0"># Now we can have the encoding line, or an empty line followed by the optional</span>
+        <span class="s0"># message.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">encoding </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">default_encoding</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">gpgsig </span><span class="s2">= </span><span class="s3">&quot;&quot;</span>
+
+        <span class="s0"># Read headers.</span>
+        <span class="s1">enc </span><span class="s2">= </span><span class="s1">next_line</span>
+        <span class="s1">buf </span><span class="s2">= </span><span class="s1">enc</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+        <span class="s4">while </span><span class="s1">buf</span><span class="s2">:</span>
+            <span class="s4">if </span><span class="s1">buf</span><span class="s2">[</span><span class="s5">0</span><span class="s2">:</span><span class="s5">10</span><span class="s2">] == </span><span class="s7">b&quot;encoding &quot;</span><span class="s2">:</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">encoding </span><span class="s2">= </span><span class="s1">buf</span><span class="s2">[</span><span class="s1">buf</span><span class="s2">.</span><span class="s1">find</span><span class="s2">(</span><span class="s7">b&quot; &quot;</span><span class="s2">) + </span><span class="s5">1 </span><span class="s2">:].</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">, </span><span class="s3">&quot;ignore&quot;</span><span class="s2">)</span>
+            <span class="s4">elif </span><span class="s1">buf</span><span class="s2">[</span><span class="s5">0</span><span class="s2">:</span><span class="s5">7</span><span class="s2">] == </span><span class="s7">b&quot;gpgsig &quot;</span><span class="s2">:</span>
+                <span class="s1">sig </span><span class="s2">= </span><span class="s1">buf</span><span class="s2">[</span><span class="s1">buf</span><span class="s2">.</span><span class="s1">find</span><span class="s2">(</span><span class="s7">b&quot; &quot;</span><span class="s2">) + </span><span class="s5">1 </span><span class="s2">:] + </span><span class="s7">b&quot;</span><span class="s4">\n</span><span class="s7">&quot;</span>
+                <span class="s1">is_next_header </span><span class="s2">= </span><span class="s4">False</span>
+                <span class="s4">while True</span><span class="s2">:</span>
+                    <span class="s1">sigbuf </span><span class="s2">= </span><span class="s1">readline</span><span class="s2">()</span>
+                    <span class="s4">if not </span><span class="s1">sigbuf</span><span class="s2">:</span>
+                        <span class="s4">break</span>
+                    <span class="s4">if </span><span class="s1">sigbuf</span><span class="s2">[</span><span class="s5">0</span><span class="s2">:</span><span class="s5">1</span><span class="s2">] != </span><span class="s7">b&quot; &quot;</span><span class="s2">:</span>
+                        <span class="s1">buf </span><span class="s2">= </span><span class="s1">sigbuf</span><span class="s2">.</span><span class="s1">strip</span><span class="s2">()</span>
+                        <span class="s1">is_next_header </span><span class="s2">= </span><span class="s4">True</span>
+                        <span class="s4">break</span>
+                    <span class="s1">sig </span><span class="s2">+= </span><span class="s1">sigbuf</span><span class="s2">[</span><span class="s5">1</span><span class="s2">:]</span>
+                <span class="s0"># END read all signature</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">gpgsig </span><span class="s2">= </span><span class="s1">sig</span><span class="s2">.</span><span class="s1">rstrip</span><span class="s2">(</span><span class="s7">b&quot;</span><span class="s4">\n</span><span class="s7">&quot;</span><span class="s2">).</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">, </span><span class="s3">&quot;ignore&quot;</span><span class="s2">)</span>
+                <span class="s4">if </span><span class="s1">is_next_header</span><span class="s2">:</span>
+                    <span class="s4">continue</span>
+            <span class="s1">buf </span><span class="s2">= </span><span class="s1">readline</span><span class="s2">().</span><span class="s1">strip</span><span class="s2">()</span>
+
+        <span class="s0"># Decode the author's name.</span>
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s2">(</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">author</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">authored_date</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">author_tz_offset</span><span class="s2">,</span>
+            <span class="s2">) = </span><span class="s1">parse_actor_and_date</span><span class="s2">(</span><span class="s1">author_line</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">, </span><span class="s3">&quot;replace&quot;</span><span class="s2">))</span>
+        <span class="s4">except </span><span class="s1">UnicodeDecodeError</span><span class="s2">:</span>
+            <span class="s1">_logger</span><span class="s2">.</span><span class="s1">error</span><span class="s2">(</span>
+                <span class="s3">&quot;Failed to decode author line '%s' using encoding %s&quot;</span><span class="s2">,</span>
+                <span class="s1">author_line</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">,</span>
+                <span class="s1">exc_info</span><span class="s2">=</span><span class="s4">True</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s2">(</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">committer</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">committed_date</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">committer_tz_offset</span><span class="s2">,</span>
+            <span class="s2">) = </span><span class="s1">parse_actor_and_date</span><span class="s2">(</span><span class="s1">committer_line</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">, </span><span class="s3">&quot;replace&quot;</span><span class="s2">))</span>
+        <span class="s4">except </span><span class="s1">UnicodeDecodeError</span><span class="s2">:</span>
+            <span class="s1">_logger</span><span class="s2">.</span><span class="s1">error</span><span class="s2">(</span>
+                <span class="s3">&quot;Failed to decode committer line '%s' using encoding %s&quot;</span><span class="s2">,</span>
+                <span class="s1">committer_line</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">,</span>
+                <span class="s1">exc_info</span><span class="s2">=</span><span class="s4">True</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0"># END handle author's encoding</span>
+
+        <span class="s0"># A stream from our data simply gives us the plain message.</span>
+        <span class="s0"># The end of our message stream is marked with a newline that we strip.</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">message </span><span class="s2">= </span><span class="s1">stream</span><span class="s2">.</span><span class="s1">read</span><span class="s2">()</span>
+        <span class="s4">try</span><span class="s2">:</span>
+            <span class="s1">self</span><span class="s2">.</span><span class="s1">message </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">.</span><span class="s1">decode</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">, </span><span class="s3">&quot;replace&quot;</span><span class="s2">)</span>
+        <span class="s4">except </span><span class="s1">UnicodeDecodeError</span><span class="s2">:</span>
+            <span class="s1">_logger</span><span class="s2">.</span><span class="s1">error</span><span class="s2">(</span>
+                <span class="s3">&quot;Failed to decode message '%s' using encoding %s&quot;</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">encoding</span><span class="s2">,</span>
+                <span class="s1">exc_info</span><span class="s2">=</span><span class="s4">True</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s0"># END exception handling</span>
+
+        <span class="s4">return </span><span class="s1">self</span>
+
+    <span class="s0"># } END serializable implementation</span>
+
+    <span class="s2">@</span><span class="s1">property</span>
+    <span class="s4">def </span><span class="s1">co_authors</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; List</span><span class="s2">[</span><span class="s1">Actor</span><span class="s2">]:</span>
+        <span class="s6">&quot;&quot;&quot;Search the commit message for any co-authors of this commit. 
+ 
+        Details on co-authors: 
+        https://github.blog/2018-01-29-commit-together-with-co-authors/ 
+ 
+        :return: 
+            List of co-authors for this commit (as :class:`~git.util.Actor` objects). 
+        &quot;&quot;&quot;</span>
+        <span class="s1">co_authors </span><span class="s2">= []</span>
+
+        <span class="s4">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">:</span>
+            <span class="s1">results </span><span class="s2">= </span><span class="s1">re</span><span class="s2">.</span><span class="s1">findall</span><span class="s2">(</span>
+                <span class="s3">r&quot;^Co-authored-by: (.*) &lt;(.*?)&gt;$&quot;</span><span class="s2">,</span>
+                <span class="s1">self</span><span class="s2">.</span><span class="s1">message</span><span class="s2">,</span>
+                <span class="s1">re</span><span class="s2">.</span><span class="s1">MULTILINE</span><span class="s2">,</span>
+            <span class="s2">)</span>
+            <span class="s4">for </span><span class="s1">author </span><span class="s4">in </span><span class="s1">results</span><span class="s2">:</span>
+                <span class="s1">co_authors</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">Actor</span><span class="s2">(*</span><span class="s1">author</span><span class="s2">))</span>
+
+        <span class="s4">return </span><span class="s1">co_authors</span>
+</pre>
+</body>
+</html>

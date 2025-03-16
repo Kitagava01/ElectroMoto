@@ -1,0 +1,250 @@
+<html>
+<head>
+<title>orm.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+orm.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># testing/fixtures/orm.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+<span class="s0"># mypy: ignore-errors</span>
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Any</span>
+
+<span class="s2">import </span><span class="s1">sqlalchemy </span><span class="s2">as </span><span class="s1">sa</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s1">TestBase</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">sql </span><span class="s2">import </span><span class="s1">TablesTest</span>
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">assertions</span>
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">config</span>
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">schema</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">entities </span><span class="s2">import </span><span class="s1">BasicEntity</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">entities </span><span class="s2">import </span><span class="s1">ComparableEntity</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">util </span><span class="s2">import </span><span class="s1">adict</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">orm</span>
+<span class="s2">from </span><span class="s3">...</span><span class="s1">orm </span><span class="s2">import </span><span class="s1">DeclarativeBase</span>
+<span class="s2">from </span><span class="s3">...</span><span class="s1">orm </span><span class="s2">import </span><span class="s1">events </span><span class="s2">as </span><span class="s1">orm_events</span>
+<span class="s2">from </span><span class="s3">...</span><span class="s1">orm </span><span class="s2">import </span><span class="s1">registry</span>
+
+
+<span class="s2">class </span><span class="s1">ORMTest</span><span class="s3">(</span><span class="s1">TestBase</span><span class="s3">):</span>
+    <span class="s3">@</span><span class="s1">config</span><span class="s3">.</span><span class="s1">fixture</span>
+    <span class="s2">def </span><span class="s1">fixture_session</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">fixture_session</span><span class="s3">()</span>
+
+
+<span class="s2">class </span><span class="s1">MappedTest</span><span class="s3">(</span><span class="s1">ORMTest</span><span class="s3">, </span><span class="s1">TablesTest</span><span class="s3">, </span><span class="s1">assertions</span><span class="s3">.</span><span class="s1">AssertsExecutionResults</span><span class="s3">):</span>
+    <span class="s0"># 'once', 'each', None</span>
+    <span class="s1">run_setup_classes </span><span class="s3">= </span><span class="s4">&quot;once&quot;</span>
+
+    <span class="s0"># 'once', 'each', None</span>
+    <span class="s1">run_setup_mappers </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+
+    <span class="s1">classes</span><span class="s3">: </span><span class="s1">Any </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s3">@</span><span class="s1">config</span><span class="s3">.</span><span class="s1">fixture</span><span class="s3">(</span><span class="s1">autouse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">scope</span><span class="s3">=</span><span class="s4">&quot;class&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">_setup_tables_test_class</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">cls </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_init_class</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">classes </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">classes </span><span class="s3">= </span><span class="s1">adict</span><span class="s3">()</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_setup_once_tables</span><span class="s3">()</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_setup_once_classes</span><span class="s3">()</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_setup_once_mappers</span><span class="s3">()</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_setup_once_inserts</span><span class="s3">()</span>
+
+        <span class="s2">yield</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_teardown_once_class</span><span class="s3">()</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_teardown_once_metadata_bind</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">config</span><span class="s3">.</span><span class="s1">fixture</span><span class="s3">(</span><span class="s1">autouse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">scope</span><span class="s3">=</span><span class="s4">&quot;function&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">_setup_tables_test_instance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_setup_each_tables</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_setup_each_classes</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_setup_each_mappers</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_setup_each_inserts</span><span class="s3">()</span>
+
+        <span class="s2">yield</span>
+
+        <span class="s1">orm</span><span class="s3">.</span><span class="s1">session</span><span class="s3">.</span><span class="s1">close_all_sessions</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_teardown_each_mappers</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_teardown_each_classes</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_teardown_each_tables</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_teardown_once_class</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">classes</span><span class="s3">.</span><span class="s1">clear</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_setup_once_classes</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_setup_classes </span><span class="s3">== </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">_with_register_classes</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">setup_classes</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_setup_once_mappers</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_setup_mappers </span><span class="s3">== </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">mapper_registry</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">mapper </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_generate_registry</span><span class="s3">()</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">_with_register_classes</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">setup_mappers</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_setup_each_mappers</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_setup_mappers </span><span class="s3">!= </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+            <span class="s3">(</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">mapper_registry</span><span class="s3">,</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">mapper</span><span class="s3">,</span>
+            <span class="s3">) = </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_generate_registry</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_setup_mappers </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_with_register_classes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">setup_mappers</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_setup_each_classes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_setup_classes </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_with_register_classes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">setup_classes</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_generate_registry</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s1">decl </span><span class="s3">= </span><span class="s1">registry</span><span class="s3">(</span><span class="s1">metadata</span><span class="s3">=</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">decl</span><span class="s3">, </span><span class="s1">decl</span><span class="s3">.</span><span class="s1">map_imperatively</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_with_register_classes</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">fn</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;Run a setup method, framing the operation with a Base class 
+        that will catch new subclasses to be established within 
+        the &quot;classes&quot; registry. 
+ 
+        &quot;&quot;&quot;</span>
+        <span class="s1">cls_registry </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">classes</span>
+
+        <span class="s2">class </span><span class="s1">_Base</span><span class="s3">:</span>
+            <span class="s2">def </span><span class="s1">__init_subclass__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+                <span class="s2">assert </span><span class="s1">cls_registry </span><span class="s2">is not None</span>
+                <span class="s1">cls_registry</span><span class="s3">[</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">] = </span><span class="s1">cls</span>
+                <span class="s1">super</span><span class="s3">().</span><span class="s1">__init_subclass__</span><span class="s3">()</span>
+
+        <span class="s2">class </span><span class="s1">Basic</span><span class="s3">(</span><span class="s1">BasicEntity</span><span class="s3">, </span><span class="s1">_Base</span><span class="s3">):</span>
+            <span class="s2">pass</span>
+
+        <span class="s2">class </span><span class="s1">Comparable</span><span class="s3">(</span><span class="s1">ComparableEntity</span><span class="s3">, </span><span class="s1">_Base</span><span class="s3">):</span>
+            <span class="s2">pass</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">Basic </span><span class="s3">= </span><span class="s1">Basic</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">Comparable </span><span class="s3">= </span><span class="s1">Comparable</span>
+        <span class="s1">fn</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_teardown_each_mappers</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0"># some tests create mappers in the test bodies</span>
+        <span class="s0"># and will define setup_mappers as None -</span>
+        <span class="s0"># clear mappers in any case</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_setup_mappers </span><span class="s3">!= </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+            <span class="s1">orm</span><span class="s3">.</span><span class="s1">clear_mappers</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_teardown_each_classes</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_setup_classes </span><span class="s3">!= </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">classes</span><span class="s3">.</span><span class="s1">clear</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">setup_classes</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">pass</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">setup_mappers</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">pass</span>
+
+
+<span class="s2">class </span><span class="s1">DeclarativeMappedTest</span><span class="s3">(</span><span class="s1">MappedTest</span><span class="s3">):</span>
+    <span class="s1">run_setup_classes </span><span class="s3">= </span><span class="s4">&quot;once&quot;</span>
+    <span class="s1">run_setup_mappers </span><span class="s3">= </span><span class="s4">&quot;once&quot;</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_setup_once_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">pass</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_with_register_classes</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">fn</span><span class="s3">):</span>
+        <span class="s1">cls_registry </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">classes</span>
+
+        <span class="s2">class </span><span class="s1">_DeclBase</span><span class="s3">(</span><span class="s1">DeclarativeBase</span><span class="s3">):</span>
+            <span class="s1">__table_cls__ </span><span class="s3">= </span><span class="s1">schema</span><span class="s3">.</span><span class="s1">Table</span>
+            <span class="s1">metadata </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span>
+            <span class="s1">type_annotation_map </span><span class="s3">= {</span>
+                <span class="s1">str</span><span class="s3">: </span><span class="s1">sa</span><span class="s3">.</span><span class="s1">String</span><span class="s3">().</span><span class="s1">with_variant</span><span class="s3">(</span>
+                    <span class="s1">sa</span><span class="s3">.</span><span class="s1">String</span><span class="s3">(</span><span class="s6">50</span><span class="s3">), </span><span class="s4">&quot;mysql&quot;</span><span class="s3">, </span><span class="s4">&quot;mariadb&quot;</span><span class="s3">, </span><span class="s4">&quot;oracle&quot;</span>
+                <span class="s3">)</span>
+            <span class="s3">}</span>
+
+            <span class="s2">def </span><span class="s1">__init_subclass__</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+                <span class="s2">assert </span><span class="s1">cls_registry </span><span class="s2">is not None</span>
+                <span class="s1">cls_registry</span><span class="s3">[</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">__name__</span><span class="s3">] = </span><span class="s1">cls</span>
+                <span class="s1">super</span><span class="s3">().</span><span class="s1">__init_subclass__</span><span class="s3">(**</span><span class="s1">kw</span><span class="s3">)</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">DeclarativeBasic </span><span class="s3">= </span><span class="s1">_DeclBase</span>
+
+        <span class="s0"># sets up cls.Basic which is helpful for things like composite</span>
+        <span class="s0"># classes</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">_with_register_classes</span><span class="s3">(</span><span class="s1">fn</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">tables </span><span class="s2">and </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_create_tables</span><span class="s3">:</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">create_all</span><span class="s3">(</span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">RemoveORMEventsGlobally</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">config</span><span class="s3">.</span><span class="s1">fixture</span><span class="s3">(</span><span class="s1">autouse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">_remove_listeners</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">yield</span>
+        <span class="s1">orm_events</span><span class="s3">.</span><span class="s1">MapperEvents</span><span class="s3">.</span><span class="s1">_clear</span><span class="s3">()</span>
+        <span class="s1">orm_events</span><span class="s3">.</span><span class="s1">InstanceEvents</span><span class="s3">.</span><span class="s1">_clear</span><span class="s3">()</span>
+        <span class="s1">orm_events</span><span class="s3">.</span><span class="s1">SessionEvents</span><span class="s3">.</span><span class="s1">_clear</span><span class="s3">()</span>
+        <span class="s1">orm_events</span><span class="s3">.</span><span class="s1">InstrumentationEvents</span><span class="s3">.</span><span class="s1">_clear</span><span class="s3">()</span>
+        <span class="s1">orm_events</span><span class="s3">.</span><span class="s1">QueryEvents</span><span class="s3">.</span><span class="s1">_clear</span><span class="s3">()</span>
+
+
+<span class="s1">_fixture_sessions </span><span class="s3">= </span><span class="s1">set</span><span class="s3">()</span>
+
+
+<span class="s2">def </span><span class="s1">fixture_session</span><span class="s3">(**</span><span class="s1">kw</span><span class="s3">):</span>
+    <span class="s1">kw</span><span class="s3">.</span><span class="s1">setdefault</span><span class="s3">(</span><span class="s4">&quot;autoflush&quot;</span><span class="s3">, </span><span class="s2">True</span><span class="s3">)</span>
+    <span class="s1">kw</span><span class="s3">.</span><span class="s1">setdefault</span><span class="s3">(</span><span class="s4">&quot;expire_on_commit&quot;</span><span class="s3">, </span><span class="s2">True</span><span class="s3">)</span>
+
+    <span class="s1">bind </span><span class="s3">= </span><span class="s1">kw</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s4">&quot;bind&quot;</span><span class="s3">, </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">)</span>
+
+    <span class="s1">sess </span><span class="s3">= </span><span class="s1">orm</span><span class="s3">.</span><span class="s1">Session</span><span class="s3">(</span><span class="s1">bind</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+    <span class="s1">_fixture_sessions</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">sess</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">sess</span>
+
+
+<span class="s2">def </span><span class="s1">close_all_sessions</span><span class="s3">():</span>
+    <span class="s0"># will close all still-referenced sessions</span>
+    <span class="s1">orm</span><span class="s3">.</span><span class="s1">close_all_sessions</span><span class="s3">()</span>
+    <span class="s1">_fixture_sessions</span><span class="s3">.</span><span class="s1">clear</span><span class="s3">()</span>
+
+
+<span class="s2">def </span><span class="s1">stop_test_class_inside_fixtures</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+    <span class="s1">close_all_sessions</span><span class="s3">()</span>
+    <span class="s1">orm</span><span class="s3">.</span><span class="s1">clear_mappers</span><span class="s3">()</span>
+
+
+<span class="s2">def </span><span class="s1">after_test</span><span class="s3">():</span>
+    <span class="s2">if </span><span class="s1">_fixture_sessions</span><span class="s3">:</span>
+        <span class="s1">close_all_sessions</span><span class="s3">()</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<html>
+<head>
+<title>activate.bat</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #bcbec4;}
+.s1 { color: #cf8e6d;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+.s5 { color: #cf8e6d; font-style: italic;}
+.s6 { color: #2aacb8; font-style: italic;}
+.s7 { color: #c77dbb; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+activate.bat</font>
+</center></td></tr></table>
+<pre><span class="s0">@</span><span class="s1">echo off</span>
+
+<span class="s1">rem </span><span class="s3">This file is UTF-8 encoded, so we need to update the current code page while executing it 
+</span><span class="s1">for </span><span class="s2">/f </span><span class="s0">&quot;</span><span class="s4">tokens=2 delims=:.</span><span class="s0">&quot; %%a </span><span class="s1">in </span><span class="s0">(</span><span class="s2">'</span><span class="s0">&quot;%SystemRoot%</span><span class="s4">\System32\chcp.com</span><span class="s0">&quot;</span><span class="s2">'</span><span class="s0">) </span><span class="s1">do </span><span class="s0">(</span>
+    <span class="s1">set </span><span class="s0">_OLD_CODEPAGE=</span><span class="s5">%%</span><span class="s2">a 
+</span><span class="s0">)</span>
+<span class="s1">if defined </span><span class="s2">_OLD_CODEPAGE </span><span class="s0">(</span>
+    <span class="s0">&quot;%SystemRoot%</span><span class="s4">\System32\chcp.com</span><span class="s0">&quot; </span><span class="s6">65001 </span><span class="s0">&gt; </span><span class="s7">nul</span>
+<span class="s0">)</span>
+
+<span class="s1">set </span><span class="s0">VIRTUAL_ENV=</span><span class="s2">E:\ElectoMoto2\electric_motorcycles_shop\venv 
+</span>
+<span class="s1">if </span><span class="s0">not </span><span class="s1">defined PROMPT set </span><span class="s0">PROMPT=</span><span class="s2">$P$G 
+</span>
+<span class="s1">if defined </span><span class="s2">_OLD_VIRTUAL_PROMPT </span><span class="s1">set </span><span class="s0">PROMPT=%_OLD_VIRTUAL_PROMPT%</span>
+<span class="s1">if defined </span><span class="s2">_OLD_VIRTUAL_PYTHONHOME </span><span class="s1">set </span><span class="s0">PYTHONHOME=%_OLD_VIRTUAL_PYTHONHOME%</span>
+
+<span class="s1">set </span><span class="s0">_OLD_VIRTUAL_PROMPT=%PROMPT%</span>
+<span class="s1">set </span><span class="s0">PROMPT=(</span><span class="s2">venv</span><span class="s0">) %PROMPT%</span>
+
+<span class="s1">if defined </span><span class="s2">PYTHONHOME </span><span class="s1">set </span><span class="s0">_OLD_VIRTUAL_PYTHONHOME=%PYTHONHOME%</span>
+<span class="s1">set </span><span class="s0">PYTHONHOME=</span>
+
+<span class="s1">if defined </span><span class="s2">_OLD_VIRTUAL_PATH </span><span class="s1">set </span><span class="s0">PATH=%_OLD_VIRTUAL_PATH%</span>
+<span class="s1">if </span><span class="s0">not </span><span class="s1">defined </span><span class="s2">_OLD_VIRTUAL_PATH </span><span class="s1">set </span><span class="s0">_OLD_VIRTUAL_PATH=%PATH%</span>
+
+<span class="s1">set </span><span class="s0">PATH=%VIRTUAL_ENV%</span><span class="s2">\Scripts;</span><span class="s0">%PATH%</span>
+<span class="s1">set </span><span class="s0">VIRTUAL_ENV_PROMPT=(</span><span class="s2">venv</span><span class="s0">) </span>
+
+<span class="s0">:</span><span class="s1">END</span>
+<span class="s1">if defined </span><span class="s2">_OLD_CODEPAGE </span><span class="s0">(</span>
+    <span class="s0">&quot;%SystemRoot%</span><span class="s4">\System32\chcp.com</span><span class="s0">&quot; %_OLD_CODEPAGE% &gt; </span><span class="s7">nul</span>
+    <span class="s1">set </span><span class="s0">_OLD_CODEPAGE=</span>
+<span class="s0">)</span>
+</pre>
+</body>
+</html>

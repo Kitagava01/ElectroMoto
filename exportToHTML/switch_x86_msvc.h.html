@@ -1,0 +1,348 @@
+<html>
+<head>
+<title>switch_x86_msvc.h</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #2aacb8;}
+.s4 { color: #6aab73;}
+.s5 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+switch_x86_msvc.h</font>
+</center></td></tr></table>
+<pre><span class="s0">/* 
+ * this is the internal transfer function. 
+ * 
+ * HISTORY 
+ * 24-Nov-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      needed to add another magic constant to insure 
+ *      that f in slp_eval_frame(PyFrameObject *f) 
+ *      STACK_REFPLUS will probably be 1 in most cases. 
+ *      gets included into the saved stack area. 
+ * 26-Sep-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      again as a result of virtualized stack access, 
+ *      the compiler used less registers. Needed to 
+ *      explicit mention registers in order to get them saved. 
+ *      Thanks to Jeff Senn for pointing this out and help. 
+ * 17-Sep-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      after virtualizing stack save/restore, the 
+ *      stack size shrunk a bit. Needed to introduce 
+ *      an adjustment STACK_MAGIC per platform. 
+ * 15-Sep-02  Gerd Woetzel       &lt;gerd.woetzel@GMD.DE&gt; 
+ *      slightly changed framework for sparc 
+ * 01-Mar-02  Christian Tismer  &lt;tismer@tismer.com&gt; 
+ *      Initial final version after lots of iterations for i386. 
+ */</span>
+
+<span class="s2">#define </span><span class="s1">alloca _alloca</span>
+
+<span class="s2">#define </span><span class="s1">STACK_REFPLUS </span><span class="s3">1</span>
+
+<span class="s2">#ifdef </span><span class="s1">SLP_EVAL</span>
+
+<span class="s2">#define </span><span class="s1">STACK_MAGIC </span><span class="s3">0</span>
+
+<span class="s0">/* Some magic to quell warnings and keep slp_switch() from crashing when built 
+   with VC90. Disable global optimizations, and the warning: frame pointer 
+   register 'ebp' modified by inline assembly code. 
+ 
+   We used to just disable global optimizations (&quot;g&quot;) but upstream stackless 
+   Python, as well as stackman, turn off all optimizations. 
+ 
+References: 
+https://github.com/stackless-dev/stackman/blob/dbc72fe5207a2055e658c819fdeab9731dee78b9/stackman/platforms/switch_x86_msvc.h 
+https://github.com/stackless-dev/stackless/blob/main-slp/Stackless/platf/switch_x86_msvc.h 
+*/</span>
+<span class="s2">#define </span><span class="s1">WIN32_LEAN_AND_MEAN</span>
+<span class="s2">#include </span><span class="s1">&lt;windows.h&gt;</span>
+
+<span class="s1">#pragma optimize(</span><span class="s4">&quot;&quot;</span><span class="s1">, off) </span><span class="s0">/* so that autos are stored on the stack */</span>
+<span class="s1">#pragma warning(disable:</span><span class="s3">4731</span><span class="s1">)</span>
+<span class="s1">#pragma warning(disable:</span><span class="s3">4733</span><span class="s1">) </span><span class="s0">/* disable warning about modifying FS[0] */</span>
+
+<span class="s0">/** 
+ * Most modern compilers and environments handle C++ exceptions without any 
+ * special help from us. MSVC on 32-bit windows is an exception. There, C++ 
+ * exceptions are dealt with using Windows' Structured Exception Handling 
+ * (SEH). 
+ * 
+ * SEH is implemented as a singly linked list of &lt;function*, prev*&gt; nodes. The 
+ * head of this list is stored in the Thread Information Block, which itself 
+ * is pointed to from the FS register. It's the first field in the structure, 
+ * or offset 0, so we can access it using assembly FS:[0], or the compiler 
+ * intrinsics and field offset information from the headers (as we do below). 
+ * Somewhat unusually, the tail of the list doesn't have prev == NULL, it has 
+ * prev == 0xFFFFFFFF. 
+ * 
+ * SEH was designed for C, and traditionally uses the MSVC compiler 
+ * intrinsincs __try{}/__except{}. It is also utilized for C++ exceptions by 
+ * MSVC; there, every throw of a C++ exception raises a SEH error with the 
+ * ExceptionCode 0xE06D7363; the SEH handler list is then traversed to 
+ * deal with the exception. 
+ * 
+ * If the SEH list is corrupt, then when a C++ exception is thrown the program 
+ * will abruptly exit with exit code 1. This does not use std::terminate(), so 
+ * std::set_terminate() is useless to debug this. 
+ * 
+ * The SEH list is closely tied to the call stack; entering a function that 
+ * uses __try{} or most C++ functions will push a new handler onto the front 
+ * of the list. Returning from the function will remove the handler. Saving 
+ * and restoring the head node of the SEH list (FS:[0]) per-greenlet is NOT 
+ * ENOUGH to make SEH or exceptions work. 
+ * 
+ * Stack switching breaks SEH because the call stack no longer necessarily 
+ * matches the SEH list. For example, given greenlet A that switches to 
+ * greenlet B, at the moment of entering greenlet B, we will have any SEH 
+ * handlers from greenlet A on the SEH list; greenlet B can then add its own 
+ * handlers to the SEH list. When greenlet B switches back to greenlet A, 
+ * greenlet B's handlers would still be on the SEH stack, but when switch() 
+ * returns control to greenlet A, we have replaced the contents of the stack 
+ * in memory, so all the address that greenlet B added to the SEH list are now 
+ * invalid: part of the call stack has been unwound, but the SEH list was out 
+ * of sync with the call stack. The net effect is that exception handling 
+ * stops working. 
+ * 
+ * Thus, when switching greenlets, we need to be sure that the SEH list 
+ * matches the effective call stack, &quot;cutting out&quot; any handlers that were 
+ * pushed by the greenlet that switched out and which are no longer valid. 
+ * 
+ * The easiest way to do this is to capture the SEH list at the time the main 
+ * greenlet for a thread is created, and, when initially starting a greenlet, 
+ * start a new SEH list for it, which contains nothing but the handler 
+ * established for the new greenlet itself, with the tail being the handlers 
+ * for the main greenlet. If we then save and restore the SEH per-greenlet, 
+ * they won't interfere with each others SEH lists. (No greenlet can unwind 
+ * the call stack past the handlers established by the main greenlet). 
+ * 
+ * By observation, a new thread starts with three SEH handlers on the list. By 
+ * the time we get around to creating the main greenlet, though, there can be 
+ * many more, established by transient calls that lead to the creation of the 
+ * main greenlet. Therefore, 3 is a magic constant telling us when to perform 
+ * the initial slice. 
+ * 
+ * All of this can be debugged using a vectored exception handler, which 
+ * operates independently of the SEH handler list, and is called first. 
+ * Walking the SEH list at key points can also be helpful. 
+ * 
+ * References: 
+ * https://en.wikipedia.org/wiki/Win32_Thread_Information_Block 
+ * https://devblogs.microsoft.com/oldnewthing/20100730-00/?p=13273 
+ * https://docs.microsoft.com/en-us/cpp/cpp/try-except-statement?view=msvc-160 
+ * https://docs.microsoft.com/en-us/cpp/cpp/structured-exception-handling-c-cpp?view=msvc-160 
+ * https://docs.microsoft.com/en-us/windows/win32/debug/structured-exception-handling 
+ * https://docs.microsoft.com/en-us/windows/win32/debug/using-a-vectored-exception-handler 
+ * https://bytepointer.com/resources/pietrek_crash_course_depths_of_win32_seh.htm 
+ */</span>
+<span class="s2">#define </span><span class="s1">GREENLET_NEEDS_EXCEPTION_STATE_SAVED</span>
+
+
+<span class="s2">typedef struct </span><span class="s1">_GExceptionRegistration {</span>
+    <span class="s2">struct </span><span class="s1">_GExceptionRegistration* prev;</span>
+    <span class="s2">void</span><span class="s1">* handler_f;</span>
+<span class="s1">} GExceptionRegistration;</span>
+
+<span class="s2">static void</span>
+<span class="s1">slp_set_exception_state(</span><span class="s2">const void </span><span class="s1">*</span><span class="s2">const </span><span class="s1">seh_state)</span>
+<span class="s1">{</span>
+    <span class="s0">// Because the stack from from which we do this is ALSO a handler, and</span>
+    <span class="s0">// that one we want to keep, we need to relink the current SEH handler</span>
+    <span class="s0">// frame to point to this one, cutting out the middle men, as it were.</span>
+    <span class="s0">//</span>
+    <span class="s0">// Entering a try block doesn't change the SEH frame, but entering a</span>
+    <span class="s0">// function containing a try block does.</span>
+    <span class="s1">GExceptionRegistration* current_seh_state = (GExceptionRegistration*)__readfsdword(FIELD_OFFSET(NT_TIB, ExceptionList));</span>
+    <span class="s1">current_seh_state</span><span class="s5">-&gt;</span><span class="s1">prev = (GExceptionRegistration*)seh_state;</span>
+<span class="s1">}</span>
+
+
+<span class="s2">static </span><span class="s1">GExceptionRegistration*</span>
+<span class="s1">x86_slp_get_third_oldest_handler()</span>
+<span class="s1">{</span>
+    <span class="s1">GExceptionRegistration* a = NULL; </span><span class="s0">/* Closest to the top */</span>
+    <span class="s1">GExceptionRegistration* b = NULL; </span><span class="s0">/* second */</span>
+    <span class="s1">GExceptionRegistration* c = NULL;</span>
+    <span class="s1">GExceptionRegistration* seh_state = (GExceptionRegistration*)__readfsdword(FIELD_OFFSET(NT_TIB, ExceptionList));</span>
+    <span class="s1">a = b = c = seh_state;</span>
+
+    <span class="s2">while </span><span class="s1">(seh_state &amp;&amp; seh_state != (GExceptionRegistration*)</span><span class="s3">0xFFFFFFFF</span><span class="s1">) {</span>
+        <span class="s2">if </span><span class="s1">((</span><span class="s2">void</span><span class="s1">*)seh_state</span><span class="s5">-&gt;</span><span class="s1">prev &lt; (</span><span class="s2">void</span><span class="s1">*)</span><span class="s3">100</span><span class="s1">) {</span>
+            <span class="s1">fprintf(stderr, </span><span class="s4">&quot;</span><span class="s2">\t</span><span class="s4">ERROR: Broken SEH chain.</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">);</span>
+            <span class="s2">return </span><span class="s1">NULL;</span>
+        <span class="s1">}</span>
+        <span class="s1">a = b;</span>
+        <span class="s1">b = c;</span>
+        <span class="s1">c = seh_state;</span>
+
+        <span class="s1">seh_state = seh_state</span><span class="s5">-&gt;</span><span class="s1">prev;</span>
+    <span class="s1">}</span>
+    <span class="s2">return </span><span class="s1">a ? a : (b ? b : c);</span>
+<span class="s1">}</span>
+
+
+<span class="s2">static void</span><span class="s1">*</span>
+<span class="s1">slp_get_exception_state()</span>
+<span class="s1">{</span>
+    <span class="s0">// XXX: There appear to be three SEH handlers on the stack already at the</span>
+    <span class="s0">// start of the thread. Is that a guarantee? Almost certainly not. Yet in</span>
+    <span class="s0">// all observed cases it has been three. This is consistent with</span>
+    <span class="s0">// faulthandler off or on, and optimizations off or on. It may not be</span>
+    <span class="s0">// consistent with other operating system versions, though: we only have</span>
+    <span class="s0">// CI on one or two versions (don't ask what there are).</span>
+    <span class="s0">// In theory we could capture the number of handlers on the chain when</span>
+    <span class="s0">// PyInit__greenlet is called: there are probably only the default</span>
+    <span class="s0">// handlers at that point (unless we're embedded and people have used</span>
+    <span class="s0">// __try/__except or a C++ handler)?</span>
+    <span class="s2">return </span><span class="s1">x86_slp_get_third_oldest_handler();</span>
+<span class="s1">}</span>
+
+<span class="s2">static int</span>
+<span class="s1">slp_switch(</span><span class="s2">void</span><span class="s1">)</span>
+<span class="s1">{</span>
+    <span class="s0">/* MASM syntax is typically reversed from other assemblers. 
+       It is usually &lt;instruction&gt; &lt;destination&gt; &lt;source&gt; 
+     */</span>
+    <span class="s2">int </span><span class="s1">*stackref, stsizediff;</span>
+    <span class="s0">/* store the structured exception state for this stack */</span>
+    <span class="s1">DWORD seh_state = __readfsdword(FIELD_OFFSET(NT_TIB, ExceptionList));</span>
+    <span class="s1">__asm mov stackref, esp;</span>
+    <span class="s0">/* modify EBX, ESI and EDI in order to get them preserved */</span>
+    <span class="s1">__asm mov ebx, ebx;</span>
+    <span class="s1">__asm xchg esi, edi;</span>
+    <span class="s1">{</span>
+        <span class="s1">SLP_SAVE_STATE(stackref, stsizediff);</span>
+        <span class="s1">__asm {</span>
+            <span class="s1">mov     eax, stsizediff</span>
+            <span class="s1">add     esp, eax</span>
+            <span class="s1">add     ebp, eax</span>
+        <span class="s1">}</span>
+        <span class="s1">SLP_RESTORE_STATE();</span>
+    <span class="s1">}</span>
+    <span class="s1">__writefsdword(FIELD_OFFSET(NT_TIB, ExceptionList), seh_state);</span>
+    <span class="s2">return </span><span class="s3">0</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s0">/* re-enable ebp warning and global optimizations. */</span>
+<span class="s1">#pragma optimize(</span><span class="s4">&quot;&quot;</span><span class="s1">, on)</span>
+<span class="s1">#pragma warning(</span><span class="s2">default</span><span class="s1">:</span><span class="s3">4731</span><span class="s1">)</span>
+<span class="s1">#pragma warning(</span><span class="s2">default</span><span class="s1">:</span><span class="s3">4733</span><span class="s1">) </span><span class="s0">/* disable warning about modifying FS[0] */</span>
+
+
+<span class="s2">#endif</span>
+
+<span class="s0">/* 
+ * further self-processing support 
+ */</span>
+
+<span class="s0">/* we have IsBadReadPtr available, so we can peek at objects */</span>
+<span class="s2">#define </span><span class="s1">STACKLESS_SPY</span>
+
+<span class="s2">#ifdef </span><span class="s1">GREENLET_DEBUG</span>
+
+<span class="s2">#define </span><span class="s1">CANNOT_READ_MEM(p, bytes) IsBadReadPtr(p, bytes)</span>
+
+<span class="s2">static int </span><span class="s1">IS_ON_STACK(</span><span class="s2">void</span><span class="s1">*p)</span>
+<span class="s1">{</span>
+    <span class="s2">int </span><span class="s1">stackref;</span>
+    <span class="s2">int </span><span class="s1">stackbase = ((</span><span class="s2">int</span><span class="s1">)&amp;stackref) &amp; </span><span class="s3">0xfffff000</span><span class="s1">;</span>
+    <span class="s2">return </span><span class="s1">(</span><span class="s2">int</span><span class="s1">)p &gt;= stackbase &amp;&amp; (</span><span class="s2">int</span><span class="s1">)p &lt; stackbase + </span><span class="s3">0x00100000</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s2">static void</span>
+<span class="s1">x86_slp_show_seh_chain()</span>
+<span class="s1">{</span>
+    <span class="s1">GExceptionRegistration* seh_state = (GExceptionRegistration*)__readfsdword(FIELD_OFFSET(NT_TIB, ExceptionList));</span>
+    <span class="s1">fprintf(stderr, </span><span class="s4">&quot;====== SEH Chain ======</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">);</span>
+    <span class="s2">while </span><span class="s1">(seh_state &amp;&amp; seh_state != (GExceptionRegistration*)</span><span class="s3">0xFFFFFFFF</span><span class="s1">) {</span>
+        <span class="s1">fprintf(stderr, </span><span class="s4">&quot;</span><span class="s2">\t</span><span class="s4">SEH_chain addr: %p handler: %p prev: %p</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">,</span>
+                <span class="s1">seh_state,</span>
+                <span class="s1">seh_state</span><span class="s5">-&gt;</span><span class="s1">handler_f, seh_state</span><span class="s5">-&gt;</span><span class="s1">prev);</span>
+        <span class="s2">if </span><span class="s1">((</span><span class="s2">void</span><span class="s1">*)seh_state</span><span class="s5">-&gt;</span><span class="s1">prev &lt; (</span><span class="s2">void</span><span class="s1">*)</span><span class="s3">100</span><span class="s1">) {</span>
+            <span class="s1">fprintf(stderr, </span><span class="s4">&quot;</span><span class="s2">\t</span><span class="s4">ERROR: Broken chain.</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">);</span>
+            <span class="s2">break</span><span class="s1">;</span>
+        <span class="s1">}</span>
+        <span class="s1">seh_state = seh_state</span><span class="s5">-&gt;</span><span class="s1">prev;</span>
+    <span class="s1">}</span>
+    <span class="s1">fprintf(stderr, </span><span class="s4">&quot;====== End SEH Chain ======</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">);</span>
+    <span class="s1">fflush(NULL);</span>
+    <span class="s2">return</span><span class="s1">;</span>
+<span class="s1">}</span>
+
+<span class="s0">//addVectoredExceptionHandler constants:</span>
+<span class="s0">//CALL_FIRST means call this exception handler first;</span>
+<span class="s0">//CALL_LAST means call this exception handler last</span>
+<span class="s2">#define </span><span class="s1">CALL_FIRST </span><span class="s3">1</span>
+<span class="s2">#define </span><span class="s1">CALL_LAST </span><span class="s3">0</span>
+
+<span class="s1">LONG WINAPI</span>
+<span class="s1">GreenletVectorHandler(PEXCEPTION_POINTERS ExceptionInfo)</span>
+<span class="s1">{</span>
+    <span class="s0">// We get one of these for every C++ exception, with code</span>
+    <span class="s0">// E06D7363</span>
+    <span class="s0">// This is a special value that means &quot;C++ exception from MSVC&quot;</span>
+    <span class="s0">// https://devblogs.microsoft.com/oldnewthing/20100730-00/?p=13273</span>
+    <span class="s0">//</span>
+    <span class="s0">// Install in the module init function with:</span>
+    <span class="s0">// AddVectoredExceptionHandler(CALL_FIRST, GreenletVectorHandler);</span>
+    <span class="s1">PEXCEPTION_RECORD ExceptionRecord = ExceptionInfo</span><span class="s5">-&gt;</span><span class="s1">ExceptionRecord;</span>
+
+    <span class="s1">fprintf(stderr,</span>
+            <span class="s4">&quot;GOT VECTORED EXCEPTION:</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;</span><span class="s2">\t</span><span class="s4">ExceptionCode   : %p</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;</span><span class="s2">\t</span><span class="s4">ExceptionFlags  : %p</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;</span><span class="s2">\t</span><span class="s4">ExceptionAddr   : %p</span><span class="s2">\n</span><span class="s4">&quot;</span>
+            <span class="s4">&quot;</span><span class="s2">\t</span><span class="s4">Numberparams    : %ld</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">,</span>
+            <span class="s1">ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionCode,</span>
+            <span class="s1">ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionFlags,</span>
+            <span class="s1">ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionAddress,</span>
+            <span class="s1">ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">NumberParameters</span>
+            <span class="s1">);</span>
+    <span class="s2">if </span><span class="s1">(ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionFlags &amp; </span><span class="s3">1</span><span class="s1">) {</span>
+        <span class="s1">fprintf(stderr,  </span><span class="s4">&quot;</span><span class="s2">\t\t</span><span class="s4">EH_NONCONTINUABLE</span><span class="s2">\n</span><span class="s4">&quot; </span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s2">if </span><span class="s1">(ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionFlags &amp; </span><span class="s3">2</span><span class="s1">) {</span>
+        <span class="s1">fprintf(stderr,  </span><span class="s4">&quot;</span><span class="s2">\t\t</span><span class="s4">EH_UNWINDING</span><span class="s2">\n</span><span class="s4">&quot; </span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s2">if </span><span class="s1">(ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionFlags &amp; </span><span class="s3">4</span><span class="s1">) {</span>
+        <span class="s1">fprintf(stderr, </span><span class="s4">&quot;</span><span class="s2">\t\t</span><span class="s4">EH_EXIT_UNWIND</span><span class="s2">\n</span><span class="s4">&quot; </span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s2">if </span><span class="s1">(ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionFlags &amp; </span><span class="s3">8</span><span class="s1">) {</span>
+        <span class="s1">fprintf(stderr,  </span><span class="s4">&quot;</span><span class="s2">\t\t</span><span class="s4">EH_STACK_INVALID</span><span class="s2">\n</span><span class="s4">&quot; </span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s2">if </span><span class="s1">(ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionFlags &amp; </span><span class="s3">0x10</span><span class="s1">) {</span>
+        <span class="s1">fprintf(stderr,  </span><span class="s4">&quot;</span><span class="s2">\t\t</span><span class="s4">EH_NESTED_CALL</span><span class="s2">\n</span><span class="s4">&quot; </span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s2">if </span><span class="s1">(ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionFlags &amp; </span><span class="s3">0x20</span><span class="s1">) {</span>
+        <span class="s1">fprintf(stderr,  </span><span class="s4">&quot;</span><span class="s2">\t\t</span><span class="s4">EH_TARGET_UNWIND</span><span class="s2">\n</span><span class="s4">&quot; </span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s2">if </span><span class="s1">(ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionFlags &amp; </span><span class="s3">0x40</span><span class="s1">) {</span>
+        <span class="s1">fprintf(stderr,  </span><span class="s4">&quot;</span><span class="s2">\t\t</span><span class="s4">EH_COLLIDED_UNWIND</span><span class="s2">\n</span><span class="s4">&quot; </span><span class="s1">);</span>
+    <span class="s1">}</span>
+    <span class="s1">fprintf(stderr, </span><span class="s4">&quot;</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">);</span>
+    <span class="s1">fflush(NULL);</span>
+    <span class="s2">for</span><span class="s1">(DWORD i = </span><span class="s3">0</span><span class="s1">; i &lt; ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">NumberParameters; i++) {</span>
+        <span class="s1">fprintf(stderr, </span><span class="s4">&quot;</span><span class="s2">\t\t\t</span><span class="s4">Param %ld: %lX</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">, i, ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">ExceptionInformation[i]);</span>
+    <span class="s1">}</span>
+
+    <span class="s2">if </span><span class="s1">(ExceptionRecord</span><span class="s5">-&gt;</span><span class="s1">NumberParameters == </span><span class="s3">3</span><span class="s1">) {</span>
+        <span class="s1">fprintf(stderr, </span><span class="s4">&quot;</span><span class="s2">\t</span><span class="s4">About to traverse SEH chain</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">);</span>
+        <span class="s0">// C++ Exception records have 3 params.</span>
+        <span class="s1">x86_slp_show_seh_chain();</span>
+    <span class="s1">}</span>
+
+    <span class="s2">return </span><span class="s1">EXCEPTION_CONTINUE_SEARCH;</span>
+<span class="s1">}</span>
+
+
+
+
+<span class="s2">#endif</span>
+</pre>
+</body>
+</html>

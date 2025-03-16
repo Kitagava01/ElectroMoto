@@ -1,0 +1,836 @@
+<html>
+<head>
+<title>TGreenlet.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #7a7e85;}
+.s3 { color: #6aab73;}
+.s4 { color: #c77dbb;}
+.s5 { color: #2aacb8;}
+.s6 { color: #0da19e;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TGreenlet.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">GREENLET_GREENLET_HPP</span>
+<span class="s0">#define </span><span class="s1">GREENLET_GREENLET_HPP</span>
+<span class="s2">/* 
+ * Declarations of the core data structures. 
+*/</span>
+
+<span class="s0">#define </span><span class="s1">PY_SSIZE_T_CLEAN</span>
+<span class="s0">#include </span><span class="s1">&lt;Python.h&gt;</span>
+
+<span class="s0">#include </span><span class="s3">&quot;greenlet_compiler_compat.hpp&quot;</span>
+<span class="s0">#include </span><span class="s3">&quot;greenlet_refs.hpp&quot;</span>
+<span class="s0">#include </span><span class="s3">&quot;greenlet_cpython_compat.hpp&quot;</span>
+<span class="s0">#include </span><span class="s3">&quot;greenlet_allocator.hpp&quot;</span>
+
+<span class="s4">using </span><span class="s1">greenlet::refs::OwnedObject;</span>
+<span class="s4">using </span><span class="s1">greenlet::refs::OwnedGreenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::refs::OwnedMainGreenlet;</span>
+<span class="s4">using </span><span class="s1">greenlet::refs::BorrowedGreenlet;</span>
+
+<span class="s0">#if </span><span class="s1">PY_VERSION_HEX &lt; </span><span class="s5">0x30B00A6</span>
+<span class="s1">#  define _PyCFrame CFrame</span>
+<span class="s1">#  define _PyInterpreterFrame _interpreter_frame</span>
+<span class="s0">#endif</span>
+
+<span class="s0">#if </span><span class="s1">GREENLET_PY312</span>
+<span class="s1">#  define Py_BUILD_CORE</span>
+<span class="s1">#  include </span><span class="s3">&quot;internal/pycore_frame.h&quot;</span>
+<span class="s0">#endif</span>
+
+<span class="s2">// XXX: TODO: Work to remove all virtual functions</span>
+<span class="s2">// for speed of calling and size of objects (no vtable).</span>
+<span class="s2">// One pattern is the Curiously Recurring Template</span>
+<span class="s4">namespace </span><span class="s1">greenlet</span>
+<span class="s1">{</span>
+    <span class="s4">class </span><span class="s1">ExceptionState</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(ExceptionState);</span>
+
+        <span class="s2">// Even though these are borrowed objects, we actually own</span>
+        <span class="s2">// them, when they're not null.</span>
+        <span class="s2">// XXX: Express that in the API.</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">_PyErr_StackItem* exc_info;</span>
+        <span class="s1">_PyErr_StackItem exc_state;</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">ExceptionState();</span>
+        <span class="s0">void </span><span class="s4">operator</span><span class="s1">&lt;&lt;(</span><span class="s0">const </span><span class="s1">PyThreadState *</span><span class="s0">const </span><span class="s1">tstate) noexcept;</span>
+        <span class="s0">void </span><span class="s4">operator</span><span class="s1">&gt;&gt;(PyThreadState* tstate) noexcept;</span>
+        <span class="s0">void </span><span class="s1">clear() noexcept;</span>
+
+        <span class="s0">int </span><span class="s1">tp_traverse(visitproc visit, </span><span class="s0">void</span><span class="s1">* arg) noexcept;</span>
+        <span class="s0">void </span><span class="s1">tp_clear() noexcept;</span>
+    <span class="s1">};</span>
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T&gt;</span>
+    <span class="s0">void </span><span class="s4">operator</span><span class="s1">&lt;&lt;(</span><span class="s0">const </span><span class="s1">PyThreadState *</span><span class="s0">const </span><span class="s1">tstate, T&amp; exc);</span>
+
+    <span class="s4">class </span><span class="s1">PythonStateContext</span>
+    <span class="s1">{</span>
+    <span class="s4">protected</span><span class="s1">:</span>
+        <span class="s1">greenlet::refs::OwnedContext _context;</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s4">inline </span><span class="s0">const </span><span class="s1">greenlet::refs::OwnedContext&amp; context() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_context;</span>
+        <span class="s1">}</span>
+        <span class="s4">inline </span><span class="s1">greenlet::refs::OwnedContext&amp; context()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_context;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">tp_clear()</span>
+        <span class="s1">{</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_context.CLEAR();</span>
+        <span class="s1">}</span>
+
+        <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T&gt;</span>
+        <span class="s4">inline </span><span class="s0">static </span><span class="s1">PyObject* context(T* tstate)</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">tstate</span><span class="s6">-&gt;</span><span class="s1">context;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T&gt;</span>
+        <span class="s4">inline </span><span class="s0">static void </span><span class="s1">context(T* tstate, PyObject* new_context)</span>
+        <span class="s1">{</span>
+            <span class="s1">tstate</span><span class="s6">-&gt;</span><span class="s1">context = new_context;</span>
+            <span class="s1">tstate</span><span class="s6">-&gt;</span><span class="s1">context_ver++;</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+    <span class="s4">class </span><span class="s1">SwitchingArgs;</span>
+    <span class="s4">class </span><span class="s1">PythonState : </span><span class="s4">public </span><span class="s1">PythonStateContext</span>
+    <span class="s1">{</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s0">typedef </span><span class="s1">greenlet::refs::OwnedReference&lt;</span><span class="s0">struct </span><span class="s1">_frame&gt; OwnedFrame;</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(PythonState);</span>
+        <span class="s2">// We own this if we're suspended (although currently we don't</span>
+        <span class="s2">// tp_traverse into it; that's a TODO). If we're running, it's</span>
+        <span class="s2">// empty. If we get deallocated and *still* have a frame, it</span>
+        <span class="s2">// won't be reachable from the place that normally decref's</span>
+        <span class="s2">// it, so we need to do it (hence owning it).</span>
+        <span class="s1">OwnedFrame _top_frame;</span>
+<span class="s0">#if </span><span class="s1">GREENLET_USE_CFRAME</span>
+        <span class="s1">_PyCFrame* cframe;</span>
+        <span class="s0">int </span><span class="s1">use_tracing;</span>
+<span class="s0">#endif</span>
+<span class="s0">#if </span><span class="s1">GREENLET_PY312</span>
+        <span class="s0">int </span><span class="s1">py_recursion_depth;</span>
+        <span class="s0">int </span><span class="s1">c_recursion_depth;</span>
+<span class="s0">#else</span>
+        <span class="s0">int </span><span class="s1">recursion_depth;</span>
+<span class="s0">#endif</span>
+<span class="s0">#if </span><span class="s1">GREENLET_PY313</span>
+        <span class="s1">PyObject *delete_later;</span>
+<span class="s0">#else</span>
+        <span class="s0">int </span><span class="s1">trash_delete_nesting;</span>
+<span class="s0">#endif</span>
+<span class="s0">#if </span><span class="s1">GREENLET_PY311</span>
+        <span class="s1">_PyInterpreterFrame* current_frame;</span>
+        <span class="s1">_PyStackChunk* datastack_chunk;</span>
+        <span class="s1">PyObject** datastack_top;</span>
+        <span class="s1">PyObject** datastack_limit;</span>
+<span class="s0">#endif</span>
+        <span class="s2">// The PyInterpreterFrame list on 3.12+ contains some entries that are</span>
+        <span class="s2">// on the C stack, which can't be directly accessed while a greenlet is</span>
+        <span class="s2">// suspended. In order to keep greenlet gr_frame introspection working,</span>
+        <span class="s2">// we adjust stack switching to rewrite the interpreter frame list</span>
+        <span class="s2">// to skip these C-stack frames; we call this &quot;exposing&quot; the greenlet's</span>
+        <span class="s2">// frames because it makes them valid to work with in Python. Then when</span>
+        <span class="s2">// the greenlet is resumed we need to remember to reverse the operation</span>
+        <span class="s2">// we did. The C-stack frames are &quot;entry frames&quot; which are a low-level</span>
+        <span class="s2">// interpreter detail; they're not needed for introspection, but do</span>
+        <span class="s2">// need to be present for the eval loop to work.</span>
+        <span class="s0">void </span><span class="s1">unexpose_frames();</span>
+
+    <span class="s4">public</span><span class="s1">:</span>
+
+        <span class="s1">PythonState();</span>
+        <span class="s2">// You can use this for testing whether we have a frame</span>
+        <span class="s2">// or not. It returns const so they can't modify it.</span>
+        <span class="s0">const </span><span class="s1">OwnedFrame&amp; top_frame() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+
+        <span class="s4">inline </span><span class="s0">void </span><span class="s4">operator</span><span class="s1">&lt;&lt;(</span><span class="s0">const </span><span class="s1">PyThreadState *</span><span class="s0">const </span><span class="s1">tstate) noexcept;</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s4">operator</span><span class="s1">&gt;&gt;(PyThreadState* tstate) noexcept;</span>
+        <span class="s0">void </span><span class="s1">clear() noexcept;</span>
+
+        <span class="s0">int </span><span class="s1">tp_traverse(visitproc visit, </span><span class="s0">void</span><span class="s1">* arg, </span><span class="s0">bool </span><span class="s1">visit_top_frame) noexcept;</span>
+        <span class="s0">void </span><span class="s1">tp_clear(</span><span class="s0">bool </span><span class="s1">own_top_frame) noexcept;</span>
+        <span class="s0">void </span><span class="s1">set_initial_state(</span><span class="s0">const </span><span class="s1">PyThreadState* </span><span class="s0">const </span><span class="s1">tstate) noexcept;</span>
+<span class="s0">#if </span><span class="s1">GREENLET_USE_CFRAME</span>
+        <span class="s0">void </span><span class="s1">set_new_cframe(_PyCFrame&amp; frame) noexcept;</span>
+<span class="s0">#endif</span>
+
+        <span class="s0">void </span><span class="s1">may_switch_away() noexcept;</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">will_switch_from(PyThreadState *</span><span class="s0">const </span><span class="s1">origin_tstate) noexcept;</span>
+        <span class="s0">void </span><span class="s1">did_finish(PyThreadState* tstate) noexcept;</span>
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">StackState</span>
+    <span class="s1">{</span>
+        <span class="s2">// By having only plain C (POD) members, no virtual functions</span>
+        <span class="s2">// or bases, we get a trivial assignment operator generated</span>
+        <span class="s2">// for us. However, that's not safe since we do manage memory.</span>
+        <span class="s2">// So we declare an assignment operator that only works if we</span>
+        <span class="s2">// don't have any memory allocated. (We don't use</span>
+        <span class="s2">// std::shared_ptr for reference counting just to keep this</span>
+        <span class="s2">// object small)</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s0">char</span><span class="s1">* _stack_start;</span>
+        <span class="s0">char</span><span class="s1">* stack_stop;</span>
+        <span class="s0">char</span><span class="s1">* stack_copy;</span>
+        <span class="s1">intptr_t _stack_saved;</span>
+        <span class="s1">StackState* stack_prev;</span>
+        <span class="s4">inline </span><span class="s0">int </span><span class="s1">copy_stack_to_heap_up_to(</span><span class="s0">const char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">stop) noexcept;</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">free_stack_copy() noexcept;</span>
+
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s2">/** 
+         * Creates a started, but inactive, state, using *current* 
+         * as the previous. 
+         */</span>
+        <span class="s1">StackState(</span><span class="s0">void</span><span class="s1">* mark, StackState&amp; current);</span>
+        <span class="s2">/** 
+         * Creates an inactive, unstarted, state. 
+         */</span>
+        <span class="s1">StackState();</span>
+        <span class="s1">~StackState();</span>
+        <span class="s1">StackState(</span><span class="s0">const </span><span class="s1">StackState&amp; other);</span>
+        <span class="s1">StackState&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">StackState&amp; other);</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">copy_heap_to_stack(</span><span class="s0">const </span><span class="s1">StackState&amp; current) noexcept;</span>
+        <span class="s4">inline </span><span class="s0">int </span><span class="s1">copy_stack_to_heap(</span><span class="s0">char</span><span class="s1">* </span><span class="s0">const </span><span class="s1">stackref, </span><span class="s0">const </span><span class="s1">StackState&amp; current) noexcept;</span>
+        <span class="s4">inline </span><span class="s0">bool </span><span class="s1">started() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">inline </span><span class="s0">bool </span><span class="s1">main() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">inline </span><span class="s0">bool </span><span class="s1">active() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">set_active() noexcept;</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">set_inactive() noexcept;</span>
+        <span class="s4">inline </span><span class="s1">intptr_t stack_saved() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">inline </span><span class="s0">char</span><span class="s1">* stack_start() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s0">static </span><span class="s4">inline </span><span class="s1">StackState make_main() noexcept;</span>
+<span class="s0">#ifdef </span><span class="s1">GREENLET_USE_STDIO</span>
+        <span class="s4">friend </span><span class="s1">std::ostream&amp; </span><span class="s4">operator</span><span class="s1">&lt;&lt;(std::ostream&amp; os, </span><span class="s0">const </span><span class="s1">StackState&amp; s);</span>
+<span class="s0">#endif</span>
+
+        <span class="s2">// Fill in [dest, dest + n) with the values that would be at</span>
+        <span class="s2">// [src, src + n) while this greenlet is running. This is like memcpy</span>
+        <span class="s2">// except that if the greenlet is suspended it accounts for the portion</span>
+        <span class="s2">// of the greenlet's stack that was spilled to the heap. `src` may</span>
+        <span class="s2">// be on this greenlet's stack, or on the heap, but not on a different</span>
+        <span class="s2">// greenlet's stack.</span>
+        <span class="s0">void </span><span class="s1">copy_from_stack(</span><span class="s0">void</span><span class="s1">* dest, </span><span class="s0">const void</span><span class="s1">* src, size_t n) </span><span class="s0">const</span><span class="s1">;</span>
+    <span class="s1">};</span>
+<span class="s0">#ifdef </span><span class="s1">GREENLET_USE_STDIO</span>
+    <span class="s1">std::ostream&amp; </span><span class="s4">operator</span><span class="s1">&lt;&lt;(std::ostream&amp; os, </span><span class="s0">const </span><span class="s1">StackState&amp; s);</span>
+<span class="s0">#endif</span>
+
+    <span class="s4">class </span><span class="s1">SwitchingArgs</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_ASSIGNMENT_OF_CLS(SwitchingArgs);</span>
+        <span class="s2">// If args and kwargs are both false (NULL), this is a *throw*, not a</span>
+        <span class="s2">// switch. PyErr_... must have been called already.</span>
+        <span class="s1">OwnedObject _args;</span>
+        <span class="s1">OwnedObject _kwargs;</span>
+    <span class="s4">public</span><span class="s1">:</span>
+
+        <span class="s1">SwitchingArgs()</span>
+        <span class="s1">{}</span>
+
+        <span class="s1">SwitchingArgs(</span><span class="s0">const </span><span class="s1">OwnedObject&amp; args, </span><span class="s0">const </span><span class="s1">OwnedObject&amp; kwargs)</span>
+            <span class="s1">: _args(args),</span>
+              <span class="s1">_kwargs(kwargs)</span>
+        <span class="s1">{}</span>
+
+        <span class="s1">SwitchingArgs(</span><span class="s0">const </span><span class="s1">SwitchingArgs&amp; other)</span>
+            <span class="s1">: _args(other._args),</span>
+              <span class="s1">_kwargs(other._kwargs)</span>
+        <span class="s1">{}</span>
+
+        <span class="s0">const </span><span class="s1">OwnedObject&amp; args()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_args;</span>
+        <span class="s1">}</span>
+
+        <span class="s0">const </span><span class="s1">OwnedObject&amp; kwargs()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_kwargs;</span>
+        <span class="s1">}</span>
+
+        <span class="s2">/** 
+         * Moves ownership from the argument to this object. 
+         */</span>
+        <span class="s1">SwitchingArgs&amp; </span><span class="s4">operator</span><span class="s1">&lt;&lt;=(SwitchingArgs&amp; other)</span>
+        <span class="s1">{</span>
+            <span class="s0">if </span><span class="s1">(</span><span class="s4">this </span><span class="s1">!= &amp;other) {</span>
+                <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_args = other._args;</span>
+                <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_kwargs = other._kwargs;</span>
+                <span class="s1">other.CLEAR();</span>
+            <span class="s1">}</span>
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s2">/** 
+         * Acquires ownership of the argument (consumes the reference). 
+         */</span>
+        <span class="s1">SwitchingArgs&amp; </span><span class="s4">operator</span><span class="s1">&lt;&lt;=(PyObject* args)</span>
+        <span class="s1">{</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_args = OwnedObject::consuming(args);</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_kwargs.CLEAR();</span>
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s2">/** 
+         * Acquires ownership of the argument. 
+         * 
+         * Sets the args to be the given value; clears the kwargs. 
+         */</span>
+        <span class="s1">SwitchingArgs&amp; </span><span class="s4">operator</span><span class="s1">&lt;&lt;=(OwnedObject&amp; args)</span>
+        <span class="s1">{</span>
+            <span class="s1">assert(&amp;args != &amp;</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_args);</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_args = args;</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_kwargs.CLEAR();</span>
+            <span class="s1">args.CLEAR();</span>
+
+            <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">explicit operator </span><span class="s0">bool</span><span class="s1">() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_args || </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_kwargs;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">CLEAR()</span>
+        <span class="s1">{</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_args.CLEAR();</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_kwargs.CLEAR();</span>
+        <span class="s1">}</span>
+
+        <span class="s0">const </span><span class="s1">std::string as_str() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">PyUnicode_AsUTF8(</span>
+                <span class="s1">OwnedObject::consuming(</span>
+                    <span class="s1">PyUnicode_FromFormat(</span>
+                        <span class="s3">&quot;SwitchingArgs(args=%R, kwargs=%R)&quot;</span><span class="s1">,</span>
+                        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_args.borrow(),</span>
+                        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_kwargs.borrow()</span>
+                    <span class="s1">)</span>
+                <span class="s1">).borrow()</span>
+            <span class="s1">);</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">ThreadState;</span>
+
+    <span class="s4">class </span><span class="s1">UserGreenlet;</span>
+    <span class="s4">class </span><span class="s1">MainGreenlet;</span>
+
+    <span class="s4">class </span><span class="s1">Greenlet</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(Greenlet);</span>
+        <span class="s1">PyGreenlet* </span><span class="s0">const </span><span class="s1">_self;</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s2">// XXX: Work to remove these.</span>
+        <span class="s4">friend class </span><span class="s1">ThreadState;</span>
+        <span class="s4">friend class </span><span class="s1">UserGreenlet;</span>
+        <span class="s4">friend class </span><span class="s1">MainGreenlet;</span>
+    <span class="s4">protected</span><span class="s1">:</span>
+        <span class="s1">ExceptionState exception_state;</span>
+        <span class="s1">SwitchingArgs switch_args;</span>
+        <span class="s1">StackState stack_state;</span>
+        <span class="s1">PythonState python_state;</span>
+        <span class="s1">Greenlet(PyGreenlet* p, </span><span class="s0">const </span><span class="s1">StackState&amp; initial_state);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s2">// This constructor takes ownership of the PyGreenlet, by</span>
+        <span class="s2">// setting ``p-&gt;pimpl = this;``.</span>
+        <span class="s1">Greenlet(PyGreenlet* p);</span>
+        <span class="s4">virtual </span><span class="s1">~Greenlet();</span>
+
+        <span class="s0">const </span><span class="s1">OwnedObject context() </span><span class="s0">const</span><span class="s1">;</span>
+
+        <span class="s2">// You MUST call this _very_ early in the switching process to</span>
+        <span class="s2">// prepare anything that may need prepared. This might perform</span>
+        <span class="s2">// garbage collections or otherwise run arbitrary Python code.</span>
+        <span class="s2">//</span>
+        <span class="s2">// One specific use of it is for Python 3.11+, preventing</span>
+        <span class="s2">// running arbitrary code at unsafe times. See</span>
+        <span class="s2">// PythonState::may_switch_away().</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">may_switch_away()</span>
+        <span class="s1">{</span>
+            <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">python_state.may_switch_away();</span>
+        <span class="s1">}</span>
+
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">context(refs::BorrowedObject new_context);</span>
+
+        <span class="s4">inline </span><span class="s1">SwitchingArgs&amp; args()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">switch_args;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">virtual </span><span class="s0">const </span><span class="s1">refs::BorrowedMainGreenlet main_greenlet() </span><span class="s0">const </span><span class="s1">= </span><span class="s5">0</span><span class="s1">;</span>
+
+        <span class="s4">inline </span><span class="s1">intptr_t stack_saved() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state.stack_saved();</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// This is used by the macro SLP_SAVE_STATE to compute the</span>
+        <span class="s2">// difference in stack sizes. It might be nice to handle the</span>
+        <span class="s2">// computation ourself, but the type of the result</span>
+        <span class="s2">// varies by platform, so doing it in the macro is the</span>
+        <span class="s2">// simplest way.</span>
+        <span class="s4">inline </span><span class="s0">const char</span><span class="s1">* stack_start() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state.stack_start();</span>
+        <span class="s1">}</span>
+
+        <span class="s4">virtual </span><span class="s1">OwnedObject throw_GreenletExit_during_dealloc(</span><span class="s0">const </span><span class="s1">ThreadState&amp; current_thread_state);</span>
+        <span class="s4">virtual </span><span class="s1">OwnedObject g_switch() = </span><span class="s5">0</span><span class="s1">;</span>
+        <span class="s2">/** 
+         * Force the greenlet to appear dead. Used when it's not 
+         * possible to throw an exception into a greenlet anymore. 
+         * 
+         * This losses access to the thread state and the main greenlet. 
+         */</span>
+        <span class="s4">virtual </span><span class="s0">void </span><span class="s1">murder_in_place();</span>
+
+        <span class="s2">/** 
+         * Called when somebody notices we were running in a dead 
+         * thread to allow cleaning up resources (because we can't 
+         * raise GreenletExit into it anymore). 
+         * This is very similar to ``murder_in_place()``, except that 
+         * it DOES NOT lose the main greenlet or thread state. 
+         */</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">deactivate_and_free();</span>
+
+
+        <span class="s2">// Called when some thread wants to deallocate a greenlet</span>
+        <span class="s2">// object.</span>
+        <span class="s2">// The thread may or may not be the same thread the greenlet</span>
+        <span class="s2">// was running in.</span>
+        <span class="s2">// The thread state will be null if the thread the greenlet</span>
+        <span class="s2">// was running in was known to have exited.</span>
+        <span class="s0">void </span><span class="s1">deallocing_greenlet_in_thread(</span><span class="s0">const </span><span class="s1">ThreadState* current_state);</span>
+
+        <span class="s2">// Must be called on 3.12+ before exposing a suspended greenlet's</span>
+        <span class="s2">// frames to user code. This rewrites the linked list of interpreter</span>
+        <span class="s2">// frames to skip the ones that are being stored on the C stack (which</span>
+        <span class="s2">// can't be safely accessed while the greenlet is suspended because</span>
+        <span class="s2">// that stack space might be hosting a different greenlet), and</span>
+        <span class="s2">// sets PythonState::frames_were_exposed so we remember to restore</span>
+        <span class="s2">// the original list before resuming the greenlet. The C-stack frames</span>
+        <span class="s2">// are a low-level interpreter implementation detail; while they're</span>
+        <span class="s2">// important to the bytecode eval loop, they're superfluous for</span>
+        <span class="s2">// introspection purposes.</span>
+        <span class="s0">void </span><span class="s1">expose_frames();</span>
+
+
+        <span class="s2">// TODO: Figure out how to make these non-public.</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">slp_restore_state() noexcept;</span>
+        <span class="s4">inline </span><span class="s0">int </span><span class="s1">slp_save_state(</span><span class="s0">char </span><span class="s1">*</span><span class="s0">const </span><span class="s1">stackref) noexcept;</span>
+
+        <span class="s4">inline </span><span class="s0">bool </span><span class="s1">is_currently_running_in_some_thread() </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">virtual </span><span class="s0">bool </span><span class="s1">belongs_to_thread(</span><span class="s0">const </span><span class="s1">ThreadState* state) </span><span class="s0">const</span><span class="s1">;</span>
+
+        <span class="s4">inline </span><span class="s0">bool </span><span class="s1">started() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state.started();</span>
+        <span class="s1">}</span>
+        <span class="s4">inline </span><span class="s0">bool </span><span class="s1">active() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state.active();</span>
+        <span class="s1">}</span>
+        <span class="s4">inline </span><span class="s0">bool </span><span class="s1">main() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">stack_state.main();</span>
+        <span class="s1">}</span>
+        <span class="s4">virtual </span><span class="s1">refs::BorrowedMainGreenlet find_main_greenlet_in_lineage() </span><span class="s0">const </span><span class="s1">= </span><span class="s5">0</span><span class="s1">;</span>
+
+        <span class="s4">virtual </span><span class="s0">const </span><span class="s1">OwnedGreenlet parent() </span><span class="s0">const </span><span class="s1">= </span><span class="s5">0</span><span class="s1">;</span>
+        <span class="s4">virtual </span><span class="s0">void </span><span class="s1">parent(</span><span class="s0">const </span><span class="s1">refs::BorrowedObject new_parent) = </span><span class="s5">0</span><span class="s1">;</span>
+
+        <span class="s4">inline </span><span class="s0">const </span><span class="s1">PythonState::OwnedFrame&amp; top_frame()</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">python_state.top_frame();</span>
+        <span class="s1">}</span>
+
+        <span class="s4">virtual </span><span class="s0">const </span><span class="s1">OwnedObject&amp; run() </span><span class="s0">const </span><span class="s1">= </span><span class="s5">0</span><span class="s1">;</span>
+        <span class="s4">virtual </span><span class="s0">void </span><span class="s1">run(</span><span class="s0">const </span><span class="s1">refs::BorrowedObject nrun) = </span><span class="s5">0</span><span class="s1">;</span>
+
+
+        <span class="s4">virtual </span><span class="s0">int </span><span class="s1">tp_traverse(visitproc visit, </span><span class="s0">void</span><span class="s1">* arg);</span>
+        <span class="s4">virtual </span><span class="s0">int </span><span class="s1">tp_clear();</span>
+
+
+        <span class="s2">// Return the thread state that the greenlet is running in, or</span>
+        <span class="s2">// null if the greenlet is not running or the thread is known</span>
+        <span class="s2">// to have exited.</span>
+        <span class="s4">virtual </span><span class="s1">ThreadState* thread_state() </span><span class="s0">const </span><span class="s1">noexcept = </span><span class="s5">0</span><span class="s1">;</span>
+
+        <span class="s2">// Return true if the greenlet is known to have been running</span>
+        <span class="s2">// (active) in a thread that has now exited.</span>
+        <span class="s4">virtual </span><span class="s0">bool </span><span class="s1">was_running_in_dead_thread() </span><span class="s0">const </span><span class="s1">noexcept = </span><span class="s5">0</span><span class="s1">;</span>
+
+        <span class="s2">// Return a borrowed greenlet that is the Python object</span>
+        <span class="s2">// this object represents.</span>
+        <span class="s4">inline </span><span class="s1">BorrowedGreenlet self() </span><span class="s0">const </span><span class="s1">noexcept</span>
+        <span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">BorrowedGreenlet(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_self);</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// For testing. If this returns true, we should pretend that</span>
+        <span class="s2">// slp_switch() failed.</span>
+        <span class="s4">virtual </span><span class="s0">bool </span><span class="s1">force_slp_switch_error() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+
+    <span class="s4">protected</span><span class="s1">:</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">release_args();</span>
+
+        <span class="s2">// The functions that must not be inlined are declared virtual.</span>
+        <span class="s2">// We also mark them as protected, not private, so that the</span>
+        <span class="s2">// compiler is forced to call them through a function pointer.</span>
+        <span class="s2">// (A sufficiently smart compiler could directly call a private</span>
+        <span class="s2">// virtual function since it can never be overridden in a</span>
+        <span class="s2">// subclass).</span>
+
+        <span class="s2">// Also TODO: Switch away from integer error codes and to enums,</span>
+        <span class="s2">// or throw exceptions when possible.</span>
+        <span class="s0">struct </span><span class="s1">switchstack_result_t</span>
+        <span class="s1">{</span>
+            <span class="s0">int </span><span class="s1">status;</span>
+            <span class="s1">Greenlet* the_new_current_greenlet;</span>
+            <span class="s1">OwnedGreenlet origin_greenlet;</span>
+
+            <span class="s1">switchstack_result_t()</span>
+                <span class="s1">: status(</span><span class="s5">0</span><span class="s1">),</span>
+                  <span class="s1">the_new_current_greenlet(nullptr)</span>
+            <span class="s1">{}</span>
+
+            <span class="s1">switchstack_result_t(</span><span class="s0">int </span><span class="s1">err)</span>
+                <span class="s1">: status(err),</span>
+                  <span class="s1">the_new_current_greenlet(nullptr)</span>
+            <span class="s1">{}</span>
+
+            <span class="s1">switchstack_result_t(</span><span class="s0">int </span><span class="s1">err, Greenlet* state, OwnedGreenlet&amp; origin)</span>
+                <span class="s1">: status(err),</span>
+                  <span class="s1">the_new_current_greenlet(state),</span>
+                  <span class="s1">origin_greenlet(origin)</span>
+            <span class="s1">{</span>
+            <span class="s1">}</span>
+
+            <span class="s1">switchstack_result_t(</span><span class="s0">int </span><span class="s1">err, Greenlet* state, </span><span class="s0">const </span><span class="s1">BorrowedGreenlet&amp; origin)</span>
+                <span class="s1">: status(err),</span>
+                  <span class="s1">the_new_current_greenlet(state),</span>
+                  <span class="s1">origin_greenlet(origin)</span>
+            <span class="s1">{</span>
+            <span class="s1">}</span>
+
+            <span class="s1">switchstack_result_t(</span><span class="s0">const </span><span class="s1">switchstack_result_t&amp; other)</span>
+                <span class="s1">: status(other.status),</span>
+                  <span class="s1">the_new_current_greenlet(other.the_new_current_greenlet),</span>
+                  <span class="s1">origin_greenlet(other.origin_greenlet)</span>
+            <span class="s1">{}</span>
+
+            <span class="s1">switchstack_result_t&amp; </span><span class="s4">operator</span><span class="s1">=(</span><span class="s0">const </span><span class="s1">switchstack_result_t&amp; other)</span>
+            <span class="s1">{</span>
+                <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">status = other.status;</span>
+                <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">the_new_current_greenlet = other.the_new_current_greenlet;</span>
+                <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">origin_greenlet = other.origin_greenlet;</span>
+                <span class="s0">return </span><span class="s1">*</span><span class="s4">this</span><span class="s1">;</span>
+            <span class="s1">}</span>
+        <span class="s1">};</span>
+
+        <span class="s1">OwnedObject on_switchstack_or_initialstub_failure(</span>
+            <span class="s1">Greenlet* target,</span>
+            <span class="s0">const </span><span class="s1">switchstack_result_t&amp; err,</span>
+            <span class="s0">const bool </span><span class="s1">target_was_me=</span><span class="s0">false</span><span class="s1">,</span>
+            <span class="s0">const bool </span><span class="s1">was_initial_stub=</span><span class="s0">false</span><span class="s1">);</span>
+
+        <span class="s2">// Returns the previous greenlet we just switched away from.</span>
+        <span class="s4">virtual </span><span class="s1">OwnedGreenlet g_switchstack_success() noexcept;</span>
+
+
+        <span class="s2">// Check the preconditions for switching to this greenlet; if they</span>
+        <span class="s2">// aren't met, throws PyErrOccurred. Most callers will want to</span>
+        <span class="s2">// catch this and clear the arguments</span>
+        <span class="s4">inline </span><span class="s0">void </span><span class="s1">check_switch_allowed() </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">class </span><span class="s1">GreenletStartedWhileInPython : </span><span class="s4">public </span><span class="s1">std::runtime_error</span>
+        <span class="s1">{</span>
+        <span class="s4">public</span><span class="s1">:</span>
+            <span class="s1">GreenletStartedWhileInPython() : std::runtime_error(</span><span class="s3">&quot;&quot;</span><span class="s1">)</span>
+            <span class="s1">{}</span>
+        <span class="s1">};</span>
+
+    <span class="s4">protected</span><span class="s1">:</span>
+
+
+        <span class="s2">/** 
+           Perform a stack switch into this greenlet. 
+ 
+           This temporarily sets the global variable 
+           ``switching_thread_state`` to this greenlet; as soon as the 
+           call to ``slp_switch`` completes, this is reset to NULL. 
+           Consequently, this depends on the GIL. 
+ 
+           TODO: Adopt the stackman model and pass ``slp_switch`` a 
+           callback function and context pointer; this eliminates the 
+           need for global variables altogether. 
+ 
+           Because the stack switch happens in this function, this 
+           function can't use its own stack (local) variables, set 
+           before the switch, and then accessed after the switch. 
+ 
+           Further, you con't even access ``g_thread_state_global`` 
+           before and after the switch from the global variable. 
+           Because it is thread local some compilers cache it in a 
+           register/on the stack, notably new versions of MSVC; this 
+           breaks with strange crashes sometime later, because writing 
+           to anything in ``g_thread_state_global`` after the switch 
+           is actually writing to random memory. For this reason, we 
+           call a non-inlined function to finish the operation. (XXX: 
+           The ``/GT`` MSVC compiler argument probably fixes that.) 
+ 
+           It is very important that stack switch is 'atomic', i.e. no 
+           calls into other Python code allowed (except very few that 
+           are safe), because global variables are very fragile. (This 
+           should no longer be the case with thread-local variables.) 
+ 
+        */</span>
+        <span class="s2">// Made virtual to facilitate subclassing UserGreenlet for testing.</span>
+        <span class="s4">virtual </span><span class="s1">switchstack_result_t g_switchstack(</span><span class="s0">void</span><span class="s1">);</span>
+
+<span class="s4">class </span><span class="s1">TracingGuard</span>
+<span class="s1">{</span>
+<span class="s4">private</span><span class="s1">:</span>
+    <span class="s1">PyThreadState* tstate;</span>
+<span class="s4">public</span><span class="s1">:</span>
+    <span class="s1">TracingGuard()</span>
+        <span class="s1">: tstate(PyThreadState_GET())</span>
+    <span class="s1">{</span>
+        <span class="s1">PyThreadState_EnterTracing(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">tstate);</span>
+    <span class="s1">}</span>
+
+    <span class="s1">~TracingGuard()</span>
+    <span class="s1">{</span>
+        <span class="s1">PyThreadState_LeaveTracing(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">tstate);</span>
+        <span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">tstate = nullptr;</span>
+    <span class="s1">}</span>
+
+    <span class="s4">inline </span><span class="s0">void </span><span class="s1">CallTraceFunction(</span><span class="s0">const </span><span class="s1">OwnedObject&amp; tracefunc,</span>
+                                  <span class="s0">const </span><span class="s1">greenlet::refs::ImmortalEventName&amp; event,</span>
+                                  <span class="s0">const </span><span class="s1">BorrowedGreenlet&amp; origin,</span>
+                                  <span class="s0">const </span><span class="s1">BorrowedGreenlet&amp; target)</span>
+    <span class="s1">{</span>
+        <span class="s2">// TODO: This calls tracefunc(event, (origin, target)). Add a shortcut</span>
+        <span class="s2">// function for that that's specialized to avoid the Py_BuildValue</span>
+        <span class="s2">// string parsing, or start with just using &quot;ON&quot; format with PyTuple_Pack(2,</span>
+        <span class="s2">// origin, target). That seems like what the N format is meant</span>
+        <span class="s2">// for.</span>
+        <span class="s2">// XXX: Why does event not automatically cast back to a PyObject?</span>
+        <span class="s2">// It tries to call the &quot;deleted constructor ImmortalEventName</span>
+        <span class="s2">// const&quot; instead.</span>
+        <span class="s1">assert(tracefunc);</span>
+        <span class="s1">assert(event);</span>
+        <span class="s1">assert(origin);</span>
+        <span class="s1">assert(target);</span>
+        <span class="s1">greenlet::refs::NewReference retval(</span>
+            <span class="s1">PyObject_CallFunction(</span>
+                <span class="s1">tracefunc.borrow(),</span>
+                <span class="s3">&quot;O(OO)&quot;</span><span class="s1">,</span>
+                <span class="s1">event.borrow(),</span>
+                <span class="s1">origin.borrow(),</span>
+                <span class="s1">target.borrow()</span>
+            <span class="s1">));</span>
+        <span class="s0">if </span><span class="s1">(!retval) {</span>
+            <span class="s4">throw </span><span class="s1">PyErrOccurred::from_current();</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+<span class="s1">};</span>
+
+      <span class="s0">static void</span>
+      <span class="s1">g_calltrace(</span><span class="s0">const </span><span class="s1">OwnedObject&amp; tracefunc,</span>
+                  <span class="s0">const </span><span class="s1">greenlet::refs::ImmortalEventName&amp; event,</span>
+                  <span class="s0">const </span><span class="s1">greenlet::refs::BorrowedGreenlet&amp; origin,</span>
+                  <span class="s0">const </span><span class="s1">BorrowedGreenlet&amp; target);</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s1">OwnedObject g_switch_finish(</span><span class="s0">const </span><span class="s1">switchstack_result_t&amp; err);</span>
+
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">UserGreenlet : </span><span class="s4">public </span><span class="s1">Greenlet</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s0">static </span><span class="s1">greenlet::PythonAllocator&lt;UserGreenlet&gt; allocator;</span>
+        <span class="s1">OwnedMainGreenlet _main_greenlet;</span>
+        <span class="s1">OwnedObject _run_callable;</span>
+        <span class="s1">OwnedGreenlet _parent;</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s0">static void</span><span class="s1">* </span><span class="s4">operator new</span><span class="s1">(size_t UNUSED(count));</span>
+        <span class="s0">static void </span><span class="s4">operator </span><span class="s0">delete</span><span class="s1">(</span><span class="s0">void</span><span class="s1">* ptr);</span>
+
+        <span class="s1">UserGreenlet(PyGreenlet* p, BorrowedGreenlet the_parent);</span>
+        <span class="s4">virtual </span><span class="s1">~UserGreenlet();</span>
+
+        <span class="s4">virtual </span><span class="s1">refs::BorrowedMainGreenlet find_main_greenlet_in_lineage() </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">virtual </span><span class="s0">bool </span><span class="s1">was_running_in_dead_thread() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">virtual </span><span class="s1">ThreadState* thread_state() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">virtual </span><span class="s1">OwnedObject g_switch();</span>
+        <span class="s4">virtual </span><span class="s0">const </span><span class="s1">OwnedObject&amp; run() </span><span class="s0">const</span>
+        <span class="s1">{</span>
+            <span class="s0">if </span><span class="s1">(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">started() || !</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_run_callable) {</span>
+                <span class="s4">throw </span><span class="s1">AttributeError(</span><span class="s3">&quot;run&quot;</span><span class="s1">);</span>
+            <span class="s1">}</span>
+            <span class="s0">return </span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">_run_callable;</span>
+        <span class="s1">}</span>
+        <span class="s4">virtual </span><span class="s0">void </span><span class="s1">run(</span><span class="s0">const </span><span class="s1">refs::BorrowedObject nrun);</span>
+
+        <span class="s4">virtual </span><span class="s0">const </span><span class="s1">OwnedGreenlet parent() </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">virtual </span><span class="s0">void </span><span class="s1">parent(</span><span class="s0">const </span><span class="s1">refs::BorrowedObject new_parent);</span>
+
+        <span class="s4">virtual </span><span class="s0">const </span><span class="s1">refs::BorrowedMainGreenlet main_greenlet() </span><span class="s0">const</span><span class="s1">;</span>
+
+        <span class="s4">virtual </span><span class="s0">void </span><span class="s1">murder_in_place();</span>
+        <span class="s4">virtual </span><span class="s0">bool </span><span class="s1">belongs_to_thread(</span><span class="s0">const </span><span class="s1">ThreadState* state) </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">virtual </span><span class="s0">int </span><span class="s1">tp_traverse(visitproc visit, </span><span class="s0">void</span><span class="s1">* arg);</span>
+        <span class="s4">virtual </span><span class="s0">int </span><span class="s1">tp_clear();</span>
+        <span class="s4">class </span><span class="s1">ParentIsCurrentGuard</span>
+        <span class="s1">{</span>
+        <span class="s4">private</span><span class="s1">:</span>
+            <span class="s1">OwnedGreenlet oldparent;</span>
+            <span class="s1">UserGreenlet* greenlet;</span>
+            <span class="s1">G_NO_COPIES_OF_CLS(ParentIsCurrentGuard);</span>
+        <span class="s4">public</span><span class="s1">:</span>
+            <span class="s1">ParentIsCurrentGuard(UserGreenlet* p, </span><span class="s0">const </span><span class="s1">ThreadState&amp; thread_state);</span>
+            <span class="s1">~ParentIsCurrentGuard();</span>
+        <span class="s1">};</span>
+        <span class="s4">virtual </span><span class="s1">OwnedObject throw_GreenletExit_during_dealloc(</span><span class="s0">const </span><span class="s1">ThreadState&amp; current_thread_state);</span>
+    <span class="s4">protected</span><span class="s1">:</span>
+        <span class="s4">virtual </span><span class="s1">switchstack_result_t g_initialstub(</span><span class="s0">void</span><span class="s1">* mark);</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s2">// This function isn't meant to return.</span>
+        <span class="s2">// This accepts raw pointers and the ownership of them at the</span>
+        <span class="s2">// same time. The caller should use ``inner_bootstrap(origin.relinquish_ownership())``.</span>
+        <span class="s0">void </span><span class="s1">inner_bootstrap(PyGreenlet* origin_greenlet, PyObject* run);</span>
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">BrokenGreenlet : </span><span class="s4">public </span><span class="s1">UserGreenlet</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s0">static </span><span class="s1">greenlet::PythonAllocator&lt;BrokenGreenlet&gt; allocator;</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s0">bool </span><span class="s1">_force_switch_error = </span><span class="s0">false</span><span class="s1">;</span>
+        <span class="s0">bool </span><span class="s1">_force_slp_switch_error = </span><span class="s0">false</span><span class="s1">;</span>
+
+        <span class="s0">static void</span><span class="s1">* </span><span class="s4">operator new</span><span class="s1">(size_t UNUSED(count));</span>
+        <span class="s0">static void </span><span class="s4">operator </span><span class="s0">delete</span><span class="s1">(</span><span class="s0">void</span><span class="s1">* ptr);</span>
+        <span class="s1">BrokenGreenlet(PyGreenlet* p, BorrowedGreenlet the_parent)</span>
+            <span class="s1">: UserGreenlet(p, the_parent)</span>
+        <span class="s1">{}</span>
+        <span class="s4">virtual </span><span class="s1">~BrokenGreenlet()</span>
+        <span class="s1">{}</span>
+
+        <span class="s4">virtual </span><span class="s1">switchstack_result_t g_switchstack(</span><span class="s0">void</span><span class="s1">);</span>
+        <span class="s4">virtual </span><span class="s0">bool </span><span class="s1">force_slp_switch_error() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+
+    <span class="s1">};</span>
+
+    <span class="s4">class </span><span class="s1">MainGreenlet : </span><span class="s4">public </span><span class="s1">Greenlet</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s0">static </span><span class="s1">greenlet::PythonAllocator&lt;MainGreenlet&gt; allocator;</span>
+        <span class="s1">refs::BorrowedMainGreenlet _self;</span>
+        <span class="s1">ThreadState* _thread_state;</span>
+        <span class="s1">G_NO_COPIES_OF_CLS(MainGreenlet);</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s0">static void</span><span class="s1">* </span><span class="s4">operator new</span><span class="s1">(size_t UNUSED(count));</span>
+        <span class="s0">static void </span><span class="s4">operator </span><span class="s0">delete</span><span class="s1">(</span><span class="s0">void</span><span class="s1">* ptr);</span>
+
+        <span class="s1">MainGreenlet(refs::BorrowedMainGreenlet::PyType*, ThreadState*);</span>
+        <span class="s4">virtual </span><span class="s1">~MainGreenlet();</span>
+
+
+        <span class="s4">virtual </span><span class="s0">const </span><span class="s1">OwnedObject&amp; run() </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">virtual </span><span class="s0">void </span><span class="s1">run(</span><span class="s0">const </span><span class="s1">refs::BorrowedObject nrun);</span>
+
+        <span class="s4">virtual </span><span class="s0">const </span><span class="s1">OwnedGreenlet parent() </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">virtual </span><span class="s0">void </span><span class="s1">parent(</span><span class="s0">const </span><span class="s1">refs::BorrowedObject new_parent);</span>
+
+        <span class="s4">virtual </span><span class="s0">const </span><span class="s1">refs::BorrowedMainGreenlet main_greenlet() </span><span class="s0">const</span><span class="s1">;</span>
+
+        <span class="s4">virtual </span><span class="s1">refs::BorrowedMainGreenlet find_main_greenlet_in_lineage() </span><span class="s0">const</span><span class="s1">;</span>
+        <span class="s4">virtual </span><span class="s0">bool </span><span class="s1">was_running_in_dead_thread() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s4">virtual </span><span class="s1">ThreadState* thread_state() </span><span class="s0">const </span><span class="s1">noexcept;</span>
+        <span class="s0">void </span><span class="s1">thread_state(ThreadState*) noexcept;</span>
+        <span class="s4">virtual </span><span class="s1">OwnedObject g_switch();</span>
+        <span class="s4">virtual </span><span class="s0">int </span><span class="s1">tp_traverse(visitproc visit, </span><span class="s0">void</span><span class="s1">* arg);</span>
+    <span class="s1">};</span>
+
+    <span class="s2">// Instantiate one on the stack to save the GC state,</span>
+    <span class="s2">// and then disable GC. When it goes out of scope, GC will be</span>
+    <span class="s2">// restored to its original state. Sadly, these APIs are only</span>
+    <span class="s2">// available on 3.10+; luckily, we only need them on 3.11+.</span>
+<span class="s0">#if </span><span class="s1">GREENLET_PY310</span>
+    <span class="s4">class </span><span class="s1">GCDisabledGuard</span>
+    <span class="s1">{</span>
+    <span class="s4">private</span><span class="s1">:</span>
+        <span class="s0">int </span><span class="s1">was_enabled = </span><span class="s5">0</span><span class="s1">;</span>
+    <span class="s4">public</span><span class="s1">:</span>
+        <span class="s1">GCDisabledGuard()</span>
+            <span class="s1">: was_enabled(PyGC_IsEnabled())</span>
+        <span class="s1">{</span>
+            <span class="s1">PyGC_Disable();</span>
+        <span class="s1">}</span>
+
+        <span class="s1">~GCDisabledGuard()</span>
+        <span class="s1">{</span>
+            <span class="s0">if </span><span class="s1">(</span><span class="s4">this</span><span class="s6">-&gt;</span><span class="s1">was_enabled) {</span>
+                <span class="s1">PyGC_Enable();</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+    <span class="s1">};</span>
+<span class="s0">#endif</span>
+
+    <span class="s1">OwnedObject&amp; </span><span class="s4">operator</span><span class="s1">&lt;&lt;=(OwnedObject&amp; lhs, greenlet::SwitchingArgs&amp; rhs) noexcept;</span>
+
+    <span class="s2">//TODO: Greenlet::g_switch() should call this automatically on its</span>
+    <span class="s2">//return value. As it is, the module code is calling it.</span>
+    <span class="s0">static </span><span class="s4">inline </span><span class="s1">OwnedObject</span>
+    <span class="s1">single_result(</span><span class="s0">const </span><span class="s1">OwnedObject&amp; results)</span>
+    <span class="s1">{</span>
+        <span class="s0">if </span><span class="s1">(results</span>
+            <span class="s1">&amp;&amp; PyTuple_Check(results.borrow())</span>
+            <span class="s1">&amp;&amp; PyTuple_GET_SIZE(results.borrow()) == </span><span class="s5">1</span><span class="s1">) {</span>
+            <span class="s1">PyObject* result = PyTuple_GET_ITEM(results.borrow(), </span><span class="s5">0</span><span class="s1">);</span>
+            <span class="s1">assert(result);</span>
+            <span class="s0">return </span><span class="s1">OwnedObject::owning(result);</span>
+        <span class="s1">}</span>
+        <span class="s0">return </span><span class="s1">results;</span>
+    <span class="s1">}</span>
+
+
+    <span class="s0">static </span><span class="s1">OwnedObject</span>
+    <span class="s1">g_handle_exit(</span><span class="s0">const </span><span class="s1">OwnedObject&amp; greenlet_result);</span>
+
+
+    <span class="s1">template&lt;</span><span class="s4">typename </span><span class="s1">T&gt;</span>
+    <span class="s0">void </span><span class="s4">operator</span><span class="s1">&lt;&lt;(</span><span class="s0">const </span><span class="s1">PyThreadState *</span><span class="s0">const </span><span class="s1">lhs, T&amp; rhs)</span>
+    <span class="s1">{</span>
+        <span class="s1">rhs.</span><span class="s4">operator</span><span class="s1">&lt;&lt;(lhs);</span>
+    <span class="s1">}</span>
+
+<span class="s1">} </span><span class="s2">// namespace greenlet ;</span>
+
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

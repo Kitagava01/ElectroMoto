@@ -1,0 +1,450 @@
+<html>
+<head>
+<title>periodic_update.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #2aacb8;}
+.s5 { color: #7a7e85;}
+.s6 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+periodic_update.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;Periodically update bundled versions.&quot;&quot;&quot;</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">json</span>
+<span class="s2">import </span><span class="s1">logging</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">ssl</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">datetime</span><span class="s3">, </span><span class="s1">timedelta</span><span class="s3">, </span><span class="s1">timezone</span>
+<span class="s2">from </span><span class="s1">itertools </span><span class="s2">import </span><span class="s1">groupby</span>
+<span class="s2">from </span><span class="s1">pathlib </span><span class="s2">import </span><span class="s1">Path</span>
+<span class="s2">from </span><span class="s1">shutil </span><span class="s2">import </span><span class="s1">copy2</span>
+<span class="s2">from </span><span class="s1">subprocess </span><span class="s2">import </span><span class="s1">DEVNULL</span><span class="s3">, </span><span class="s1">Popen</span>
+<span class="s2">from </span><span class="s1">textwrap </span><span class="s2">import </span><span class="s1">dedent</span>
+<span class="s2">from </span><span class="s1">threading </span><span class="s2">import </span><span class="s1">Thread</span>
+<span class="s2">from </span><span class="s1">urllib</span><span class="s3">.</span><span class="s1">error </span><span class="s2">import </span><span class="s1">URLError</span>
+<span class="s2">from </span><span class="s1">urllib</span><span class="s3">.</span><span class="s1">request </span><span class="s2">import </span><span class="s1">urlopen</span>
+
+<span class="s2">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">app_data </span><span class="s2">import </span><span class="s1">AppDataDiskFolder</span>
+<span class="s2">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">seed</span><span class="s3">.</span><span class="s1">wheels</span><span class="s3">.</span><span class="s1">embed </span><span class="s2">import </span><span class="s1">BUNDLE_SUPPORT</span>
+<span class="s2">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">seed</span><span class="s3">.</span><span class="s1">wheels</span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s1">Wheel</span>
+<span class="s2">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">util</span><span class="s3">.</span><span class="s1">subprocess </span><span class="s2">import </span><span class="s1">CREATE_NO_WINDOW</span>
+
+<span class="s1">GRACE_PERIOD_CI </span><span class="s3">= </span><span class="s1">timedelta</span><span class="s3">(</span><span class="s1">hours</span><span class="s3">=</span><span class="s4">1</span><span class="s3">)  </span><span class="s5"># prevent version switch in the middle of a CI run</span>
+<span class="s1">GRACE_PERIOD_MINOR </span><span class="s3">= </span><span class="s1">timedelta</span><span class="s3">(</span><span class="s1">days</span><span class="s3">=</span><span class="s4">28</span><span class="s3">)</span>
+<span class="s1">UPDATE_PERIOD </span><span class="s3">= </span><span class="s1">timedelta</span><span class="s3">(</span><span class="s1">days</span><span class="s3">=</span><span class="s4">14</span><span class="s3">)</span>
+<span class="s1">UPDATE_ABORTED_DELAY </span><span class="s3">= </span><span class="s1">timedelta</span><span class="s3">(</span><span class="s1">hours</span><span class="s3">=</span><span class="s4">1</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">periodic_update</span><span class="s3">(  </span><span class="s5"># noqa: PLR0913</span>
+    <span class="s1">distribution</span><span class="s3">,</span>
+    <span class="s1">of_version</span><span class="s3">,</span>
+    <span class="s1">for_py_version</span><span class="s3">,</span>
+    <span class="s1">wheel</span><span class="s3">,</span>
+    <span class="s1">search_dirs</span><span class="s3">,</span>
+    <span class="s1">app_data</span><span class="s3">,</span>
+    <span class="s1">do_periodic_update</span><span class="s3">,</span>
+    <span class="s1">env</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">if </span><span class="s1">do_periodic_update</span><span class="s3">:</span>
+        <span class="s1">handle_auto_update</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">wheel</span><span class="s3">, </span><span class="s1">search_dirs</span><span class="s3">, </span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">env</span><span class="s3">)</span>
+
+    <span class="s1">now </span><span class="s3">= </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_update_wheel</span><span class="s3">(</span><span class="s1">ver</span><span class="s3">):</span>
+        <span class="s1">updated_wheel </span><span class="s3">= </span><span class="s1">Wheel</span><span class="s3">(</span><span class="s1">app_data</span><span class="s3">.</span><span class="s1">house </span><span class="s3">/ </span><span class="s1">ver</span><span class="s3">.</span><span class="s1">filename</span><span class="s3">)</span>
+        <span class="s1">logging</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s6">&quot;using %supdated wheel %s&quot;</span><span class="s3">, </span><span class="s6">&quot;periodically &quot; </span><span class="s2">if </span><span class="s1">updated_wheel </span><span class="s2">else </span><span class="s6">&quot;&quot;</span><span class="s3">, </span><span class="s1">updated_wheel</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">updated_wheel</span>
+
+    <span class="s1">u_log </span><span class="s3">= </span><span class="s1">UpdateLog</span><span class="s3">.</span><span class="s1">from_app_data</span><span class="s3">(</span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">of_version </span><span class="s2">is None</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">_</span><span class="s3">, </span><span class="s1">group </span><span class="s2">in </span><span class="s1">groupby</span><span class="s3">(</span><span class="s1">u_log</span><span class="s3">.</span><span class="s1">versions</span><span class="s3">, </span><span class="s1">key</span><span class="s3">=</span><span class="s2">lambda </span><span class="s1">v</span><span class="s3">: </span><span class="s1">v</span><span class="s3">.</span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">version_tuple</span><span class="s3">[</span><span class="s4">0</span><span class="s3">:</span><span class="s4">2</span><span class="s3">]):</span>
+            <span class="s5"># use only latest patch version per minor, earlier assumed to be buggy</span>
+            <span class="s1">all_patches </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">group</span><span class="s3">)</span>
+            <span class="s1">ignore_grace_period_minor </span><span class="s3">= </span><span class="s1">any</span><span class="s3">(</span><span class="s1">version </span><span class="s2">for </span><span class="s1">version </span><span class="s2">in </span><span class="s1">all_patches </span><span class="s2">if </span><span class="s1">version</span><span class="s3">.</span><span class="s1">use</span><span class="s3">(</span><span class="s1">now</span><span class="s3">))</span>
+            <span class="s2">for </span><span class="s1">version </span><span class="s2">in </span><span class="s1">all_patches</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">wheel </span><span class="s2">is not None and </span><span class="s1">Path</span><span class="s3">(</span><span class="s1">version</span><span class="s3">.</span><span class="s1">filename</span><span class="s3">).</span><span class="s1">name </span><span class="s3">== </span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">name</span><span class="s3">:</span>
+                    <span class="s2">return </span><span class="s1">wheel</span>
+                <span class="s2">if </span><span class="s1">version</span><span class="s3">.</span><span class="s1">use</span><span class="s3">(</span><span class="s1">now</span><span class="s3">, </span><span class="s1">ignore_grace_period_minor</span><span class="s3">):</span>
+                    <span class="s2">return </span><span class="s1">_update_wheel</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">version </span><span class="s2">in </span><span class="s1">u_log</span><span class="s3">.</span><span class="s1">versions</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">version</span><span class="s3">.</span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">version </span><span class="s3">== </span><span class="s1">of_version</span><span class="s3">:</span>
+                <span class="s2">return </span><span class="s1">_update_wheel</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)</span>
+
+    <span class="s2">return </span><span class="s1">wheel</span>
+
+
+<span class="s2">def </span><span class="s1">handle_auto_update</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">wheel</span><span class="s3">, </span><span class="s1">search_dirs</span><span class="s3">, </span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">env</span><span class="s3">):  </span><span class="s5"># noqa: PLR0913</span>
+    <span class="s1">embed_update_log </span><span class="s3">= </span><span class="s1">app_data</span><span class="s3">.</span><span class="s1">embed_update_log</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">)</span>
+    <span class="s1">u_log </span><span class="s3">= </span><span class="s1">UpdateLog</span><span class="s3">.</span><span class="s1">from_dict</span><span class="s3">(</span><span class="s1">embed_update_log</span><span class="s3">.</span><span class="s1">read</span><span class="s3">())</span>
+    <span class="s2">if </span><span class="s1">u_log</span><span class="s3">.</span><span class="s1">needs_update</span><span class="s3">:</span>
+        <span class="s1">u_log</span><span class="s3">.</span><span class="s1">periodic </span><span class="s3">= </span><span class="s2">True</span>
+        <span class="s1">u_log</span><span class="s3">.</span><span class="s1">started </span><span class="s3">= </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">)</span>
+        <span class="s1">embed_update_log</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">u_log</span><span class="s3">.</span><span class="s1">to_dict</span><span class="s3">())</span>
+        <span class="s1">trigger_update</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">wheel</span><span class="s3">, </span><span class="s1">search_dirs</span><span class="s3">, </span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">periodic</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">env</span><span class="s3">=</span><span class="s1">env</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">add_wheel_to_update_log</span><span class="s3">(</span><span class="s1">wheel</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">app_data</span><span class="s3">):</span>
+    <span class="s1">embed_update_log </span><span class="s3">= </span><span class="s1">app_data</span><span class="s3">.</span><span class="s1">embed_update_log</span><span class="s3">(</span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">)</span>
+    <span class="s1">logging</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s6">&quot;adding %s information to %s&quot;</span><span class="s3">, </span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">embed_update_log</span><span class="s3">.</span><span class="s1">file</span><span class="s3">)</span>
+    <span class="s1">u_log </span><span class="s3">= </span><span class="s1">UpdateLog</span><span class="s3">.</span><span class="s1">from_dict</span><span class="s3">(</span><span class="s1">embed_update_log</span><span class="s3">.</span><span class="s1">read</span><span class="s3">())</span>
+    <span class="s2">if </span><span class="s1">any</span><span class="s3">(</span><span class="s1">version</span><span class="s3">.</span><span class="s1">filename </span><span class="s3">== </span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">name </span><span class="s2">for </span><span class="s1">version </span><span class="s2">in </span><span class="s1">u_log</span><span class="s3">.</span><span class="s1">versions</span><span class="s3">):</span>
+        <span class="s1">logging</span><span class="s3">.</span><span class="s1">warning</span><span class="s3">(</span><span class="s6">&quot;%s already present in %s&quot;</span><span class="s3">, </span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">embed_update_log</span><span class="s3">.</span><span class="s1">file</span><span class="s3">)</span>
+        <span class="s2">return</span>
+    <span class="s5"># we don't need a release date for sources other than &quot;periodic&quot;</span>
+    <span class="s1">version </span><span class="s3">= </span><span class="s1">NewVersion</span><span class="s3">(</span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">), </span><span class="s2">None</span><span class="s3">, </span><span class="s6">&quot;download&quot;</span><span class="s3">)</span>
+    <span class="s1">u_log</span><span class="s3">.</span><span class="s1">versions</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)  </span><span class="s5"># always write at the end for proper updates</span>
+    <span class="s1">embed_update_log</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">u_log</span><span class="s3">.</span><span class="s1">to_dict</span><span class="s3">())</span>
+
+
+<span class="s1">DATETIME_FMT </span><span class="s3">= </span><span class="s6">&quot;%Y-%m-%dT%H:%M:%S.%fZ&quot;</span>
+
+
+<span class="s2">def </span><span class="s1">dump_datetime</span><span class="s3">(</span><span class="s1">value</span><span class="s3">):</span>
+    <span class="s2">return None if </span><span class="s1">value </span><span class="s2">is None else </span><span class="s1">value</span><span class="s3">.</span><span class="s1">strftime</span><span class="s3">(</span><span class="s1">DATETIME_FMT</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">load_datetime</span><span class="s3">(</span><span class="s1">value</span><span class="s3">):</span>
+    <span class="s2">return None if </span><span class="s1">value </span><span class="s2">is None else </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">strptime</span><span class="s3">(</span><span class="s1">value</span><span class="s3">, </span><span class="s1">DATETIME_FMT</span><span class="s3">).</span><span class="s1">replace</span><span class="s3">(</span><span class="s1">tzinfo</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">NewVersion</span><span class="s3">:  </span><span class="s5"># noqa: PLW1641</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">filename</span><span class="s3">, </span><span class="s1">found_date</span><span class="s3">, </span><span class="s1">release_date</span><span class="s3">, </span><span class="s1">source</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">filename </span><span class="s3">= </span><span class="s1">filename</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">found_date </span><span class="s3">= </span><span class="s1">found_date</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">release_date </span><span class="s3">= </span><span class="s1">release_date</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">source </span><span class="s3">= </span><span class="s1">source</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">from_dict</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">dictionary</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">(</span>
+            <span class="s1">filename</span><span class="s3">=</span><span class="s1">dictionary</span><span class="s3">[</span><span class="s6">&quot;filename&quot;</span><span class="s3">],</span>
+            <span class="s1">found_date</span><span class="s3">=</span><span class="s1">load_datetime</span><span class="s3">(</span><span class="s1">dictionary</span><span class="s3">[</span><span class="s6">&quot;found_date&quot;</span><span class="s3">]),</span>
+            <span class="s1">release_date</span><span class="s3">=</span><span class="s1">load_datetime</span><span class="s3">(</span><span class="s1">dictionary</span><span class="s3">[</span><span class="s6">&quot;release_date&quot;</span><span class="s3">]),</span>
+            <span class="s1">source</span><span class="s3">=</span><span class="s1">dictionary</span><span class="s3">[</span><span class="s6">&quot;source&quot;</span><span class="s3">],</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">to_dict</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s3">{</span>
+            <span class="s6">&quot;filename&quot;</span><span class="s3">: </span><span class="s1">self</span><span class="s3">.</span><span class="s1">filename</span><span class="s3">,</span>
+            <span class="s6">&quot;release_date&quot;</span><span class="s3">: </span><span class="s1">dump_datetime</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">release_date</span><span class="s3">),</span>
+            <span class="s6">&quot;found_date&quot;</span><span class="s3">: </span><span class="s1">dump_datetime</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">found_date</span><span class="s3">),</span>
+            <span class="s6">&quot;source&quot;</span><span class="s3">: </span><span class="s1">self</span><span class="s3">.</span><span class="s1">source</span><span class="s3">,</span>
+        <span class="s3">}</span>
+
+    <span class="s2">def </span><span class="s1">use</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">now</span><span class="s3">, </span><span class="s1">ignore_grace_period_minor</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">ignore_grace_period_ci</span><span class="s3">=</span><span class="s2">False</span><span class="s3">):  </span><span class="s5"># noqa: FBT002</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">source </span><span class="s3">== </span><span class="s6">&quot;manual&quot;</span><span class="s3">:</span>
+            <span class="s2">return True</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">source </span><span class="s3">== </span><span class="s6">&quot;periodic&quot; </span><span class="s2">and </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">found_date </span><span class="s3">&lt; </span><span class="s1">now </span><span class="s3">- </span><span class="s1">GRACE_PERIOD_CI </span><span class="s2">or </span><span class="s1">ignore_grace_period_ci</span><span class="s3">):</span>
+            <span class="s2">if not </span><span class="s1">ignore_grace_period_minor</span><span class="s3">:</span>
+                <span class="s1">compare_from </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">release_date </span><span class="s2">or </span><span class="s1">self</span><span class="s3">.</span><span class="s1">found_date</span>
+                <span class="s2">return </span><span class="s1">now </span><span class="s3">- </span><span class="s1">compare_from </span><span class="s3">&gt;= </span><span class="s1">GRACE_PERIOD_MINOR</span>
+            <span class="s2">return True</span>
+        <span class="s2">return False</span>
+
+    <span class="s2">def </span><span class="s1">__repr__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) </span><span class="s1">-&gt; str</span><span class="s3">:</span>
+        <span class="s2">return </span><span class="s3">(</span>
+            <span class="s6">f&quot;</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span><span class="s3">.</span><span class="s1">__name__</span><span class="s2">}</span><span class="s6">(filename=</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">filename</span><span class="s2">}</span><span class="s6">), found_date=</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">found_date</span><span class="s2">}</span><span class="s6">, &quot;</span>
+            <span class="s6">f&quot;release_date=</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">release_date</span><span class="s2">}</span><span class="s6">, source=</span><span class="s2">{</span><span class="s1">self</span><span class="s3">.</span><span class="s1">source</span><span class="s2">}</span><span class="s6">)&quot;</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__eq__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">) == </span><span class="s1">type</span><span class="s3">(</span><span class="s1">other</span><span class="s3">) </span><span class="s2">and </span><span class="s1">all</span><span class="s3">(  </span><span class="s5"># noqa: E721</span>
+            <span class="s1">getattr</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">k</span><span class="s3">) == </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">other</span><span class="s3">, </span><span class="s1">k</span><span class="s3">) </span><span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s3">[</span><span class="s6">&quot;filename&quot;</span><span class="s3">, </span><span class="s6">&quot;release_date&quot;</span><span class="s3">, </span><span class="s6">&quot;found_date&quot;</span><span class="s3">, </span><span class="s6">&quot;source&quot;</span><span class="s3">]</span>
+        <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__ne__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">other</span><span class="s3">):</span>
+        <span class="s2">return not </span><span class="s3">(</span><span class="s1">self </span><span class="s3">== </span><span class="s1">other</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">wheel</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">Wheel</span><span class="s3">(</span><span class="s1">Path</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">filename</span><span class="s3">))</span>
+
+
+<span class="s2">class </span><span class="s1">UpdateLog</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">started</span><span class="s3">, </span><span class="s1">completed</span><span class="s3">, </span><span class="s1">versions</span><span class="s3">, </span><span class="s1">periodic</span><span class="s3">) </span><span class="s1">-&gt; </span><span class="s2">None</span><span class="s3">:</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">started </span><span class="s3">= </span><span class="s1">started</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">completed </span><span class="s3">= </span><span class="s1">completed</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">versions </span><span class="s3">= </span><span class="s1">versions</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">periodic </span><span class="s3">= </span><span class="s1">periodic</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">from_dict</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">dictionary</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">dictionary </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">dictionary </span><span class="s3">= {}</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">(</span>
+            <span class="s1">load_datetime</span><span class="s3">(</span><span class="s1">dictionary</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s6">&quot;started&quot;</span><span class="s3">)),</span>
+            <span class="s1">load_datetime</span><span class="s3">(</span><span class="s1">dictionary</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s6">&quot;completed&quot;</span><span class="s3">)),</span>
+            <span class="s3">[</span><span class="s1">NewVersion</span><span class="s3">.</span><span class="s1">from_dict</span><span class="s3">(</span><span class="s1">v</span><span class="s3">) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">dictionary</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s6">&quot;versions&quot;</span><span class="s3">, [])],</span>
+            <span class="s1">dictionary</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s6">&quot;periodic&quot;</span><span class="s3">),</span>
+        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">from_app_data</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">):</span>
+        <span class="s1">raw_json </span><span class="s3">= </span><span class="s1">app_data</span><span class="s3">.</span><span class="s1">embed_update_log</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">).</span><span class="s1">read</span><span class="s3">()</span>
+        <span class="s2">return </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">from_dict</span><span class="s3">(</span><span class="s1">raw_json</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">to_dict</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s3">{</span>
+            <span class="s6">&quot;started&quot;</span><span class="s3">: </span><span class="s1">dump_datetime</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">started</span><span class="s3">),</span>
+            <span class="s6">&quot;completed&quot;</span><span class="s3">: </span><span class="s1">dump_datetime</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">completed</span><span class="s3">),</span>
+            <span class="s6">&quot;periodic&quot;</span><span class="s3">: </span><span class="s1">self</span><span class="s3">.</span><span class="s1">periodic</span><span class="s3">,</span>
+            <span class="s6">&quot;versions&quot;</span><span class="s3">: [</span><span class="s1">r</span><span class="s3">.</span><span class="s1">to_dict</span><span class="s3">() </span><span class="s2">for </span><span class="s1">r </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">versions</span><span class="s3">],</span>
+        <span class="s3">}</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">needs_update</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">now </span><span class="s3">= </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">completed </span><span class="s2">is None</span><span class="s3">:  </span><span class="s5"># never completed</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_check_start</span><span class="s3">(</span><span class="s1">now</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">now </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">completed </span><span class="s3">&lt;= </span><span class="s1">UPDATE_PERIOD</span><span class="s3">:</span>
+            <span class="s2">return False</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_check_start</span><span class="s3">(</span><span class="s1">now</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_check_start</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">now</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">started </span><span class="s2">is None or </span><span class="s1">now </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">started </span><span class="s3">&gt; </span><span class="s1">UPDATE_ABORTED_DELAY</span>
+
+
+<span class="s2">def </span><span class="s1">trigger_update</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">wheel</span><span class="s3">, </span><span class="s1">search_dirs</span><span class="s3">, </span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">env</span><span class="s3">, </span><span class="s1">periodic</span><span class="s3">):  </span><span class="s5"># noqa: PLR0913</span>
+    <span class="s1">wheel_path </span><span class="s3">= </span><span class="s2">None if </span><span class="s1">wheel </span><span class="s2">is None else </span><span class="s1">str</span><span class="s3">(</span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">path</span><span class="s3">)</span>
+    <span class="s1">cmd </span><span class="s3">= [</span>
+        <span class="s1">sys</span><span class="s3">.</span><span class="s1">executable</span><span class="s3">,</span>
+        <span class="s6">&quot;-c&quot;</span><span class="s3">,</span>
+        <span class="s1">dedent</span><span class="s3">(</span>
+            <span class="s6">&quot;&quot;&quot; 
+        from virtualenv.report import setup_report, MAX_LEVEL 
+        from virtualenv.seed.wheels.periodic_update import do_update 
+        setup_report(MAX_LEVEL, show_pid=True) 
+        do_update({!r}, {!r}, {!r}, {!r}, {!r}, {!r}) 
+        &quot;&quot;&quot;</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s3">.</span><span class="s1">strip</span><span class="s3">()</span>
+        <span class="s3">.</span><span class="s1">format</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">wheel_path</span><span class="s3">, </span><span class="s1">str</span><span class="s3">(</span><span class="s1">app_data</span><span class="s3">), [</span><span class="s1">str</span><span class="s3">(</span><span class="s1">p</span><span class="s3">) </span><span class="s2">for </span><span class="s1">p </span><span class="s2">in </span><span class="s1">search_dirs</span><span class="s3">], </span><span class="s1">periodic</span><span class="s3">),</span>
+    <span class="s3">]</span>
+    <span class="s1">debug </span><span class="s3">= </span><span class="s1">env</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s6">&quot;_VIRTUALENV_PERIODIC_UPDATE_INLINE&quot;</span><span class="s3">) == </span><span class="s6">&quot;1&quot;</span>
+    <span class="s1">pipe </span><span class="s3">= </span><span class="s2">None if </span><span class="s1">debug </span><span class="s2">else </span><span class="s1">DEVNULL</span>
+    <span class="s1">kwargs </span><span class="s3">= {</span><span class="s6">&quot;stdout&quot;</span><span class="s3">: </span><span class="s1">pipe</span><span class="s3">, </span><span class="s6">&quot;stderr&quot;</span><span class="s3">: </span><span class="s1">pipe</span><span class="s3">}</span>
+    <span class="s2">if not </span><span class="s1">debug </span><span class="s2">and </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">platform </span><span class="s3">== </span><span class="s6">&quot;win32&quot;</span><span class="s3">:</span>
+        <span class="s1">kwargs</span><span class="s3">[</span><span class="s6">&quot;creationflags&quot;</span><span class="s3">] = </span><span class="s1">CREATE_NO_WINDOW</span>
+    <span class="s1">process </span><span class="s3">= </span><span class="s1">Popen</span><span class="s3">(</span><span class="s1">cmd</span><span class="s3">, **</span><span class="s1">kwargs</span><span class="s3">)</span>
+    <span class="s1">logging</span><span class="s3">.</span><span class="s1">info</span><span class="s3">(</span>
+        <span class="s6">&quot;triggered periodic upgrade of %s%s (for python %s) via background process having PID %d&quot;</span><span class="s3">,</span>
+        <span class="s1">distribution</span><span class="s3">,</span>
+        <span class="s6">&quot;&quot; </span><span class="s2">if </span><span class="s1">wheel </span><span class="s2">is None else </span><span class="s6">f&quot;==</span><span class="s2">{</span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">version</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s3">,</span>
+        <span class="s1">for_py_version</span><span class="s3">,</span>
+        <span class="s1">process</span><span class="s3">.</span><span class="s1">pid</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">debug</span><span class="s3">:</span>
+        <span class="s1">process</span><span class="s3">.</span><span class="s1">communicate</span><span class="s3">()  </span><span class="s5"># on purpose not called to make it a background process</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s5"># set the returncode here -&gt; no ResourceWarning on main process exit if the subprocess still runs</span>
+        <span class="s1">process</span><span class="s3">.</span><span class="s1">returncode </span><span class="s3">= </span><span class="s4">0</span>
+
+
+<span class="s2">def </span><span class="s1">do_update</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">embed_filename</span><span class="s3">, </span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">search_dirs</span><span class="s3">, </span><span class="s1">periodic</span><span class="s3">):  </span><span class="s5"># noqa: PLR0913</span>
+    <span class="s1">versions </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s1">versions </span><span class="s3">= </span><span class="s1">_run_do_update</span><span class="s3">(</span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">embed_filename</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">periodic</span><span class="s3">, </span><span class="s1">search_dirs</span><span class="s3">)</span>
+    <span class="s2">finally</span><span class="s3">:</span>
+        <span class="s1">logging</span><span class="s3">.</span><span class="s1">debug</span><span class="s3">(</span><span class="s6">&quot;done %s %s with %s&quot;</span><span class="s3">, </span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">versions</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">versions</span>
+
+
+<span class="s2">def </span><span class="s1">_run_do_update</span><span class="s3">(  </span><span class="s5"># noqa: C901, PLR0913</span>
+    <span class="s1">app_data</span><span class="s3">,</span>
+    <span class="s1">distribution</span><span class="s3">,</span>
+    <span class="s1">embed_filename</span><span class="s3">,</span>
+    <span class="s1">for_py_version</span><span class="s3">,</span>
+    <span class="s1">periodic</span><span class="s3">,</span>
+    <span class="s1">search_dirs</span><span class="s3">,</span>
+<span class="s3">):</span>
+    <span class="s2">from </span><span class="s1">virtualenv</span><span class="s3">.</span><span class="s1">seed</span><span class="s3">.</span><span class="s1">wheels </span><span class="s2">import </span><span class="s1">acquire  </span><span class="s5"># noqa: PLC0415</span>
+
+    <span class="s1">wheel_filename </span><span class="s3">= </span><span class="s2">None if </span><span class="s1">embed_filename </span><span class="s2">is None else </span><span class="s1">Path</span><span class="s3">(</span><span class="s1">embed_filename</span><span class="s3">)</span>
+    <span class="s1">embed_version </span><span class="s3">= </span><span class="s2">None if </span><span class="s1">wheel_filename </span><span class="s2">is None else </span><span class="s1">Wheel</span><span class="s3">(</span><span class="s1">wheel_filename</span><span class="s3">).</span><span class="s1">version_tuple</span>
+    <span class="s1">app_data </span><span class="s3">= </span><span class="s1">AppDataDiskFolder</span><span class="s3">(</span><span class="s1">app_data</span><span class="s3">) </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">str</span><span class="s3">) </span><span class="s2">else </span><span class="s1">app_data</span>
+    <span class="s1">search_dirs </span><span class="s3">= [</span><span class="s1">Path</span><span class="s3">(</span><span class="s1">p</span><span class="s3">) </span><span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">p</span><span class="s3">, </span><span class="s1">str</span><span class="s3">) </span><span class="s2">else </span><span class="s1">p </span><span class="s2">for </span><span class="s1">p </span><span class="s2">in </span><span class="s1">search_dirs</span><span class="s3">]</span>
+    <span class="s1">wheelhouse </span><span class="s3">= </span><span class="s1">app_data</span><span class="s3">.</span><span class="s1">house</span>
+    <span class="s1">embed_update_log </span><span class="s3">= </span><span class="s1">app_data</span><span class="s3">.</span><span class="s1">embed_update_log</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">)</span>
+    <span class="s1">u_log </span><span class="s3">= </span><span class="s1">UpdateLog</span><span class="s3">.</span><span class="s1">from_dict</span><span class="s3">(</span><span class="s1">embed_update_log</span><span class="s3">.</span><span class="s1">read</span><span class="s3">())</span>
+    <span class="s1">now </span><span class="s3">= </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">)</span>
+
+    <span class="s1">update_versions</span><span class="s3">, </span><span class="s1">other_versions </span><span class="s3">= [], []</span>
+    <span class="s2">for </span><span class="s1">version </span><span class="s2">in </span><span class="s1">u_log</span><span class="s3">.</span><span class="s1">versions</span><span class="s3">:</span>
+        <span class="s2">if </span><span class="s1">version</span><span class="s3">.</span><span class="s1">source </span><span class="s2">in </span><span class="s3">{</span><span class="s6">&quot;periodic&quot;</span><span class="s3">, </span><span class="s6">&quot;manual&quot;</span><span class="s3">}:</span>
+            <span class="s1">update_versions</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">other_versions</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">version</span><span class="s3">)</span>
+
+    <span class="s2">if </span><span class="s1">periodic</span><span class="s3">:</span>
+        <span class="s1">source </span><span class="s3">= </span><span class="s6">&quot;periodic&quot;</span>
+    <span class="s2">else</span><span class="s3">:</span>
+        <span class="s1">source </span><span class="s3">= </span><span class="s6">&quot;manual&quot;</span>
+        <span class="s5"># mark the most recent one as source &quot;manual&quot;</span>
+        <span class="s2">if </span><span class="s1">update_versions</span><span class="s3">:</span>
+            <span class="s1">update_versions</span><span class="s3">[</span><span class="s4">0</span><span class="s3">].</span><span class="s1">source </span><span class="s3">= </span><span class="s1">source</span>
+
+    <span class="s2">if </span><span class="s1">wheel_filename </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s1">dest </span><span class="s3">= </span><span class="s1">wheelhouse </span><span class="s3">/ </span><span class="s1">wheel_filename</span><span class="s3">.</span><span class="s1">name</span>
+        <span class="s2">if not </span><span class="s1">dest</span><span class="s3">.</span><span class="s1">exists</span><span class="s3">():</span>
+            <span class="s1">copy2</span><span class="s3">(</span><span class="s1">str</span><span class="s3">(</span><span class="s1">wheel_filename</span><span class="s3">), </span><span class="s1">str</span><span class="s3">(</span><span class="s1">wheelhouse</span><span class="s3">))</span>
+    <span class="s1">last</span><span class="s3">, </span><span class="s1">last_version</span><span class="s3">, </span><span class="s1">versions</span><span class="s3">, </span><span class="s1">filenames </span><span class="s3">= </span><span class="s2">None</span><span class="s3">, </span><span class="s2">None</span><span class="s3">, [], </span><span class="s1">set</span><span class="s3">()</span>
+    <span class="s2">while </span><span class="s1">last </span><span class="s2">is None or not </span><span class="s1">last</span><span class="s3">.</span><span class="s1">use</span><span class="s3">(</span><span class="s1">now</span><span class="s3">, </span><span class="s1">ignore_grace_period_ci</span><span class="s3">=</span><span class="s2">True</span><span class="s3">):</span>
+        <span class="s1">download_time </span><span class="s3">= </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">)</span>
+        <span class="s1">dest </span><span class="s3">= </span><span class="s1">acquire</span><span class="s3">.</span><span class="s1">download_wheel</span><span class="s3">(</span>
+            <span class="s1">distribution</span><span class="s3">=</span><span class="s1">distribution</span><span class="s3">,</span>
+            <span class="s1">version_spec</span><span class="s3">=</span><span class="s2">None if </span><span class="s1">last_version </span><span class="s2">is None else </span><span class="s6">f&quot;&lt;</span><span class="s2">{</span><span class="s1">last_version</span><span class="s2">}</span><span class="s6">&quot;</span><span class="s3">,</span>
+            <span class="s1">for_py_version</span><span class="s3">=</span><span class="s1">for_py_version</span><span class="s3">,</span>
+            <span class="s1">search_dirs</span><span class="s3">=</span><span class="s1">search_dirs</span><span class="s3">,</span>
+            <span class="s1">app_data</span><span class="s3">=</span><span class="s1">app_data</span><span class="s3">,</span>
+            <span class="s1">to_folder</span><span class="s3">=</span><span class="s1">wheelhouse</span><span class="s3">,</span>
+            <span class="s1">env</span><span class="s3">=</span><span class="s1">os</span><span class="s3">.</span><span class="s1">environ</span><span class="s3">,</span>
+        <span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">dest </span><span class="s2">is None or </span><span class="s3">(</span><span class="s1">update_versions </span><span class="s2">and </span><span class="s1">update_versions</span><span class="s3">[</span><span class="s4">0</span><span class="s3">].</span><span class="s1">filename </span><span class="s3">== </span><span class="s1">dest</span><span class="s3">.</span><span class="s1">name</span><span class="s3">):</span>
+            <span class="s2">break</span>
+        <span class="s1">release_date </span><span class="s3">= </span><span class="s1">release_date_for_wheel_path</span><span class="s3">(</span><span class="s1">dest</span><span class="s3">.</span><span class="s1">path</span><span class="s3">)</span>
+        <span class="s1">last </span><span class="s3">= </span><span class="s1">NewVersion</span><span class="s3">(</span><span class="s1">filename</span><span class="s3">=</span><span class="s1">dest</span><span class="s3">.</span><span class="s1">path</span><span class="s3">.</span><span class="s1">name</span><span class="s3">, </span><span class="s1">release_date</span><span class="s3">=</span><span class="s1">release_date</span><span class="s3">, </span><span class="s1">found_date</span><span class="s3">=</span><span class="s1">download_time</span><span class="s3">, </span><span class="s1">source</span><span class="s3">=</span><span class="s1">source</span><span class="s3">)</span>
+        <span class="s1">logging</span><span class="s3">.</span><span class="s1">info</span><span class="s3">(</span><span class="s6">&quot;detected %s in %s&quot;</span><span class="s3">, </span><span class="s1">last</span><span class="s3">, </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">) - </span><span class="s1">download_time</span><span class="s3">)</span>
+        <span class="s1">versions</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">last</span><span class="s3">)</span>
+        <span class="s1">filenames</span><span class="s3">.</span><span class="s1">add</span><span class="s3">(</span><span class="s1">last</span><span class="s3">.</span><span class="s1">filename</span><span class="s3">)</span>
+        <span class="s1">last_wheel </span><span class="s3">= </span><span class="s1">last</span><span class="s3">.</span><span class="s1">wheel</span>
+        <span class="s1">last_version </span><span class="s3">= </span><span class="s1">last_wheel</span><span class="s3">.</span><span class="s1">version</span>
+        <span class="s2">if </span><span class="s1">embed_version </span><span class="s2">is not None and </span><span class="s1">embed_version </span><span class="s3">&gt;= </span><span class="s1">last_wheel</span><span class="s3">.</span><span class="s1">version_tuple</span><span class="s3">:</span>
+            <span class="s2">break  </span><span class="s5"># stop download if we reach the embed version</span>
+    <span class="s1">u_log</span><span class="s3">.</span><span class="s1">periodic </span><span class="s3">= </span><span class="s1">periodic</span>
+    <span class="s2">if not </span><span class="s1">u_log</span><span class="s3">.</span><span class="s1">periodic</span><span class="s3">:</span>
+        <span class="s1">u_log</span><span class="s3">.</span><span class="s1">started </span><span class="s3">= </span><span class="s1">now</span>
+    <span class="s5"># update other_versions by removing version we just found</span>
+    <span class="s1">other_versions </span><span class="s3">= [</span><span class="s1">version </span><span class="s2">for </span><span class="s1">version </span><span class="s2">in </span><span class="s1">other_versions </span><span class="s2">if </span><span class="s1">version</span><span class="s3">.</span><span class="s1">filename </span><span class="s2">not in </span><span class="s1">filenames</span><span class="s3">]</span>
+    <span class="s1">u_log</span><span class="s3">.</span><span class="s1">versions </span><span class="s3">= </span><span class="s1">versions </span><span class="s3">+ </span><span class="s1">update_versions </span><span class="s3">+ </span><span class="s1">other_versions</span>
+    <span class="s1">u_log</span><span class="s3">.</span><span class="s1">completed </span><span class="s3">= </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">)</span>
+    <span class="s1">embed_update_log</span><span class="s3">.</span><span class="s1">write</span><span class="s3">(</span><span class="s1">u_log</span><span class="s3">.</span><span class="s1">to_dict</span><span class="s3">())</span>
+    <span class="s2">return </span><span class="s1">versions</span>
+
+
+<span class="s2">def </span><span class="s1">release_date_for_wheel_path</span><span class="s3">(</span><span class="s1">dest</span><span class="s3">):</span>
+    <span class="s1">wheel </span><span class="s3">= </span><span class="s1">Wheel</span><span class="s3">(</span><span class="s1">dest</span><span class="s3">)</span>
+    <span class="s5"># the most accurate is to ask PyPi - e.g. https://pypi.org/pypi/pip/json,</span>
+    <span class="s5"># see https://warehouse.pypa.io/api-reference/json/ for more details</span>
+    <span class="s1">content </span><span class="s3">= </span><span class="s1">_pypi_get_distribution_info_cached</span><span class="s3">(</span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">distribution</span><span class="s3">)</span>
+    <span class="s2">if </span><span class="s1">content </span><span class="s2">is not None</span><span class="s3">:</span>
+        <span class="s2">try</span><span class="s3">:</span>
+            <span class="s1">upload_time </span><span class="s3">= </span><span class="s1">content</span><span class="s3">[</span><span class="s6">&quot;releases&quot;</span><span class="s3">][</span><span class="s1">wheel</span><span class="s3">.</span><span class="s1">version</span><span class="s3">][</span><span class="s4">0</span><span class="s3">][</span><span class="s6">&quot;upload_time&quot;</span><span class="s3">]</span>
+            <span class="s2">return </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">strptime</span><span class="s3">(</span><span class="s1">upload_time</span><span class="s3">, </span><span class="s6">&quot;%Y-%m-%dT%H:%M:%S&quot;</span><span class="s3">).</span><span class="s1">replace</span><span class="s3">(</span><span class="s1">tzinfo</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">)</span>
+        <span class="s2">except </span><span class="s1">Exception </span><span class="s2">as </span><span class="s1">exception</span><span class="s3">:  </span><span class="s5"># noqa: BLE001</span>
+            <span class="s1">logging</span><span class="s3">.</span><span class="s1">error</span><span class="s3">(</span><span class="s6">&quot;could not load release date %s because %r&quot;</span><span class="s3">, </span><span class="s1">content</span><span class="s3">, </span><span class="s1">exception</span><span class="s3">)  </span><span class="s5"># noqa: TRY400</span>
+    <span class="s2">return None</span>
+
+
+<span class="s2">def </span><span class="s1">_request_context</span><span class="s3">():</span>
+    <span class="s2">yield None</span>
+    <span class="s5"># fallback to non verified HTTPS (the information we request is not sensitive, so fallback)</span>
+    <span class="s2">yield </span><span class="s1">ssl</span><span class="s3">.</span><span class="s1">_create_unverified_context</span><span class="s3">()  </span><span class="s5"># noqa: S323, SLF001</span>
+
+
+<span class="s1">_PYPI_CACHE </span><span class="s3">= {}</span>
+
+
+<span class="s2">def </span><span class="s1">_pypi_get_distribution_info_cached</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">):</span>
+    <span class="s2">if </span><span class="s1">distribution </span><span class="s2">not in </span><span class="s1">_PYPI_CACHE</span><span class="s3">:</span>
+        <span class="s1">_PYPI_CACHE</span><span class="s3">[</span><span class="s1">distribution</span><span class="s3">] = </span><span class="s1">_pypi_get_distribution_info</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">)</span>
+    <span class="s2">return </span><span class="s1">_PYPI_CACHE</span><span class="s3">[</span><span class="s1">distribution</span><span class="s3">]</span>
+
+
+<span class="s2">def </span><span class="s1">_pypi_get_distribution_info</span><span class="s3">(</span><span class="s1">distribution</span><span class="s3">):</span>
+    <span class="s1">content</span><span class="s3">, </span><span class="s1">url </span><span class="s3">= </span><span class="s2">None</span><span class="s3">, </span><span class="s6">f&quot;https://pypi.org/pypi/</span><span class="s2">{</span><span class="s1">distribution</span><span class="s2">}</span><span class="s6">/json&quot;</span>
+    <span class="s2">try</span><span class="s3">:</span>
+        <span class="s2">for </span><span class="s1">context </span><span class="s2">in </span><span class="s1">_request_context</span><span class="s3">():</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">with </span><span class="s1">urlopen</span><span class="s3">(</span><span class="s1">url</span><span class="s3">, </span><span class="s1">context</span><span class="s3">=</span><span class="s1">context</span><span class="s3">) </span><span class="s2">as </span><span class="s1">file_handler</span><span class="s3">:  </span><span class="s5"># noqa: S310</span>
+                    <span class="s1">content </span><span class="s3">= </span><span class="s1">json</span><span class="s3">.</span><span class="s1">load</span><span class="s3">(</span><span class="s1">file_handler</span><span class="s3">)</span>
+                <span class="s2">break</span>
+            <span class="s2">except </span><span class="s1">URLError </span><span class="s2">as </span><span class="s1">exception</span><span class="s3">:</span>
+                <span class="s1">logging</span><span class="s3">.</span><span class="s1">error</span><span class="s3">(</span><span class="s6">&quot;failed to access %s because %r&quot;</span><span class="s3">, </span><span class="s1">url</span><span class="s3">, </span><span class="s1">exception</span><span class="s3">)  </span><span class="s5"># noqa: TRY400</span>
+    <span class="s2">except </span><span class="s1">Exception </span><span class="s2">as </span><span class="s1">exception</span><span class="s3">:  </span><span class="s5"># noqa: BLE001</span>
+        <span class="s1">logging</span><span class="s3">.</span><span class="s1">error</span><span class="s3">(</span><span class="s6">&quot;failed to access %s because %r&quot;</span><span class="s3">, </span><span class="s1">url</span><span class="s3">, </span><span class="s1">exception</span><span class="s3">)  </span><span class="s5"># noqa: TRY400</span>
+    <span class="s2">return </span><span class="s1">content</span>
+
+
+<span class="s2">def </span><span class="s1">manual_upgrade</span><span class="s3">(</span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">env</span><span class="s3">):</span>
+    <span class="s1">threads </span><span class="s3">= []</span>
+
+    <span class="s2">for </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">distribution_to_package </span><span class="s2">in </span><span class="s1">BUNDLE_SUPPORT</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+        <span class="s5"># load extra search dir for the given for_py</span>
+        <span class="s2">for </span><span class="s1">distribution </span><span class="s2">in </span><span class="s1">distribution_to_package</span><span class="s3">:</span>
+            <span class="s1">thread </span><span class="s3">= </span><span class="s1">Thread</span><span class="s3">(</span><span class="s1">target</span><span class="s3">=</span><span class="s1">_run_manual_upgrade</span><span class="s3">, </span><span class="s1">args</span><span class="s3">=(</span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">env</span><span class="s3">))</span>
+            <span class="s1">thread</span><span class="s3">.</span><span class="s1">start</span><span class="s3">()</span>
+            <span class="s1">threads</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">thread</span><span class="s3">)</span>
+
+    <span class="s2">for </span><span class="s1">thread </span><span class="s2">in </span><span class="s1">threads</span><span class="s3">:</span>
+        <span class="s1">thread</span><span class="s3">.</span><span class="s1">join</span><span class="s3">()</span>
+
+
+<span class="s2">def </span><span class="s1">_run_manual_upgrade</span><span class="s3">(</span><span class="s1">app_data</span><span class="s3">, </span><span class="s1">distribution</span><span class="s3">, </span><span class="s1">for_py_version</span><span class="s3">, </span><span class="s1">env</span><span class="s3">):</span>
+    <span class="s1">start </span><span class="s3">= </span><span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">)</span>
+    <span class="s2">from </span><span class="s3">.</span><span class="s1">bundle </span><span class="s2">import </span><span class="s1">from_bundle  </span><span class="s5"># noqa: PLC0415</span>
+
+    <span class="s1">current </span><span class="s3">= </span><span class="s1">from_bundle</span><span class="s3">(</span>
+        <span class="s1">distribution</span><span class="s3">=</span><span class="s1">distribution</span><span class="s3">,</span>
+        <span class="s1">version</span><span class="s3">=</span><span class="s2">None</span><span class="s3">,</span>
+        <span class="s1">for_py_version</span><span class="s3">=</span><span class="s1">for_py_version</span><span class="s3">,</span>
+        <span class="s1">search_dirs</span><span class="s3">=[],</span>
+        <span class="s1">app_data</span><span class="s3">=</span><span class="s1">app_data</span><span class="s3">,</span>
+        <span class="s1">do_periodic_update</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+        <span class="s1">env</span><span class="s3">=</span><span class="s1">env</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s1">logging</span><span class="s3">.</span><span class="s1">warning</span><span class="s3">(</span>
+        <span class="s6">&quot;upgrade %s for python %s with current %s&quot;</span><span class="s3">,</span>
+        <span class="s1">distribution</span><span class="s3">,</span>
+        <span class="s1">for_py_version</span><span class="s3">,</span>
+        <span class="s6">&quot;&quot; </span><span class="s2">if </span><span class="s1">current </span><span class="s2">is None else </span><span class="s1">current</span><span class="s3">.</span><span class="s1">name</span><span class="s3">,</span>
+    <span class="s3">)</span>
+    <span class="s1">versions </span><span class="s3">= </span><span class="s1">do_update</span><span class="s3">(</span>
+        <span class="s1">distribution</span><span class="s3">=</span><span class="s1">distribution</span><span class="s3">,</span>
+        <span class="s1">for_py_version</span><span class="s3">=</span><span class="s1">for_py_version</span><span class="s3">,</span>
+        <span class="s1">embed_filename</span><span class="s3">=</span><span class="s1">current</span><span class="s3">.</span><span class="s1">path</span><span class="s3">,</span>
+        <span class="s1">app_data</span><span class="s3">=</span><span class="s1">app_data</span><span class="s3">,</span>
+        <span class="s1">search_dirs</span><span class="s3">=[],</span>
+        <span class="s1">periodic</span><span class="s3">=</span><span class="s2">False</span><span class="s3">,</span>
+    <span class="s3">)</span>
+
+    <span class="s1">args </span><span class="s3">= [</span>
+        <span class="s1">distribution</span><span class="s3">,</span>
+        <span class="s1">for_py_version</span><span class="s3">,</span>
+        <span class="s1">datetime</span><span class="s3">.</span><span class="s1">now</span><span class="s3">(</span><span class="s1">tz</span><span class="s3">=</span><span class="s1">timezone</span><span class="s3">.</span><span class="s1">utc</span><span class="s3">) - </span><span class="s1">start</span><span class="s3">,</span>
+    <span class="s3">]</span>
+    <span class="s2">if </span><span class="s1">versions</span><span class="s3">:</span>
+        <span class="s1">args</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s6">&quot;</span><span class="s2">\n</span><span class="s6">&quot;</span><span class="s3">.</span><span class="s1">join</span><span class="s3">(</span><span class="s6">f&quot;</span><span class="s2">\t{</span><span class="s1">v</span><span class="s2">}</span><span class="s6">&quot; </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">versions</span><span class="s3">))</span>
+    <span class="s1">ver_update </span><span class="s3">= </span><span class="s6">&quot;new entries found:</span><span class="s2">\n</span><span class="s6">%s&quot; </span><span class="s2">if </span><span class="s1">versions </span><span class="s2">else </span><span class="s6">&quot;no new versions found&quot;</span>
+    <span class="s1">msg </span><span class="s3">= </span><span class="s6">f&quot;upgraded %s for python %s in %s </span><span class="s2">{</span><span class="s1">ver_update</span><span class="s2">}</span><span class="s6">&quot;</span>
+    <span class="s1">logging</span><span class="s3">.</span><span class="s1">warning</span><span class="s3">(</span><span class="s1">msg</span><span class="s3">, *</span><span class="s1">args</span><span class="s3">)</span>
+
+
+<span class="s1">__all__ </span><span class="s3">= [</span>
+    <span class="s6">&quot;NewVersion&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;UpdateLog&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;add_wheel_to_update_log&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;do_update&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;dump_datetime&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;load_datetime&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;manual_upgrade&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;periodic_update&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;release_date_for_wheel_path&quot;</span><span class="s3">,</span>
+    <span class="s6">&quot;trigger_update&quot;</span><span class="s3">,</span>
+<span class="s3">]</span>
+</pre>
+</body>
+</html>

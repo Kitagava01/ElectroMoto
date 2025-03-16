@@ -1,0 +1,526 @@
+<html>
+<head>
+<title>sql.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #7a7e85;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #5f826b; font-style: italic;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+sql.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># testing/fixtures/sql.py</span>
+<span class="s0"># Copyright (C) 2005-2024 the SQLAlchemy authors and contributors</span>
+<span class="s0"># &lt;see AUTHORS file&gt;</span>
+<span class="s0">#</span>
+<span class="s0"># This module is part of SQLAlchemy and is released under</span>
+<span class="s0"># the MIT License: https://www.opensource.org/licenses/mit-license.php</span>
+<span class="s0"># mypy: ignore-errors</span>
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">itertools</span>
+<span class="s2">import </span><span class="s1">random</span>
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">import </span><span class="s1">sys</span>
+
+<span class="s2">import </span><span class="s1">sqlalchemy </span><span class="s2">as </span><span class="s1">sa</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">base </span><span class="s2">import </span><span class="s1">TestBase</span>
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">config</span>
+<span class="s2">from </span><span class="s3">.. </span><span class="s2">import </span><span class="s1">mock</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">assertions </span><span class="s2">import </span><span class="s1">eq_</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">assertions </span><span class="s2">import </span><span class="s1">ne_</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">util </span><span class="s2">import </span><span class="s1">adict</span>
+<span class="s2">from </span><span class="s3">..</span><span class="s1">util </span><span class="s2">import </span><span class="s1">drop_all_tables_from_metadata</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">event</span>
+<span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">util</span>
+<span class="s2">from </span><span class="s3">...</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">sort_tables_and_constraints</span>
+<span class="s2">from </span><span class="s3">...</span><span class="s1">sql </span><span class="s2">import </span><span class="s1">visitors</span>
+<span class="s2">from </span><span class="s3">...</span><span class="s1">sql</span><span class="s3">.</span><span class="s1">elements </span><span class="s2">import </span><span class="s1">ClauseElement</span>
+
+
+<span class="s2">class </span><span class="s1">TablesTest</span><span class="s3">(</span><span class="s1">TestBase</span><span class="s3">):</span>
+    <span class="s0"># 'once', None</span>
+    <span class="s1">run_setup_bind </span><span class="s3">= </span><span class="s4">&quot;once&quot;</span>
+
+    <span class="s0"># 'once', 'each', None</span>
+    <span class="s1">run_define_tables </span><span class="s3">= </span><span class="s4">&quot;once&quot;</span>
+
+    <span class="s0"># 'once', 'each', None</span>
+    <span class="s1">run_create_tables </span><span class="s3">= </span><span class="s4">&quot;once&quot;</span>
+
+    <span class="s0"># 'once', 'each', None</span>
+    <span class="s1">run_inserts </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+
+    <span class="s0"># 'each', None</span>
+    <span class="s1">run_deletes </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+
+    <span class="s0"># 'once', None</span>
+    <span class="s1">run_dispose_bind </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s1">bind </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s1">_tables_metadata </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s1">tables </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s1">other </span><span class="s3">= </span><span class="s2">None</span>
+    <span class="s1">sequences </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s3">@</span><span class="s1">config</span><span class="s3">.</span><span class="s1">fixture</span><span class="s3">(</span><span class="s1">autouse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">scope</span><span class="s3">=</span><span class="s4">&quot;class&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">_setup_tables_test_class</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">cls </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">__class__</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_init_class</span><span class="s3">()</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_setup_once_tables</span><span class="s3">()</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_setup_once_inserts</span><span class="s3">()</span>
+
+        <span class="s2">yield</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_teardown_once_metadata_bind</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">config</span><span class="s3">.</span><span class="s1">fixture</span><span class="s3">(</span><span class="s1">autouse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">scope</span><span class="s3">=</span><span class="s4">&quot;function&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">_setup_tables_test_instance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_setup_each_tables</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_setup_each_inserts</span><span class="s3">()</span>
+
+        <span class="s2">yield</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_teardown_each_tables</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">property</span>
+    <span class="s2">def </span><span class="s1">tables_test_metadata</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_init_class</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_define_tables </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_create_tables </span><span class="s3">== </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+                <span class="s1">cls</span><span class="s3">.</span><span class="s1">run_create_tables </span><span class="s3">= </span><span class="s4">&quot;each&quot;</span>
+            <span class="s2">assert </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_inserts </span><span class="s2">in </span><span class="s3">(</span><span class="s4">&quot;each&quot;</span><span class="s3">, </span><span class="s2">None</span><span class="s3">)</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">other </span><span class="s3">= </span><span class="s1">adict</span><span class="s3">()</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">tables </span><span class="s3">= </span><span class="s1">adict</span><span class="s3">()</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">sequences </span><span class="s3">= </span><span class="s1">adict</span><span class="s3">()</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">bind </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">setup_bind</span><span class="s3">()</span>
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata </span><span class="s3">= </span><span class="s1">sa</span><span class="s3">.</span><span class="s1">MetaData</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_setup_once_inserts</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_inserts </span><span class="s3">== </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">_load_fixtures</span><span class="s3">()</span>
+            <span class="s2">with </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">.</span><span class="s1">begin</span><span class="s3">() </span><span class="s2">as </span><span class="s1">conn</span><span class="s3">:</span>
+                <span class="s1">cls</span><span class="s3">.</span><span class="s1">insert_data</span><span class="s3">(</span><span class="s1">conn</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_setup_once_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_define_tables </span><span class="s3">== </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">define_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_create_tables </span><span class="s3">== </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+                <span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">create_all</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">)</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">)</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">sequences</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">_sequences</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_setup_each_tables</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_define_tables </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">define_tables</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_create_tables </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">create_all</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">sequences</span><span class="s3">.</span><span class="s1">update</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">_sequences</span><span class="s3">)</span>
+        <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_create_tables </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">create_all</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_setup_each_inserts</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_inserts </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_load_fixtures</span><span class="s3">()</span>
+            <span class="s2">with </span><span class="s1">self</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">.</span><span class="s1">begin</span><span class="s3">() </span><span class="s2">as </span><span class="s1">conn</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">insert_data</span><span class="s3">(</span><span class="s1">conn</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_teardown_each_tables</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_define_tables </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">clear</span><span class="s3">()</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_create_tables </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+                <span class="s1">drop_all_tables_from_metadata</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">clear</span><span class="s3">()</span>
+        <span class="s2">elif </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_create_tables </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span><span class="s3">:</span>
+            <span class="s1">drop_all_tables_from_metadata</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">)</span>
+
+        <span class="s1">savepoints </span><span class="s3">= </span><span class="s1">getattr</span><span class="s3">(</span><span class="s1">config</span><span class="s3">.</span><span class="s1">requirements</span><span class="s3">, </span><span class="s4">&quot;savepoints&quot;</span><span class="s3">, </span><span class="s2">False</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">savepoints</span><span class="s3">:</span>
+            <span class="s1">savepoints </span><span class="s3">= </span><span class="s1">savepoints</span><span class="s3">.</span><span class="s1">enabled</span>
+
+        <span class="s0"># no need to run deletes if tables are recreated on setup</span>
+        <span class="s2">if </span><span class="s3">(</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">run_define_tables </span><span class="s3">!= </span><span class="s4">&quot;each&quot;</span>
+            <span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_create_tables </span><span class="s3">!= </span><span class="s4">&quot;each&quot;</span>
+            <span class="s2">and </span><span class="s1">self</span><span class="s3">.</span><span class="s1">run_deletes </span><span class="s3">== </span><span class="s4">&quot;each&quot;</span>
+        <span class="s3">):</span>
+            <span class="s2">with </span><span class="s1">self</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">.</span><span class="s1">begin</span><span class="s3">() </span><span class="s2">as </span><span class="s1">conn</span><span class="s3">:</span>
+                <span class="s2">for </span><span class="s1">table </span><span class="s2">in </span><span class="s1">reversed</span><span class="s3">(</span>
+                    <span class="s3">[</span>
+                        <span class="s1">t</span>
+                        <span class="s2">for </span><span class="s3">(</span><span class="s1">t</span><span class="s3">, </span><span class="s1">fks</span><span class="s3">) </span><span class="s2">in </span><span class="s1">sort_tables_and_constraints</span><span class="s3">(</span>
+                            <span class="s1">self</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">values</span><span class="s3">()</span>
+                        <span class="s3">)</span>
+                        <span class="s2">if </span><span class="s1">t </span><span class="s2">is not None</span>
+                    <span class="s3">]</span>
+                <span class="s3">):</span>
+                    <span class="s2">try</span><span class="s3">:</span>
+                        <span class="s2">if </span><span class="s1">savepoints</span><span class="s3">:</span>
+                            <span class="s2">with </span><span class="s1">conn</span><span class="s3">.</span><span class="s1">begin_nested</span><span class="s3">():</span>
+                                <span class="s1">conn</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">delete</span><span class="s3">())</span>
+                        <span class="s2">else</span><span class="s3">:</span>
+                            <span class="s1">conn</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span><span class="s1">table</span><span class="s3">.</span><span class="s1">delete</span><span class="s3">())</span>
+                    <span class="s2">except </span><span class="s1">sa</span><span class="s3">.</span><span class="s1">exc</span><span class="s3">.</span><span class="s1">DBAPIError </span><span class="s2">as </span><span class="s1">ex</span><span class="s3">:</span>
+                        <span class="s1">print</span><span class="s3">(</span>
+                            <span class="s3">(</span><span class="s4">&quot;Error emptying table %s: %r&quot; </span><span class="s3">% (</span><span class="s1">table</span><span class="s3">, </span><span class="s1">ex</span><span class="s3">)),</span>
+                            <span class="s1">file</span><span class="s3">=</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">stderr</span><span class="s3">,</span>
+                        <span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_teardown_once_metadata_bind</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_create_tables</span><span class="s3">:</span>
+            <span class="s1">drop_all_tables_from_metadata</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">, </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_dispose_bind </span><span class="s3">== </span><span class="s4">&quot;once&quot;</span><span class="s3">:</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">dispose_bind</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">)</span>
+
+        <span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">bind </span><span class="s3">= </span><span class="s2">None</span>
+
+        <span class="s2">if </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">run_setup_bind </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">bind </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">setup_bind</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">dispose_bind</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">bind</span><span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">bind</span><span class="s3">, </span><span class="s4">&quot;dispose&quot;</span><span class="s3">):</span>
+            <span class="s1">bind</span><span class="s3">.</span><span class="s1">dispose</span><span class="s3">()</span>
+        <span class="s2">elif </span><span class="s1">hasattr</span><span class="s3">(</span><span class="s1">bind</span><span class="s3">, </span><span class="s4">&quot;close&quot;</span><span class="s3">):</span>
+            <span class="s1">bind</span><span class="s3">.</span><span class="s1">close</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">define_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">):</span>
+        <span class="s2">pass</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">fixtures</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s3">{}</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">insert_data</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">connection</span><span class="s3">):</span>
+        <span class="s2">pass</span>
+
+    <span class="s2">def </span><span class="s1">sql_count_</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">count</span><span class="s3">, </span><span class="s1">fn</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">assert_sql_count</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">, </span><span class="s1">fn</span><span class="s3">, </span><span class="s1">count</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">sql_eq_</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">callable_</span><span class="s3">, </span><span class="s1">statements</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">assert_sql</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">, </span><span class="s1">callable_</span><span class="s3">, </span><span class="s1">statements</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">_load_fixtures</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">):</span>
+        <span class="s5">&quot;&quot;&quot;Insert rows as represented by the fixtures() method.&quot;&quot;&quot;</span>
+        <span class="s1">headers</span><span class="s3">, </span><span class="s1">rows </span><span class="s3">= {}, {}</span>
+        <span class="s2">for </span><span class="s1">table</span><span class="s3">, </span><span class="s1">data </span><span class="s2">in </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">fixtures</span><span class="s3">().</span><span class="s1">items</span><span class="s3">():</span>
+            <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">data</span><span class="s3">) &lt; </span><span class="s6">2</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">table</span><span class="s3">, </span><span class="s1">str</span><span class="s3">):</span>
+                <span class="s1">table </span><span class="s3">= </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">[</span><span class="s1">table</span><span class="s3">]</span>
+            <span class="s1">headers</span><span class="s3">[</span><span class="s1">table</span><span class="s3">] = </span><span class="s1">data</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+            <span class="s1">rows</span><span class="s3">[</span><span class="s1">table</span><span class="s3">] = </span><span class="s1">data</span><span class="s3">[</span><span class="s6">1</span><span class="s3">:]</span>
+        <span class="s2">for </span><span class="s1">table</span><span class="s3">, </span><span class="s1">fks </span><span class="s2">in </span><span class="s1">sort_tables_and_constraints</span><span class="s3">(</span>
+            <span class="s1">cls</span><span class="s3">.</span><span class="s1">_tables_metadata</span><span class="s3">.</span><span class="s1">tables</span><span class="s3">.</span><span class="s1">values</span><span class="s3">()</span>
+        <span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">table </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s1">table </span><span class="s2">not in </span><span class="s1">headers</span><span class="s3">:</span>
+                <span class="s2">continue</span>
+            <span class="s2">with </span><span class="s1">cls</span><span class="s3">.</span><span class="s1">bind</span><span class="s3">.</span><span class="s1">begin</span><span class="s3">() </span><span class="s2">as </span><span class="s1">conn</span><span class="s3">:</span>
+                <span class="s1">conn</span><span class="s3">.</span><span class="s1">execute</span><span class="s3">(</span>
+                    <span class="s1">table</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(),</span>
+                    <span class="s3">[</span>
+                        <span class="s1">dict</span><span class="s3">(</span><span class="s1">zip</span><span class="s3">(</span><span class="s1">headers</span><span class="s3">[</span><span class="s1">table</span><span class="s3">], </span><span class="s1">column_values</span><span class="s3">))</span>
+                        <span class="s2">for </span><span class="s1">column_values </span><span class="s2">in </span><span class="s1">rows</span><span class="s3">[</span><span class="s1">table</span><span class="s3">]</span>
+                    <span class="s3">],</span>
+                <span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">NoCache</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">config</span><span class="s3">.</span><span class="s1">fixture</span><span class="s3">(</span><span class="s1">autouse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">scope</span><span class="s3">=</span><span class="s4">&quot;function&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">_disable_cache</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">_cache </span><span class="s3">= </span><span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">_compiled_cache</span>
+        <span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">_compiled_cache </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">yield</span>
+        <span class="s1">config</span><span class="s3">.</span><span class="s1">db</span><span class="s3">.</span><span class="s1">_compiled_cache </span><span class="s3">= </span><span class="s1">_cache</span>
+
+
+<span class="s2">class </span><span class="s1">RemovesEvents</span><span class="s3">:</span>
+    <span class="s3">@</span><span class="s1">util</span><span class="s3">.</span><span class="s1">memoized_property</span>
+    <span class="s2">def </span><span class="s1">_event_fns</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">set</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">event_listen</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">target</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">fn</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_event_fns</span><span class="s3">.</span><span class="s1">add</span><span class="s3">((</span><span class="s1">target</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">fn</span><span class="s3">))</span>
+        <span class="s1">event</span><span class="s3">.</span><span class="s1">listen</span><span class="s3">(</span><span class="s1">target</span><span class="s3">, </span><span class="s1">name</span><span class="s3">, </span><span class="s1">fn</span><span class="s3">, **</span><span class="s1">kw</span><span class="s3">)</span>
+
+    <span class="s3">@</span><span class="s1">config</span><span class="s3">.</span><span class="s1">fixture</span><span class="s3">(</span><span class="s1">autouse</span><span class="s3">=</span><span class="s2">True</span><span class="s3">, </span><span class="s1">scope</span><span class="s3">=</span><span class="s4">&quot;function&quot;</span><span class="s3">)</span>
+    <span class="s2">def </span><span class="s1">_remove_events</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">yield</span>
+        <span class="s2">for </span><span class="s1">key </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_event_fns</span><span class="s3">:</span>
+            <span class="s1">event</span><span class="s3">.</span><span class="s1">remove</span><span class="s3">(*</span><span class="s1">key</span><span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">ComputedReflectionFixtureTest</span><span class="s3">(</span><span class="s1">TablesTest</span><span class="s3">):</span>
+    <span class="s1">run_inserts </span><span class="s3">= </span><span class="s1">run_deletes </span><span class="s3">= </span><span class="s2">None</span>
+
+    <span class="s1">__backend__ </span><span class="s3">= </span><span class="s2">True</span>
+    <span class="s1">__requires__ </span><span class="s3">= (</span><span class="s4">&quot;computed_columns&quot;</span><span class="s3">, </span><span class="s4">&quot;table_reflection&quot;</span><span class="s3">)</span>
+
+    <span class="s1">regexp </span><span class="s3">= </span><span class="s1">re</span><span class="s3">.</span><span class="s1">compile</span><span class="s3">(</span><span class="s4">r&quot;[\[\]\(\)\s`'\&quot;]*&quot;</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">normalize</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">text</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">regexp</span><span class="s3">.</span><span class="s1">sub</span><span class="s3">(</span><span class="s4">&quot;&quot;</span><span class="s3">, </span><span class="s1">text</span><span class="s3">).</span><span class="s1">lower</span><span class="s3">()</span>
+
+    <span class="s3">@</span><span class="s1">classmethod</span>
+    <span class="s2">def </span><span class="s1">define_tables</span><span class="s3">(</span><span class="s1">cls</span><span class="s3">, </span><span class="s1">metadata</span><span class="s3">):</span>
+        <span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">Integer</span>
+        <span class="s2">from </span><span class="s3">... </span><span class="s2">import </span><span class="s1">testing</span>
+        <span class="s2">from </span><span class="s3">...</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">Column</span>
+        <span class="s2">from </span><span class="s3">...</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">Computed</span>
+        <span class="s2">from </span><span class="s3">...</span><span class="s1">schema </span><span class="s2">import </span><span class="s1">Table</span>
+
+        <span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;computed_default_table&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;normal&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;computed_col&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">Computed</span><span class="s3">(</span><span class="s4">&quot;normal + 42&quot;</span><span class="s3">)),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;with_default&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">server_default</span><span class="s3">=</span><span class="s4">&quot;42&quot;</span><span class="s3">),</span>
+        <span class="s3">)</span>
+
+        <span class="s1">t </span><span class="s3">= </span><span class="s1">Table</span><span class="s3">(</span>
+            <span class="s4">&quot;computed_column_table&quot;</span><span class="s3">,</span>
+            <span class="s1">metadata</span><span class="s3">,</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;normal&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">),</span>
+            <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;computed_no_flag&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">Computed</span><span class="s3">(</span><span class="s4">&quot;normal + 42&quot;</span><span class="s3">)),</span>
+        <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">schemas</span><span class="s3">.</span><span class="s1">enabled</span><span class="s3">:</span>
+            <span class="s1">t2 </span><span class="s3">= </span><span class="s1">Table</span><span class="s3">(</span>
+                <span class="s4">&quot;computed_column_table&quot;</span><span class="s3">,</span>
+                <span class="s1">metadata</span><span class="s3">,</span>
+                <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;id&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">primary_key</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+                <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;normal&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">),</span>
+                <span class="s1">Column</span><span class="s3">(</span><span class="s4">&quot;computed_no_flag&quot;</span><span class="s3">, </span><span class="s1">Integer</span><span class="s3">, </span><span class="s1">Computed</span><span class="s3">(</span><span class="s4">&quot;normal / 42&quot;</span><span class="s3">)),</span>
+                <span class="s1">schema</span><span class="s3">=</span><span class="s1">config</span><span class="s3">.</span><span class="s1">test_schema</span><span class="s3">,</span>
+            <span class="s3">)</span>
+
+        <span class="s2">if </span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">computed_columns_virtual</span><span class="s3">.</span><span class="s1">enabled</span><span class="s3">:</span>
+            <span class="s1">t</span><span class="s3">.</span><span class="s1">append_column</span><span class="s3">(</span>
+                <span class="s1">Column</span><span class="s3">(</span>
+                    <span class="s4">&quot;computed_virtual&quot;</span><span class="s3">,</span>
+                    <span class="s1">Integer</span><span class="s3">,</span>
+                    <span class="s1">Computed</span><span class="s3">(</span><span class="s4">&quot;normal + 2&quot;</span><span class="s3">, </span><span class="s1">persisted</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+                <span class="s3">)</span>
+            <span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">schemas</span><span class="s3">.</span><span class="s1">enabled</span><span class="s3">:</span>
+                <span class="s1">t2</span><span class="s3">.</span><span class="s1">append_column</span><span class="s3">(</span>
+                    <span class="s1">Column</span><span class="s3">(</span>
+                        <span class="s4">&quot;computed_virtual&quot;</span><span class="s3">,</span>
+                        <span class="s1">Integer</span><span class="s3">,</span>
+                        <span class="s1">Computed</span><span class="s3">(</span><span class="s4">&quot;normal / 2&quot;</span><span class="s3">, </span><span class="s1">persisted</span><span class="s3">=</span><span class="s2">False</span><span class="s3">),</span>
+                    <span class="s3">)</span>
+                <span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">computed_columns_stored</span><span class="s3">.</span><span class="s1">enabled</span><span class="s3">:</span>
+            <span class="s1">t</span><span class="s3">.</span><span class="s1">append_column</span><span class="s3">(</span>
+                <span class="s1">Column</span><span class="s3">(</span>
+                    <span class="s4">&quot;computed_stored&quot;</span><span class="s3">,</span>
+                    <span class="s1">Integer</span><span class="s3">,</span>
+                    <span class="s1">Computed</span><span class="s3">(</span><span class="s4">&quot;normal - 42&quot;</span><span class="s3">, </span><span class="s1">persisted</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+                <span class="s3">)</span>
+            <span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">testing</span><span class="s3">.</span><span class="s1">requires</span><span class="s3">.</span><span class="s1">schemas</span><span class="s3">.</span><span class="s1">enabled</span><span class="s3">:</span>
+                <span class="s1">t2</span><span class="s3">.</span><span class="s1">append_column</span><span class="s3">(</span>
+                    <span class="s1">Column</span><span class="s3">(</span>
+                        <span class="s4">&quot;computed_stored&quot;</span><span class="s3">,</span>
+                        <span class="s1">Integer</span><span class="s3">,</span>
+                        <span class="s1">Computed</span><span class="s3">(</span><span class="s4">&quot;normal * 42&quot;</span><span class="s3">, </span><span class="s1">persisted</span><span class="s3">=</span><span class="s2">True</span><span class="s3">),</span>
+                    <span class="s3">)</span>
+                <span class="s3">)</span>
+
+
+<span class="s2">class </span><span class="s1">CacheKeyFixture</span><span class="s3">:</span>
+    <span class="s2">def </span><span class="s1">_compare_equal</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">a</span><span class="s3">, </span><span class="s1">b</span><span class="s3">, </span><span class="s1">compare_values</span><span class="s3">):</span>
+        <span class="s1">a_key </span><span class="s3">= </span><span class="s1">a</span><span class="s3">.</span><span class="s1">_generate_cache_key</span><span class="s3">()</span>
+        <span class="s1">b_key </span><span class="s3">= </span><span class="s1">b</span><span class="s3">.</span><span class="s1">_generate_cache_key</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">a_key </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s2">assert </span><span class="s1">a</span><span class="s3">.</span><span class="s1">_annotations</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">&quot;nocache&quot;</span><span class="s3">)</span>
+
+            <span class="s2">assert </span><span class="s1">b_key </span><span class="s2">is None</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s1">eq_</span><span class="s3">(</span><span class="s1">a_key</span><span class="s3">.</span><span class="s1">key</span><span class="s3">, </span><span class="s1">b_key</span><span class="s3">.</span><span class="s1">key</span><span class="s3">)</span>
+            <span class="s1">eq_</span><span class="s3">(</span><span class="s1">hash</span><span class="s3">(</span><span class="s1">a_key</span><span class="s3">.</span><span class="s1">key</span><span class="s3">), </span><span class="s1">hash</span><span class="s3">(</span><span class="s1">b_key</span><span class="s3">.</span><span class="s1">key</span><span class="s3">))</span>
+
+            <span class="s2">for </span><span class="s1">a_param</span><span class="s3">, </span><span class="s1">b_param </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span><span class="s1">a_key</span><span class="s3">.</span><span class="s1">bindparams</span><span class="s3">, </span><span class="s1">b_key</span><span class="s3">.</span><span class="s1">bindparams</span><span class="s3">):</span>
+                <span class="s2">assert </span><span class="s1">a_param</span><span class="s3">.</span><span class="s1">compare</span><span class="s3">(</span><span class="s1">b_param</span><span class="s3">, </span><span class="s1">compare_values</span><span class="s3">=</span><span class="s1">compare_values</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">a_key</span><span class="s3">, </span><span class="s1">b_key</span>
+
+    <span class="s2">def </span><span class="s1">_run_cache_key_fixture</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">fixture</span><span class="s3">, </span><span class="s1">compare_values</span><span class="s3">):</span>
+        <span class="s1">case_a </span><span class="s3">= </span><span class="s1">fixture</span><span class="s3">()</span>
+        <span class="s1">case_b </span><span class="s3">= </span><span class="s1">fixture</span><span class="s3">()</span>
+
+        <span class="s2">for </span><span class="s1">a</span><span class="s3">, </span><span class="s1">b </span><span class="s2">in </span><span class="s1">itertools</span><span class="s3">.</span><span class="s1">combinations_with_replacement</span><span class="s3">(</span>
+            <span class="s1">range</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">case_a</span><span class="s3">)), </span><span class="s6">2</span>
+        <span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">a </span><span class="s3">== </span><span class="s1">b</span><span class="s3">:</span>
+                <span class="s1">a_key</span><span class="s3">, </span><span class="s1">b_key </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_compare_equal</span><span class="s3">(</span>
+                    <span class="s1">case_a</span><span class="s3">[</span><span class="s1">a</span><span class="s3">], </span><span class="s1">case_b</span><span class="s3">[</span><span class="s1">b</span><span class="s3">], </span><span class="s1">compare_values</span>
+                <span class="s3">)</span>
+                <span class="s2">if </span><span class="s1">a_key </span><span class="s2">is None</span><span class="s3">:</span>
+                    <span class="s2">continue</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">a_key </span><span class="s3">= </span><span class="s1">case_a</span><span class="s3">[</span><span class="s1">a</span><span class="s3">].</span><span class="s1">_generate_cache_key</span><span class="s3">()</span>
+                <span class="s1">b_key </span><span class="s3">= </span><span class="s1">case_b</span><span class="s3">[</span><span class="s1">b</span><span class="s3">].</span><span class="s1">_generate_cache_key</span><span class="s3">()</span>
+
+                <span class="s2">if </span><span class="s1">a_key </span><span class="s2">is None or </span><span class="s1">b_key </span><span class="s2">is None</span><span class="s3">:</span>
+                    <span class="s2">if </span><span class="s1">a_key </span><span class="s2">is None</span><span class="s3">:</span>
+                        <span class="s2">assert </span><span class="s1">case_a</span><span class="s3">[</span><span class="s1">a</span><span class="s3">].</span><span class="s1">_annotations</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">&quot;nocache&quot;</span><span class="s3">)</span>
+                    <span class="s2">if </span><span class="s1">b_key </span><span class="s2">is None</span><span class="s3">:</span>
+                        <span class="s2">assert </span><span class="s1">case_b</span><span class="s3">[</span><span class="s1">b</span><span class="s3">].</span><span class="s1">_annotations</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s4">&quot;nocache&quot;</span><span class="s3">)</span>
+                    <span class="s2">continue</span>
+
+                <span class="s2">if </span><span class="s1">a_key</span><span class="s3">.</span><span class="s1">key </span><span class="s3">== </span><span class="s1">b_key</span><span class="s3">.</span><span class="s1">key</span><span class="s3">:</span>
+                    <span class="s2">for </span><span class="s1">a_param</span><span class="s3">, </span><span class="s1">b_param </span><span class="s2">in </span><span class="s1">zip</span><span class="s3">(</span>
+                        <span class="s1">a_key</span><span class="s3">.</span><span class="s1">bindparams</span><span class="s3">, </span><span class="s1">b_key</span><span class="s3">.</span><span class="s1">bindparams</span>
+                    <span class="s3">):</span>
+                        <span class="s2">if not </span><span class="s1">a_param</span><span class="s3">.</span><span class="s1">compare</span><span class="s3">(</span>
+                            <span class="s1">b_param</span><span class="s3">, </span><span class="s1">compare_values</span><span class="s3">=</span><span class="s1">compare_values</span>
+                        <span class="s3">):</span>
+                            <span class="s2">break</span>
+                    <span class="s2">else</span><span class="s3">:</span>
+                        <span class="s0"># this fails unconditionally since we could not</span>
+                        <span class="s0"># find bound parameter values that differed.</span>
+                        <span class="s0"># Usually we intended to get two distinct keys here</span>
+                        <span class="s0"># so the failure will be more descriptive using the</span>
+                        <span class="s0"># ne_() assertion.</span>
+                        <span class="s1">ne_</span><span class="s3">(</span><span class="s1">a_key</span><span class="s3">.</span><span class="s1">key</span><span class="s3">, </span><span class="s1">b_key</span><span class="s3">.</span><span class="s1">key</span><span class="s3">)</span>
+                <span class="s2">else</span><span class="s3">:</span>
+                    <span class="s1">ne_</span><span class="s3">(</span><span class="s1">a_key</span><span class="s3">.</span><span class="s1">key</span><span class="s3">, </span><span class="s1">b_key</span><span class="s3">.</span><span class="s1">key</span><span class="s3">)</span>
+
+            <span class="s0"># ClauseElement-specific test to ensure the cache key</span>
+            <span class="s0"># collected all the bound parameters that aren't marked</span>
+            <span class="s0"># as &quot;literal execute&quot;</span>
+            <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">case_a</span><span class="s3">[</span><span class="s1">a</span><span class="s3">], </span><span class="s1">ClauseElement</span><span class="s3">) </span><span class="s2">and </span><span class="s1">isinstance</span><span class="s3">(</span>
+                <span class="s1">case_b</span><span class="s3">[</span><span class="s1">b</span><span class="s3">], </span><span class="s1">ClauseElement</span>
+            <span class="s3">):</span>
+                <span class="s1">assert_a_params </span><span class="s3">= []</span>
+                <span class="s1">assert_b_params </span><span class="s3">= []</span>
+
+                <span class="s2">for </span><span class="s1">elem </span><span class="s2">in </span><span class="s1">visitors</span><span class="s3">.</span><span class="s1">iterate</span><span class="s3">(</span><span class="s1">case_a</span><span class="s3">[</span><span class="s1">a</span><span class="s3">]):</span>
+                    <span class="s2">if </span><span class="s1">elem</span><span class="s3">.</span><span class="s1">__visit_name__ </span><span class="s3">== </span><span class="s4">&quot;bindparam&quot;</span><span class="s3">:</span>
+                        <span class="s1">assert_a_params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">elem</span><span class="s3">)</span>
+
+                <span class="s2">for </span><span class="s1">elem </span><span class="s2">in </span><span class="s1">visitors</span><span class="s3">.</span><span class="s1">iterate</span><span class="s3">(</span><span class="s1">case_b</span><span class="s3">[</span><span class="s1">b</span><span class="s3">]):</span>
+                    <span class="s2">if </span><span class="s1">elem</span><span class="s3">.</span><span class="s1">__visit_name__ </span><span class="s3">== </span><span class="s4">&quot;bindparam&quot;</span><span class="s3">:</span>
+                        <span class="s1">assert_b_params</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">elem</span><span class="s3">)</span>
+
+                <span class="s0"># note we're asserting the order of the params as well as</span>
+                <span class="s0"># if there are dupes or not.  ordering has to be</span>
+                <span class="s0"># deterministic and matches what a traversal would provide.</span>
+                <span class="s1">eq_</span><span class="s3">(</span>
+                    <span class="s1">sorted</span><span class="s3">(</span><span class="s1">a_key</span><span class="s3">.</span><span class="s1">bindparams</span><span class="s3">, </span><span class="s1">key</span><span class="s3">=</span><span class="s2">lambda </span><span class="s1">b</span><span class="s3">: </span><span class="s1">b</span><span class="s3">.</span><span class="s1">key</span><span class="s3">),</span>
+                    <span class="s1">sorted</span><span class="s3">(</span>
+                        <span class="s1">util</span><span class="s3">.</span><span class="s1">unique_list</span><span class="s3">(</span><span class="s1">assert_a_params</span><span class="s3">), </span><span class="s1">key</span><span class="s3">=</span><span class="s2">lambda </span><span class="s1">b</span><span class="s3">: </span><span class="s1">b</span><span class="s3">.</span><span class="s1">key</span>
+                    <span class="s3">),</span>
+                <span class="s3">)</span>
+                <span class="s1">eq_</span><span class="s3">(</span>
+                    <span class="s1">sorted</span><span class="s3">(</span><span class="s1">b_key</span><span class="s3">.</span><span class="s1">bindparams</span><span class="s3">, </span><span class="s1">key</span><span class="s3">=</span><span class="s2">lambda </span><span class="s1">b</span><span class="s3">: </span><span class="s1">b</span><span class="s3">.</span><span class="s1">key</span><span class="s3">),</span>
+                    <span class="s1">sorted</span><span class="s3">(</span>
+                        <span class="s1">util</span><span class="s3">.</span><span class="s1">unique_list</span><span class="s3">(</span><span class="s1">assert_b_params</span><span class="s3">), </span><span class="s1">key</span><span class="s3">=</span><span class="s2">lambda </span><span class="s1">b</span><span class="s3">: </span><span class="s1">b</span><span class="s3">.</span><span class="s1">key</span>
+                    <span class="s3">),</span>
+                <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_run_cache_key_equal_fixture</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">fixture</span><span class="s3">, </span><span class="s1">compare_values</span><span class="s3">):</span>
+        <span class="s1">case_a </span><span class="s3">= </span><span class="s1">fixture</span><span class="s3">()</span>
+        <span class="s1">case_b </span><span class="s3">= </span><span class="s1">fixture</span><span class="s3">()</span>
+
+        <span class="s2">for </span><span class="s1">a</span><span class="s3">, </span><span class="s1">b </span><span class="s2">in </span><span class="s1">itertools</span><span class="s3">.</span><span class="s1">combinations_with_replacement</span><span class="s3">(</span>
+            <span class="s1">range</span><span class="s3">(</span><span class="s1">len</span><span class="s3">(</span><span class="s1">case_a</span><span class="s3">)), </span><span class="s6">2</span>
+        <span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_compare_equal</span><span class="s3">(</span><span class="s1">case_a</span><span class="s3">[</span><span class="s1">a</span><span class="s3">], </span><span class="s1">case_b</span><span class="s3">[</span><span class="s1">b</span><span class="s3">], </span><span class="s1">compare_values</span><span class="s3">)</span>
+
+
+<span class="s2">def </span><span class="s1">insertmanyvalues_fixture</span><span class="s3">(</span>
+    <span class="s1">connection</span><span class="s3">, </span><span class="s1">randomize_rows</span><span class="s3">=</span><span class="s2">False</span><span class="s3">, </span><span class="s1">warn_on_downgraded</span><span class="s3">=</span><span class="s2">False</span>
+<span class="s3">):</span>
+    <span class="s1">dialect </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">dialect</span>
+    <span class="s1">orig_dialect </span><span class="s3">= </span><span class="s1">dialect</span><span class="s3">.</span><span class="s1">_deliver_insertmanyvalues_batches</span>
+    <span class="s1">orig_conn </span><span class="s3">= </span><span class="s1">connection</span><span class="s3">.</span><span class="s1">_exec_insertmany_context</span>
+
+    <span class="s2">class </span><span class="s1">RandomCursor</span><span class="s3">:</span>
+        <span class="s1">__slots__ </span><span class="s3">= (</span><span class="s4">&quot;cursor&quot;</span><span class="s3">,)</span>
+
+        <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">cursor</span><span class="s3">):</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">cursor </span><span class="s3">= </span><span class="s1">cursor</span>
+
+        <span class="s0"># only this method is called by the deliver method.</span>
+        <span class="s0"># by not having the other methods we assert that those aren't being</span>
+        <span class="s0"># used</span>
+
+        <span class="s3">@</span><span class="s1">property</span>
+        <span class="s2">def </span><span class="s1">description</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">cursor</span><span class="s3">.</span><span class="s1">description</span>
+
+        <span class="s2">def </span><span class="s1">fetchall</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+            <span class="s1">rows </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">cursor</span><span class="s3">.</span><span class="s1">fetchall</span><span class="s3">()</span>
+            <span class="s1">rows </span><span class="s3">= </span><span class="s1">list</span><span class="s3">(</span><span class="s1">rows</span><span class="s3">)</span>
+            <span class="s1">random</span><span class="s3">.</span><span class="s1">shuffle</span><span class="s3">(</span><span class="s1">rows</span><span class="s3">)</span>
+            <span class="s2">return </span><span class="s1">rows</span>
+
+    <span class="s2">def </span><span class="s1">_deliver_insertmanyvalues_batches</span><span class="s3">(</span>
+        <span class="s1">connection</span><span class="s3">,</span>
+        <span class="s1">cursor</span><span class="s3">,</span>
+        <span class="s1">statement</span><span class="s3">,</span>
+        <span class="s1">parameters</span><span class="s3">,</span>
+        <span class="s1">generic_setinputsizes</span><span class="s3">,</span>
+        <span class="s1">context</span><span class="s3">,</span>
+    <span class="s3">):</span>
+        <span class="s2">if </span><span class="s1">randomize_rows</span><span class="s3">:</span>
+            <span class="s1">cursor </span><span class="s3">= </span><span class="s1">RandomCursor</span><span class="s3">(</span><span class="s1">cursor</span><span class="s3">)</span>
+        <span class="s2">for </span><span class="s1">batch </span><span class="s2">in </span><span class="s1">orig_dialect</span><span class="s3">(</span>
+            <span class="s1">connection</span><span class="s3">,</span>
+            <span class="s1">cursor</span><span class="s3">,</span>
+            <span class="s1">statement</span><span class="s3">,</span>
+            <span class="s1">parameters</span><span class="s3">,</span>
+            <span class="s1">generic_setinputsizes</span><span class="s3">,</span>
+            <span class="s1">context</span><span class="s3">,</span>
+        <span class="s3">):</span>
+            <span class="s2">if </span><span class="s1">warn_on_downgraded </span><span class="s2">and </span><span class="s1">batch</span><span class="s3">.</span><span class="s1">is_downgraded</span><span class="s3">:</span>
+                <span class="s1">util</span><span class="s3">.</span><span class="s1">warn</span><span class="s3">(</span><span class="s4">&quot;Batches were downgraded for sorted INSERT&quot;</span><span class="s3">)</span>
+
+            <span class="s2">yield </span><span class="s1">batch</span>
+
+    <span class="s2">def </span><span class="s1">_exec_insertmany_context</span><span class="s3">(</span><span class="s1">dialect</span><span class="s3">, </span><span class="s1">context</span><span class="s3">):</span>
+        <span class="s2">with </span><span class="s1">mock</span><span class="s3">.</span><span class="s1">patch</span><span class="s3">.</span><span class="s1">object</span><span class="s3">(</span>
+            <span class="s1">dialect</span><span class="s3">,</span>
+            <span class="s4">&quot;_deliver_insertmanyvalues_batches&quot;</span><span class="s3">,</span>
+            <span class="s1">new</span><span class="s3">=</span><span class="s1">_deliver_insertmanyvalues_batches</span><span class="s3">,</span>
+        <span class="s3">):</span>
+            <span class="s2">return </span><span class="s1">orig_conn</span><span class="s3">(</span><span class="s1">dialect</span><span class="s3">, </span><span class="s1">context</span><span class="s3">)</span>
+
+    <span class="s1">connection</span><span class="s3">.</span><span class="s1">_exec_insertmany_context </span><span class="s3">= </span><span class="s1">_exec_insertmany_context</span>
+</pre>
+</body>
+</html>

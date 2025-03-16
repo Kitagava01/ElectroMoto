@@ -1,0 +1,107 @@
+<html>
+<head>
+<title>test_gc.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_gc.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">gc</span>
+
+<span class="s0">import </span><span class="s1">weakref</span>
+
+<span class="s0">import </span><span class="s1">greenlet</span>
+
+
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">TestCase</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">leakcheck </span><span class="s0">import </span><span class="s1">fails_leakcheck</span>
+<span class="s3"># These only work with greenlet gc support</span>
+<span class="s3"># which is no longer optional.</span>
+<span class="s0">assert </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GREENLET_USE_GC</span>
+
+<span class="s0">class </span><span class="s1">GCTests</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">test_dead_circular_ref</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">o </span><span class="s2">= </span><span class="s1">weakref</span><span class="s2">.</span><span class="s1">ref</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">).</span><span class="s1">switch</span><span class="s2">())</span>
+        <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+        <span class="s0">if </span><span class="s1">o</span><span class="s2">() </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">import </span><span class="s1">sys</span>
+            <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;O IS NOT NONE.&quot;</span><span class="s2">, </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">getrefcount</span><span class="s2">(</span><span class="s1">o</span><span class="s2">()))</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">o</span><span class="s2">())</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertFalse</span><span class="s2">(</span><span class="s1">gc</span><span class="s2">.</span><span class="s1">garbage</span><span class="s2">, </span><span class="s1">gc</span><span class="s2">.</span><span class="s1">garbage</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_circular_greenlet</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">circular_greenlet</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">):</span>
+            <span class="s1">self </span><span class="s2">= </span><span class="s0">None</span>
+        <span class="s1">o </span><span class="s2">= </span><span class="s1">circular_greenlet</span><span class="s2">()</span>
+        <span class="s1">o</span><span class="s2">.</span><span class="s1">self </span><span class="s2">= </span><span class="s1">o</span>
+        <span class="s1">o </span><span class="s2">= </span><span class="s1">weakref</span><span class="s2">.</span><span class="s1">ref</span><span class="s2">(</span><span class="s1">o</span><span class="s2">)</span>
+        <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">o</span><span class="s2">())</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertFalse</span><span class="s2">(</span><span class="s1">gc</span><span class="s2">.</span><span class="s1">garbage</span><span class="s2">, </span><span class="s1">gc</span><span class="s2">.</span><span class="s1">garbage</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_inactive_ref</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">class </span><span class="s1">inactive_greenlet</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">run</span><span class="s2">=</span><span class="s1">self</span><span class="s2">.</span><span class="s1">run</span><span class="s2">)</span>
+
+            <span class="s0">def </span><span class="s1">run</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s0">pass</span>
+        <span class="s1">o </span><span class="s2">= </span><span class="s1">inactive_greenlet</span><span class="s2">()</span>
+        <span class="s1">o </span><span class="s2">= </span><span class="s1">weakref</span><span class="s2">.</span><span class="s1">ref</span><span class="s2">(</span><span class="s1">o</span><span class="s2">)</span>
+        <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertIsNone</span><span class="s2">(</span><span class="s1">o</span><span class="s2">())</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertFalse</span><span class="s2">(</span><span class="s1">gc</span><span class="s2">.</span><span class="s1">garbage</span><span class="s2">, </span><span class="s1">gc</span><span class="s2">.</span><span class="s1">garbage</span><span class="s2">)</span>
+
+    <span class="s2">@</span><span class="s1">fails_leakcheck</span>
+    <span class="s0">def </span><span class="s1">test_finalizer_crash</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># This test is designed to crash when active greenlets</span>
+        <span class="s3"># are made garbage collectable, until the underlying</span>
+        <span class="s3"># problem is resolved. How does it work:</span>
+        <span class="s3"># - order of object creation is important</span>
+        <span class="s3"># - array is created first, so it is moved to unreachable first</span>
+        <span class="s3"># - we create a cycle between a greenlet and this array</span>
+        <span class="s3"># - we create an object that participates in gc, is only</span>
+        <span class="s3">#   referenced by a greenlet, and would corrupt gc lists</span>
+        <span class="s3">#   on destruction, the easiest is to use an object with</span>
+        <span class="s3">#   a finalizer</span>
+        <span class="s3"># - because array is the first object in unreachable it is</span>
+        <span class="s3">#   cleared first, which causes all references to greenlet</span>
+        <span class="s3">#   to disappear and causes greenlet to be destroyed, but since</span>
+        <span class="s3">#   it is still live it causes a switch during gc, which causes</span>
+        <span class="s3">#   an object with finalizer to be destroyed, which causes stack</span>
+        <span class="s3">#   corruption and then a crash</span>
+
+        <span class="s0">class </span><span class="s1">object_with_finalizer</span><span class="s2">(</span><span class="s1">object</span><span class="s2">):</span>
+            <span class="s0">def </span><span class="s1">__del__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+                <span class="s0">pass</span>
+        <span class="s1">array </span><span class="s2">= []</span>
+        <span class="s1">parent </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+        <span class="s0">def </span><span class="s1">greenlet_body</span><span class="s2">():</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">object </span><span class="s2">= </span><span class="s1">object_with_finalizer</span><span class="s2">()</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s0">except </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">:</span>
+                <span class="s1">print</span><span class="s2">(</span><span class="s4">&quot;Got greenlet exit!&quot;</span><span class="s2">)</span>
+            <span class="s0">finally</span><span class="s2">:</span>
+                <span class="s0">del </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">object</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">greenlet_body</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">array </span><span class="s2">= </span><span class="s1">array</span>
+        <span class="s1">array</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s0">del </span><span class="s1">array</span>
+        <span class="s0">del </span><span class="s1">g</span>
+        <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">()</span>
+        <span class="s1">gc</span><span class="s2">.</span><span class="s1">collect</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

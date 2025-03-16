@@ -1,0 +1,56 @@
+<html>
+<head>
+<title>PyGreenlet.hpp</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #6aab73;}
+.s3 { color: #c77dbb;}
+.s4 { color: #7a7e85;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+PyGreenlet.hpp</font>
+</center></td></tr></table>
+<pre><span class="s0">#ifndef </span><span class="s1">PYGREENLET_HPP</span>
+<span class="s0">#define </span><span class="s1">PYGREENLET_HPP</span>
+
+
+<span class="s0">#include </span><span class="s2">&quot;greenlet.h&quot;</span>
+<span class="s0">#include </span><span class="s2">&quot;greenlet_compiler_compat.hpp&quot;</span>
+<span class="s0">#include </span><span class="s2">&quot;greenlet_refs.hpp&quot;</span>
+
+
+<span class="s3">using </span><span class="s1">greenlet::refs::OwnedGreenlet;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::BorrowedGreenlet;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::BorrowedObject;;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::OwnedObject;</span>
+<span class="s3">using </span><span class="s1">greenlet::refs::PyErrPieces;</span>
+
+
+<span class="s4">// XXX: These doesn't really belong here, it's not a Python slot.</span>
+<span class="s0">static </span><span class="s1">OwnedObject internal_green_throw(BorrowedGreenlet self, PyErrPieces&amp; err_pieces);</span>
+
+<span class="s0">static </span><span class="s1">PyGreenlet* green_new(PyTypeObject* type, PyObject* UNUSED(args), PyObject* UNUSED(kwds));</span>
+<span class="s0">static int </span><span class="s1">green_clear(PyGreenlet* self);</span>
+<span class="s0">static int </span><span class="s1">green_init(PyGreenlet* self, PyObject* args, PyObject* kwargs);</span>
+<span class="s0">static int </span><span class="s1">green_setparent(PyGreenlet* self, PyObject* nparent, </span><span class="s0">void</span><span class="s1">* UNUSED(context));</span>
+<span class="s0">static int </span><span class="s1">green_setrun(PyGreenlet* self, PyObject* nrun, </span><span class="s0">void</span><span class="s1">* UNUSED(context));</span>
+<span class="s0">static int </span><span class="s1">green_traverse(PyGreenlet* self, visitproc visit, </span><span class="s0">void</span><span class="s1">* arg);</span>
+<span class="s0">static void </span><span class="s1">green_dealloc(PyGreenlet* self);</span>
+<span class="s0">static </span><span class="s1">PyObject* green_getparent(PyGreenlet* self, </span><span class="s0">void</span><span class="s1">* UNUSED(context));</span>
+
+<span class="s0">static int </span><span class="s1">green_is_gc(PyObject* self);</span>
+<span class="s0">static </span><span class="s1">PyObject* green_getdead(PyGreenlet* self, </span><span class="s0">void</span><span class="s1">* UNUSED(context));</span>
+<span class="s0">static </span><span class="s1">PyObject* green_getrun(PyGreenlet* self, </span><span class="s0">void</span><span class="s1">* UNUSED(context));</span>
+<span class="s0">static int </span><span class="s1">green_setcontext(PyGreenlet* self, PyObject* nctx, </span><span class="s0">void</span><span class="s1">* UNUSED(context));</span>
+<span class="s0">static </span><span class="s1">PyObject* green_getframe(PyGreenlet* self, </span><span class="s0">void</span><span class="s1">* UNUSED(context));</span>
+<span class="s0">static </span><span class="s1">PyObject* green_repr(PyGreenlet* self);</span>
+<span class="s0">#endif</span>
+</pre>
+</body>
+</html>

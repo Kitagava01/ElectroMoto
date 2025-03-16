@@ -1,0 +1,81 @@
+<html>
+<head>
+<title>test_generator.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #bcbec4;}
+.s1 { color: #cf8e6d;}
+.s2 { color: #bcbec4;}
+.s3 { color: #6aab73;}
+.s4 { color: #7a7e85;}
+.s5 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_generator.py</font>
+</center></td></tr></table>
+<pre>
+<span class="s1">from </span><span class="s0">greenlet </span><span class="s1">import </span><span class="s0">greenlet</span>
+
+<span class="s1">from </span><span class="s2">. </span><span class="s1">import </span><span class="s0">TestCase</span>
+
+<span class="s1">class </span><span class="s0">genlet</span><span class="s2">(</span><span class="s0">greenlet</span><span class="s2">):</span>
+    <span class="s0">parent </span><span class="s2">= </span><span class="s1">None</span>
+    <span class="s1">def </span><span class="s0">__init__</span><span class="s2">(</span><span class="s0">self</span><span class="s2">, *</span><span class="s0">args</span><span class="s2">, **</span><span class="s0">kwds</span><span class="s2">):</span>
+        <span class="s0">self</span><span class="s2">.</span><span class="s0">args </span><span class="s2">= </span><span class="s0">args</span>
+        <span class="s0">self</span><span class="s2">.</span><span class="s0">kwds </span><span class="s2">= </span><span class="s0">kwds</span>
+
+    <span class="s1">def </span><span class="s0">run</span><span class="s2">(</span><span class="s0">self</span><span class="s2">):</span>
+        <span class="s0">fn</span><span class="s2">, = </span><span class="s0">self</span><span class="s2">.</span><span class="s0">fn</span>
+        <span class="s0">fn</span><span class="s2">(*</span><span class="s0">self</span><span class="s2">.</span><span class="s0">args</span><span class="s2">, **</span><span class="s0">self</span><span class="s2">.</span><span class="s0">kwds</span><span class="s2">)</span>
+
+    <span class="s1">def </span><span class="s0">__iter__</span><span class="s2">(</span><span class="s0">self</span><span class="s2">):</span>
+        <span class="s1">return </span><span class="s0">self</span>
+
+    <span class="s1">def </span><span class="s0">__next__</span><span class="s2">(</span><span class="s0">self</span><span class="s2">):</span>
+        <span class="s0">self</span><span class="s2">.</span><span class="s0">parent </span><span class="s2">= </span><span class="s0">greenlet</span><span class="s2">.</span><span class="s0">getcurrent</span><span class="s2">()</span>
+        <span class="s0">result </span><span class="s2">= </span><span class="s0">self</span><span class="s2">.</span><span class="s0">switch</span><span class="s2">()</span>
+        <span class="s1">if </span><span class="s0">self</span><span class="s2">:</span>
+            <span class="s1">return </span><span class="s0">result</span>
+
+        <span class="s1">raise </span><span class="s0">StopIteration</span>
+
+    <span class="s0">next </span><span class="s2">= </span><span class="s0">__next__</span>
+
+
+<span class="s1">def </span><span class="s0">Yield</span><span class="s2">(</span><span class="s0">value</span><span class="s2">):</span>
+    <span class="s0">g </span><span class="s2">= </span><span class="s0">greenlet</span><span class="s2">.</span><span class="s0">getcurrent</span><span class="s2">()</span>
+    <span class="s1">while not </span><span class="s0">isinstance</span><span class="s2">(</span><span class="s0">g</span><span class="s2">, </span><span class="s0">genlet</span><span class="s2">):</span>
+        <span class="s1">if </span><span class="s0">g </span><span class="s1">is None</span><span class="s2">:</span>
+            <span class="s1">raise </span><span class="s0">RuntimeError</span><span class="s2">(</span><span class="s3">'yield outside a genlet'</span><span class="s2">)</span>
+        <span class="s0">g </span><span class="s2">= </span><span class="s0">g</span><span class="s2">.</span><span class="s0">parent</span>
+    <span class="s0">g</span><span class="s2">.</span><span class="s0">parent</span><span class="s2">.</span><span class="s0">switch</span><span class="s2">(</span><span class="s0">value</span><span class="s2">)</span>
+
+
+<span class="s1">def </span><span class="s0">generator</span><span class="s2">(</span><span class="s0">func</span><span class="s2">):</span>
+    <span class="s1">class </span><span class="s0">Generator</span><span class="s2">(</span><span class="s0">genlet</span><span class="s2">):</span>
+        <span class="s0">fn </span><span class="s2">= (</span><span class="s0">func</span><span class="s2">,)</span>
+    <span class="s1">return </span><span class="s0">Generator</span>
+
+<span class="s4"># ____________________________________________________________</span>
+
+
+<span class="s1">class </span><span class="s0">GeneratorTests</span><span class="s2">(</span><span class="s0">TestCase</span><span class="s2">):</span>
+    <span class="s1">def </span><span class="s0">test_generator</span><span class="s2">(</span><span class="s0">self</span><span class="s2">):</span>
+        <span class="s0">seen </span><span class="s2">= []</span>
+
+        <span class="s1">def </span><span class="s0">g</span><span class="s2">(</span><span class="s0">n</span><span class="s2">):</span>
+            <span class="s1">for </span><span class="s0">i </span><span class="s1">in </span><span class="s0">range</span><span class="s2">(</span><span class="s0">n</span><span class="s2">):</span>
+                <span class="s0">seen</span><span class="s2">.</span><span class="s0">append</span><span class="s2">(</span><span class="s0">i</span><span class="s2">)</span>
+                <span class="s0">Yield</span><span class="s2">(</span><span class="s0">i</span><span class="s2">)</span>
+        <span class="s0">g </span><span class="s2">= </span><span class="s0">generator</span><span class="s2">(</span><span class="s0">g</span><span class="s2">)</span>
+        <span class="s1">for </span><span class="s0">_ </span><span class="s1">in </span><span class="s0">range</span><span class="s2">(</span><span class="s5">3</span><span class="s2">):</span>
+            <span class="s1">for </span><span class="s0">j </span><span class="s1">in </span><span class="s0">g</span><span class="s2">(</span><span class="s5">5</span><span class="s2">):</span>
+                <span class="s0">seen</span><span class="s2">.</span><span class="s0">append</span><span class="s2">(</span><span class="s0">j</span><span class="s2">)</span>
+        <span class="s0">self</span><span class="s2">.</span><span class="s0">assertEqual</span><span class="s2">(</span><span class="s0">seen</span><span class="s2">, </span><span class="s5">3 </span><span class="s2">* [</span><span class="s5">0</span><span class="s2">, </span><span class="s5">0</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">1</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">2</span><span class="s2">, </span><span class="s5">3</span><span class="s2">, </span><span class="s5">3</span><span class="s2">, </span><span class="s5">4</span><span class="s2">, </span><span class="s5">4</span><span class="s2">])</span>
+</pre>
+</body>
+</html>

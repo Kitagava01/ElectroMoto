@@ -1,0 +1,127 @@
+<html>
+<head>
+<title>test_util.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #2aacb8;}
+.s4 { color: #7a7e85;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_util.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s2">.</span><span class="s1">lib </span><span class="s0">import </span><span class="s1">TestBase</span><span class="s2">, </span><span class="s1">FileCreator</span>
+
+<span class="s0">from </span><span class="s1">smmap</span><span class="s2">.</span><span class="s1">util </span><span class="s0">import </span><span class="s2">(</span>
+    <span class="s1">MapWindow</span><span class="s2">,</span>
+    <span class="s1">MapRegion</span><span class="s2">,</span>
+    <span class="s1">MapRegionList</span><span class="s2">,</span>
+    <span class="s1">ALLOCATIONGRANULARITY</span><span class="s2">,</span>
+    <span class="s1">is_64_bit</span><span class="s2">,</span>
+    <span class="s1">align_to_mmap</span>
+<span class="s2">)</span>
+
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">sys</span>
+
+
+<span class="s0">class </span><span class="s1">TestMMan</span><span class="s2">(</span><span class="s1">TestBase</span><span class="s2">):</span>
+
+    <span class="s0">def </span><span class="s1">test_window</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">wl </span><span class="s2">= </span><span class="s1">MapWindow</span><span class="s2">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">1</span><span class="s2">)        </span><span class="s4"># left</span>
+        <span class="s1">wc </span><span class="s2">= </span><span class="s1">MapWindow</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">1</span><span class="s2">)        </span><span class="s4"># center</span>
+        <span class="s1">wc2 </span><span class="s2">= </span><span class="s1">MapWindow</span><span class="s2">(</span><span class="s3">10</span><span class="s2">, </span><span class="s3">5</span><span class="s2">)      </span><span class="s4"># another center</span>
+        <span class="s1">wr </span><span class="s2">= </span><span class="s1">MapWindow</span><span class="s2">(</span><span class="s3">8000</span><span class="s2">, </span><span class="s3">50</span><span class="s2">)    </span><span class="s4"># right</span>
+
+        <span class="s0">assert </span><span class="s1">wl</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">() == </span><span class="s3">1</span>
+        <span class="s0">assert </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">() == </span><span class="s3">2</span>
+        <span class="s0">assert </span><span class="s1">wr</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">() == </span><span class="s3">8050</span>
+
+        <span class="s4"># extension does nothing if already in place</span>
+        <span class="s1">maxsize </span><span class="s2">= </span><span class="s3">100</span>
+        <span class="s1">wc</span><span class="s2">.</span><span class="s1">extend_left_to</span><span class="s2">(</span><span class="s1">wl</span><span class="s2">, </span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">ofs </span><span class="s2">== </span><span class="s3">1 </span><span class="s0">and </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">== </span><span class="s3">1</span>
+        <span class="s1">wl</span><span class="s2">.</span><span class="s1">extend_right_to</span><span class="s2">(</span><span class="s1">wc</span><span class="s2">, </span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s1">wl</span><span class="s2">.</span><span class="s1">extend_right_to</span><span class="s2">(</span><span class="s1">wc</span><span class="s2">, </span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">wl</span><span class="s2">.</span><span class="s1">ofs </span><span class="s2">== </span><span class="s3">0 </span><span class="s0">and </span><span class="s1">wl</span><span class="s2">.</span><span class="s1">size </span><span class="s2">== </span><span class="s3">1</span>
+
+        <span class="s4"># an actual left extension</span>
+        <span class="s1">pofs_end </span><span class="s2">= </span><span class="s1">wc2</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">()</span>
+        <span class="s1">wc2</span><span class="s2">.</span><span class="s1">extend_left_to</span><span class="s2">(</span><span class="s1">wc</span><span class="s2">, </span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">wc2</span><span class="s2">.</span><span class="s1">ofs </span><span class="s2">== </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">() </span><span class="s0">and </span><span class="s1">pofs_end </span><span class="s2">== </span><span class="s1">wc2</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">()</span>
+
+        <span class="s4"># respects maxsize</span>
+        <span class="s1">wc</span><span class="s2">.</span><span class="s1">extend_right_to</span><span class="s2">(</span><span class="s1">wr</span><span class="s2">, </span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">ofs </span><span class="s2">== </span><span class="s3">1 </span><span class="s0">and </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">== </span><span class="s1">maxsize</span>
+        <span class="s1">wc</span><span class="s2">.</span><span class="s1">extend_right_to</span><span class="s2">(</span><span class="s1">wr</span><span class="s2">, </span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">ofs </span><span class="s2">== </span><span class="s3">1 </span><span class="s0">and </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">== </span><span class="s1">maxsize</span>
+
+        <span class="s4"># without maxsize</span>
+        <span class="s1">wc</span><span class="s2">.</span><span class="s1">extend_right_to</span><span class="s2">(</span><span class="s1">wr</span><span class="s2">, </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">() == </span><span class="s1">wr</span><span class="s2">.</span><span class="s1">ofs </span><span class="s0">and </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">ofs </span><span class="s2">== </span><span class="s3">1</span>
+
+        <span class="s4"># extend left</span>
+        <span class="s1">wr</span><span class="s2">.</span><span class="s1">extend_left_to</span><span class="s2">(</span><span class="s1">wc2</span><span class="s2">, </span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s1">wr</span><span class="s2">.</span><span class="s1">extend_left_to</span><span class="s2">(</span><span class="s1">wc2</span><span class="s2">, </span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">wr</span><span class="s2">.</span><span class="s1">size </span><span class="s2">== </span><span class="s1">maxsize</span>
+
+        <span class="s1">wr</span><span class="s2">.</span><span class="s1">extend_left_to</span><span class="s2">(</span><span class="s1">wc2</span><span class="s2">, </span><span class="s1">sys</span><span class="s2">.</span><span class="s1">maxsize</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">wr</span><span class="s2">.</span><span class="s1">ofs </span><span class="s2">== </span><span class="s1">wc2</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">()</span>
+
+        <span class="s1">wc</span><span class="s2">.</span><span class="s1">align</span><span class="s2">()</span>
+        <span class="s0">assert </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">ofs </span><span class="s2">== </span><span class="s3">0 </span><span class="s0">and </span><span class="s1">wc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">== </span><span class="s1">align_to_mmap</span><span class="s2">(</span><span class="s1">wc</span><span class="s2">.</span><span class="s1">size</span><span class="s2">, </span><span class="s0">True</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_region</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">FileCreator</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">k_window_test_size</span><span class="s2">, </span><span class="s5">&quot;window_test&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fc</span><span class="s2">:</span>
+            <span class="s1">half_size </span><span class="s2">= </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">// </span><span class="s3">2</span>
+            <span class="s1">rofs </span><span class="s2">= </span><span class="s1">align_to_mmap</span><span class="s2">(</span><span class="s3">4200</span><span class="s2">, </span><span class="s0">False</span><span class="s2">)</span>
+            <span class="s1">rfull </span><span class="s2">= </span><span class="s1">MapRegion</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s3">0</span><span class="s2">, </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span><span class="s2">)</span>
+            <span class="s1">rhalfofs </span><span class="s2">= </span><span class="s1">MapRegion</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">rofs</span><span class="s2">, </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span><span class="s2">)</span>
+            <span class="s1">rhalfsize </span><span class="s2">= </span><span class="s1">MapRegion</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s3">0</span><span class="s2">, </span><span class="s1">half_size</span><span class="s2">)</span>
+
+            <span class="s4"># offsets</span>
+            <span class="s0">assert </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() == </span><span class="s3">0 </span><span class="s0">and </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span>
+            <span class="s0">assert </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">() == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size   </span><span class="s4"># if this method works, it works always</span>
+
+            <span class="s0">assert </span><span class="s1">rhalfofs</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() == </span><span class="s1">rofs </span><span class="s0">and </span><span class="s1">rhalfofs</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">- </span><span class="s1">rofs</span>
+            <span class="s0">assert </span><span class="s1">rhalfsize</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() == </span><span class="s3">0 </span><span class="s0">and </span><span class="s1">rhalfsize</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() == </span><span class="s1">half_size</span>
+
+            <span class="s0">assert </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">includes_ofs</span><span class="s2">(</span><span class="s3">0</span><span class="s2">) </span><span class="s0">and </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">includes_ofs</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size </span><span class="s2">- </span><span class="s3">1</span><span class="s2">) </span><span class="s0">and </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">includes_ofs</span><span class="s2">(</span><span class="s1">half_size</span><span class="s2">)</span>
+            <span class="s0">assert not </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">includes_ofs</span><span class="s2">(-</span><span class="s3">1</span><span class="s2">) </span><span class="s0">and not </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">includes_ofs</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">maxsize</span><span class="s2">)</span>
+
+        <span class="s4"># auto-refcount</span>
+        <span class="s0">assert </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">client_count</span><span class="s2">() == </span><span class="s3">1</span>
+        <span class="s1">rfull2 </span><span class="s2">= </span><span class="s1">rfull</span>
+        <span class="s0">assert </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">client_count</span><span class="s2">() == </span><span class="s3">1</span><span class="s2">, </span><span class="s5">&quot;no auto-counting&quot;</span>
+
+        <span class="s4"># window constructor</span>
+        <span class="s1">w </span><span class="s2">= </span><span class="s1">MapWindow</span><span class="s2">.</span><span class="s1">from_region</span><span class="s2">(</span><span class="s1">rfull</span><span class="s2">)</span>
+        <span class="s0">assert </span><span class="s1">w</span><span class="s2">.</span><span class="s1">ofs </span><span class="s2">== </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">ofs_begin</span><span class="s2">() </span><span class="s0">and </span><span class="s1">w</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">() == </span><span class="s1">rfull</span><span class="s2">.</span><span class="s1">ofs_end</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_region_list</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">FileCreator</span><span class="s2">(</span><span class="s3">100</span><span class="s2">, </span><span class="s5">&quot;sample_file&quot;</span><span class="s2">) </span><span class="s0">as </span><span class="s1">fc</span><span class="s2">:</span>
+            <span class="s1">fd </span><span class="s2">= </span><span class="s1">os</span><span class="s2">.</span><span class="s1">open</span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">os</span><span class="s2">.</span><span class="s1">O_RDONLY</span><span class="s2">)</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s2">(</span><span class="s1">fc</span><span class="s2">.</span><span class="s1">path</span><span class="s2">, </span><span class="s1">fd</span><span class="s2">):</span>
+                    <span class="s1">ml </span><span class="s2">= </span><span class="s1">MapRegionList</span><span class="s2">(</span><span class="s1">item</span><span class="s2">)</span>
+
+                    <span class="s0">assert </span><span class="s1">len</span><span class="s2">(</span><span class="s1">ml</span><span class="s2">) == </span><span class="s3">0</span>
+                    <span class="s0">assert </span><span class="s1">ml</span><span class="s2">.</span><span class="s1">path_or_fd</span><span class="s2">() == </span><span class="s1">item</span>
+                    <span class="s0">assert </span><span class="s1">ml</span><span class="s2">.</span><span class="s1">file_size</span><span class="s2">() == </span><span class="s1">fc</span><span class="s2">.</span><span class="s1">size</span>
+            <span class="s0">finally</span><span class="s2">:</span>
+                <span class="s1">os</span><span class="s2">.</span><span class="s1">close</span><span class="s2">(</span><span class="s1">fd</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_util</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">assert </span><span class="s1">isinstance</span><span class="s2">(</span><span class="s1">is_64_bit</span><span class="s2">(), </span><span class="s1">bool</span><span class="s2">)    </span><span class="s4"># just call it</span>
+        <span class="s0">assert </span><span class="s1">align_to_mmap</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s0">False</span><span class="s2">) == </span><span class="s3">0</span>
+        <span class="s0">assert </span><span class="s1">align_to_mmap</span><span class="s2">(</span><span class="s3">1</span><span class="s2">, </span><span class="s0">True</span><span class="s2">) == </span><span class="s1">ALLOCATIONGRANULARITY</span>
+</pre>
+</body>
+</html>

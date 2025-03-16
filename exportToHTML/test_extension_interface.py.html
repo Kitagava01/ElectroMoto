@@ -1,0 +1,137 @@
+<html>
+<head>
+<title>test_extension_interface.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+test_extension_interface.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">print_function</span>
+<span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">absolute_import</span>
+
+<span class="s0">import </span><span class="s1">sys</span>
+
+<span class="s0">import </span><span class="s1">greenlet</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">_test_extension</span>
+<span class="s0">from </span><span class="s2">. </span><span class="s0">import </span><span class="s1">TestCase</span>
+
+<span class="s3"># pylint:disable=c-extension-no-member</span>
+
+<span class="s0">class </span><span class="s1">CAPITests</span><span class="s2">(</span><span class="s1">TestCase</span><span class="s2">):</span>
+    <span class="s0">def </span><span class="s1">test_switch</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span>
+            <span class="s4">50</span><span class="s2">, </span><span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_switch</span><span class="s2">(</span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: </span><span class="s4">50</span><span class="s2">)))</span>
+
+    <span class="s0">def </span><span class="s1">test_switch_kwargs</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">def </span><span class="s1">adder</span><span class="s2">(</span><span class="s1">x</span><span class="s2">, </span><span class="s1">y</span><span class="s2">):</span>
+            <span class="s0">return </span><span class="s1">x </span><span class="s2">* </span><span class="s1">y</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">adder</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s4">6</span><span class="s2">, </span><span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_switch_kwargs</span><span class="s2">(</span><span class="s1">g</span><span class="s2">, </span><span class="s1">x</span><span class="s2">=</span><span class="s4">3</span><span class="s2">, </span><span class="s1">y</span><span class="s2">=</span><span class="s4">2</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_setparent</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s3"># pylint:disable=disallowed-name</span>
+        <span class="s0">def </span><span class="s1">foo</span><span class="s2">():</span>
+            <span class="s0">def </span><span class="s1">bar</span><span class="s2">():</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+
+                <span class="s3"># This final switch should go back to the main greenlet, since</span>
+                <span class="s3"># the test_setparent() function in the C extension should have</span>
+                <span class="s3"># reparented this greenlet.</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+                <span class="s0">raise </span><span class="s1">AssertionError</span><span class="s2">(</span><span class="s5">&quot;Should never have reached this code&quot;</span><span class="s2">)</span>
+            <span class="s1">child </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">bar</span><span class="s2">)</span>
+            <span class="s1">child</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">(</span><span class="s1">child</span><span class="s2">)</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">throw</span><span class="s2">(</span>
+                <span class="s1">AssertionError</span><span class="s2">(</span><span class="s5">&quot;Should never reach this code&quot;</span><span class="s2">))</span>
+        <span class="s1">foo_child </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">foo</span><span class="s2">).</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s0">None</span><span class="s2">, </span><span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_setparent</span><span class="s2">(</span><span class="s1">foo_child</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_getcurrent</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_getcurrent</span><span class="s2">()</span>
+
+    <span class="s0">def </span><span class="s1">test_new_greenlet</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(-</span><span class="s4">15</span><span class="s2">, </span><span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_new_greenlet</span><span class="s2">(</span><span class="s0">lambda</span><span class="s2">: -</span><span class="s4">15</span><span class="s2">))</span>
+
+    <span class="s0">def </span><span class="s1">test_raise_greenlet_dead</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">, </span><span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_raise_dead_greenlet</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_raise_greenlet_error</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span>
+            <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">error</span><span class="s2">, </span><span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_raise_greenlet_error</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_throw</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s1">seen </span><span class="s2">= []</span>
+
+        <span class="s0">def </span><span class="s1">foo</span><span class="s2">():         </span><span class="s3"># pylint:disable=disallowed-name</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">().</span><span class="s1">parent</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+            <span class="s0">except </span><span class="s1">ValueError</span><span class="s2">:</span>
+                <span class="s1">seen</span><span class="s2">.</span><span class="s1">append</span><span class="s2">(</span><span class="s1">sys</span><span class="s2">.</span><span class="s1">exc_info</span><span class="s2">()[</span><span class="s4">1</span><span class="s2">])</span>
+            <span class="s0">except </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">GreenletExit</span><span class="s2">:</span>
+                <span class="s0">raise </span><span class="s1">AssertionError</span>
+        <span class="s1">g </span><span class="s2">= </span><span class="s1">greenlet</span><span class="s2">.</span><span class="s1">greenlet</span><span class="s2">(</span><span class="s1">foo</span><span class="s2">)</span>
+        <span class="s1">g</span><span class="s2">.</span><span class="s1">switch</span><span class="s2">()</span>
+        <span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_throw</span><span class="s2">(</span><span class="s1">g</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">len</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">), </span><span class="s4">1</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertTrue</span><span class="s2">(</span>
+            <span class="s1">isinstance</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">[</span><span class="s4">0</span><span class="s2">], </span><span class="s1">ValueError</span><span class="s2">),</span>
+            <span class="s5">&quot;ValueError was not raised in foo()&quot;</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span>
+            <span class="s1">str</span><span class="s2">(</span><span class="s1">seen</span><span class="s2">[</span><span class="s4">0</span><span class="s2">]),</span>
+            <span class="s5">'take that sucka!'</span><span class="s2">,</span>
+            <span class="s5">&quot;message doesn't match&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_non_traceback_param</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_throw_exact</span><span class="s2">(</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">(),</span>
+                <span class="s1">Exception</span><span class="s2">,</span>
+                <span class="s1">Exception</span><span class="s2">(),</span>
+                <span class="s1">self</span>
+            <span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">),</span>
+                         <span class="s5">&quot;throw() third argument must be a traceback object&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_instance_of_wrong_type</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_throw_exact</span><span class="s2">(</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">(),</span>
+                <span class="s1">Exception</span><span class="s2">(),</span>
+                <span class="s1">BaseException</span><span class="s2">(),</span>
+                <span class="s0">None</span><span class="s2">,</span>
+            <span class="s2">)</span>
+
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">),</span>
+                         <span class="s5">&quot;instance exception may not have a separate value&quot;</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">test_not_throwable</span><span class="s2">(</span><span class="s1">self</span><span class="s2">):</span>
+        <span class="s0">with </span><span class="s1">self</span><span class="s2">.</span><span class="s1">assertRaises</span><span class="s2">(</span><span class="s1">TypeError</span><span class="s2">) </span><span class="s0">as </span><span class="s1">exc</span><span class="s2">:</span>
+            <span class="s1">_test_extension</span><span class="s2">.</span><span class="s1">test_throw_exact</span><span class="s2">(</span>
+                <span class="s1">greenlet</span><span class="s2">.</span><span class="s1">getcurrent</span><span class="s2">(),</span>
+                <span class="s5">&quot;abc&quot;</span><span class="s2">,</span>
+                <span class="s0">None</span><span class="s2">,</span>
+                <span class="s0">None</span><span class="s2">,</span>
+            <span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">assertEqual</span><span class="s2">(</span><span class="s1">str</span><span class="s2">(</span><span class="s1">exc</span><span class="s2">.</span><span class="s1">exception</span><span class="s2">),</span>
+                         <span class="s5">&quot;exceptions must be classes, or instances, not str&quot;</span><span class="s2">)</span>
+
+
+<span class="s0">if </span><span class="s1">__name__ </span><span class="s2">== </span><span class="s5">'__main__'</span><span class="s2">:</span>
+    <span class="s0">import </span><span class="s1">unittest</span>
+    <span class="s1">unittest</span><span class="s2">.</span><span class="s1">main</span><span class="s2">()</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,611 @@
+<html>
+<head>
+<title>mman.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #5f826b; font-style: italic;}
+.s1 { color: #bcbec4;}
+.s2 { color: #cf8e6d;}
+.s3 { color: #bcbec4;}
+.s4 { color: #6aab73;}
+.s5 { color: #7a7e85;}
+.s6 { color: #2aacb8;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+mman.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;Module containing a memory memory manager which provides a sliding window on a number of memory mapped files&quot;&quot;&quot;</span>
+<span class="s2">from </span><span class="s3">.</span><span class="s1">util </span><span class="s2">import </span><span class="s3">(</span>
+    <span class="s1">MapWindow</span><span class="s3">,</span>
+    <span class="s1">MapRegion</span><span class="s3">,</span>
+    <span class="s1">MapRegionList</span><span class="s3">,</span>
+    <span class="s1">is_64_bit</span><span class="s3">,</span>
+<span class="s3">)</span>
+
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">from </span><span class="s1">functools </span><span class="s2">import </span><span class="s1">reduce</span>
+
+<span class="s1">__all__ </span><span class="s3">= [</span><span class="s4">&quot;StaticWindowMapManager&quot;</span><span class="s3">, </span><span class="s4">&quot;SlidingWindowMapManager&quot;</span><span class="s3">, </span><span class="s4">&quot;WindowCursor&quot;</span><span class="s3">]</span>
+<span class="s5">#{ Utilities</span>
+
+<span class="s5">#}END utilities</span>
+
+
+<span class="s2">class </span><span class="s1">WindowCursor</span><span class="s3">:</span>
+
+    <span class="s0">&quot;&quot;&quot; 
+    Pointer into the mapped region of the memory manager, keeping the map 
+    alive until it is destroyed and no other client uses it. 
+ 
+    Cursors should not be created manually, but are instead returned by the SlidingWindowMapManager 
+ 
+    **Note:**: The current implementation is suited for static and sliding window managers, but it also means 
+    that it must be suited for the somewhat quite different sliding manager. It could be improved, but 
+    I see no real need to do so.&quot;&quot;&quot;</span>
+    <span class="s1">__slots__ </span><span class="s3">= (</span>
+        <span class="s4">'_manager'</span><span class="s3">,  </span><span class="s5"># the manager keeping all file regions</span>
+        <span class="s4">'_rlist'</span><span class="s3">,   </span><span class="s5"># a regions list with regions for our file</span>
+        <span class="s4">'_region'</span><span class="s3">,  </span><span class="s5"># our current class:`MapRegion` or None</span>
+        <span class="s4">'_ofs'</span><span class="s3">,     </span><span class="s5"># relative offset from the actually mapped area to our start area</span>
+        <span class="s4">'_size'     </span><span class="s5"># maximum size we should provide</span>
+    <span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">manager</span><span class="s3">=</span><span class="s2">None</span><span class="s3">, </span><span class="s1">regions</span><span class="s3">=</span><span class="s2">None</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_manager </span><span class="s3">= </span><span class="s1">manager</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist </span><span class="s3">= </span><span class="s1">regions</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_region </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_ofs </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">= </span><span class="s6">0</span>
+
+    <span class="s2">def </span><span class="s1">__del__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_destroy</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">__enter__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">__exit__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">exc_type</span><span class="s3">, </span><span class="s1">exc_value</span><span class="s3">, </span><span class="s1">traceback</span><span class="s3">):</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_destroy</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">_destroy</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Destruction code to decrement counters&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">unuse_region</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s5"># Actual client count, which doesn't include the reference kept by the manager, nor ours</span>
+            <span class="s5"># as we are about to be deleted</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">) == </span><span class="s6">0</span><span class="s3">:</span>
+                    <span class="s5"># Free all resources associated with the mapped file</span>
+                    <span class="s1">self</span><span class="s3">.</span><span class="s1">_manager</span><span class="s3">.</span><span class="s1">_fdict</span><span class="s3">.</span><span class="s1">pop</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">.</span><span class="s1">path_or_fd</span><span class="s3">())</span>
+                <span class="s5"># END remove regions list from manager</span>
+            <span class="s2">except </span><span class="s3">(</span><span class="s1">TypeError</span><span class="s3">, </span><span class="s1">KeyError</span><span class="s3">):</span>
+                <span class="s5"># sometimes, during shutdown, getrefcount is None. Its possible</span>
+                <span class="s5"># to re-import it, however, its probably better to just ignore</span>
+                <span class="s5"># this python problem (for now).</span>
+                <span class="s5"># The next step is to get rid of the error prone getrefcount altogether.</span>
+                <span class="s2">pass</span>
+            <span class="s5"># END exception handling</span>
+        <span class="s5"># END handle regions</span>
+
+    <span class="s2">def </span><span class="s1">_copy_from</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">rhs</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Copy all data from rhs into this instance, handles usage count&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_manager </span><span class="s3">= </span><span class="s1">rhs</span><span class="s3">.</span><span class="s1">_manager</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">rhs</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">)(</span><span class="s1">rhs</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_region </span><span class="s3">= </span><span class="s1">rhs</span><span class="s3">.</span><span class="s1">_region</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_ofs </span><span class="s3">= </span><span class="s1">rhs</span><span class="s3">.</span><span class="s1">_ofs</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">= </span><span class="s1">rhs</span><span class="s3">.</span><span class="s1">_size</span>
+
+        <span class="s2">for </span><span class="s1">region </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">:</span>
+            <span class="s1">region</span><span class="s3">.</span><span class="s1">increment_client_count</span><span class="s3">()</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">increment_client_count</span><span class="s3">()</span>
+        <span class="s5"># END handle regions</span>
+
+    <span class="s2">def </span><span class="s1">__copy__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;copy module interface&quot;&quot;&quot;</span>
+        <span class="s1">cpy </span><span class="s3">= </span><span class="s1">type</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)()</span>
+        <span class="s1">cpy</span><span class="s3">.</span><span class="s1">_copy_from</span><span class="s3">(</span><span class="s1">self</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">cpy</span>
+
+    <span class="s5">#{ Interface</span>
+    <span class="s2">def </span><span class="s1">assign</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">rhs</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Assign rhs to this instance. This is required in order to get a real copy. 
+        Alternatively, you can copy an existing instance using the copy module&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_destroy</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_copy_from</span><span class="s3">(</span><span class="s1">rhs</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">use_region</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">size</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">=</span><span class="s6">0</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Assure we point to a window which allows access to the given offset into the file 
+ 
+        :param offset: absolute offset in bytes into the file 
+        :param size: amount of bytes to map. If 0, all available bytes will be mapped 
+        :param flags: additional flags to be given to os.open in case a file handle is initially opened 
+            for mapping. Has no effect if a region can actually be reused. 
+        :return: this instance - it should be queried for whether it points to a valid memory region. 
+            This is not the case if the mapping failed because we reached the end of the file 
+ 
+        **Note:**: The size actually mapped may be smaller than the given size. If that is the case, 
+        either the file has reached its end, or the map was created between two existing regions&quot;&quot;&quot;</span>
+        <span class="s1">need_region </span><span class="s3">= </span><span class="s2">True</span>
+        <span class="s1">man </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_manager</span>
+        <span class="s1">fsize </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">.</span><span class="s1">file_size</span><span class="s3">()</span>
+        <span class="s1">size </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">size </span><span class="s2">or </span><span class="s1">fsize</span><span class="s3">, </span><span class="s1">man</span><span class="s3">.</span><span class="s1">window_size</span><span class="s3">() </span><span class="s2">or </span><span class="s1">fsize</span><span class="s3">)   </span><span class="s5"># clamp size to window size</span>
+
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">includes_ofs</span><span class="s3">(</span><span class="s1">offset</span><span class="s3">):</span>
+                <span class="s1">need_region </span><span class="s3">= </span><span class="s2">False</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">unuse_region</span><span class="s3">()</span>
+            <span class="s5"># END handle existing region</span>
+        <span class="s5"># END check existing region</span>
+
+        <span class="s5"># offset too large ?</span>
+        <span class="s2">if </span><span class="s1">offset </span><span class="s3">&gt;= </span><span class="s1">fsize</span><span class="s3">:</span>
+            <span class="s2">return </span><span class="s1">self</span>
+        <span class="s5"># END handle offset</span>
+
+        <span class="s2">if </span><span class="s1">need_region</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_region </span><span class="s3">= </span><span class="s1">man</span><span class="s3">.</span><span class="s1">_obtain_region</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">, </span><span class="s2">False</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">increment_client_count</span><span class="s3">()</span>
+        <span class="s5"># END need region handling</span>
+
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_ofs </span><span class="s3">= </span><span class="s1">offset </span><span class="s3">- </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">_b</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_size </span><span class="s3">= </span><span class="s1">min</span><span class="s3">(</span><span class="s1">size</span><span class="s3">, </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">ofs_end</span><span class="s3">() - </span><span class="s1">offset</span><span class="s3">)</span>
+
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">unuse_region</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Unuse the current region. Does nothing if we have no current region 
+ 
+        **Note:** the cursor unuses the region automatically upon destruction. It is recommended 
+        to un-use the region once you are done reading from it in persistent cursors as it 
+        helps to free up resource more quickly&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region </span><span class="s2">is not None</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">increment_client_count</span><span class="s3">(-</span><span class="s6">1</span><span class="s3">)</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_region </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s5"># note: should reset ofs and size, but we spare that for performance. Its not</span>
+        <span class="s5"># allowed to query information if we are not valid !</span>
+
+    <span class="s2">def </span><span class="s1">buffer</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Return a buffer object which allows access to our memory region from our offset 
+        to the window size. Please note that it might be smaller than you requested when calling use_region() 
+ 
+        **Note:** You can only obtain a buffer if this instance is_valid() ! 
+ 
+        **Note:** buffers should not be cached passed the duration of your access as it will 
+        prevent resources from being freed even though they might not be accounted for anymore !&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">memoryview</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">buffer</span><span class="s3">())[</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_ofs</span><span class="s3">:</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_ofs</span><span class="s3">+</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size</span><span class="s3">]</span>
+
+    <span class="s2">def </span><span class="s1">map</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        :return: the underlying raw memory map. Please not that the offset and size is likely to be different 
+            to what you set as offset and size. Use it only if you are sure about the region it maps, which is the whole 
+            file in case of StaticWindowMapManager&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">map</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">is_valid</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: True if we have a valid and usable region&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region </span><span class="s2">is not None</span>
+
+    <span class="s2">def </span><span class="s1">is_associated</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: True if we are associated with a specific file already&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist </span><span class="s2">is not None</span>
+
+    <span class="s2">def </span><span class="s1">ofs_begin</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: offset to the first byte pointed to by our cursor 
+ 
+        **Note:** only if is_valid() is True&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">_b </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_ofs</span>
+
+    <span class="s2">def </span><span class="s1">ofs_end</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: offset to one past the last available byte&quot;&quot;&quot;</span>
+        <span class="s5"># unroll method calls for performance !</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">_b </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_ofs </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size</span>
+
+    <span class="s2">def </span><span class="s1">size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: amount of bytes we point to&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size</span>
+
+    <span class="s2">def </span><span class="s1">region</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: our mapped region, or None if nothing is mapped yet 
+        :raise AssertionError: if we have no current region. This is only useful for debugging&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span>
+
+    <span class="s2">def </span><span class="s1">includes_ofs</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">ofs</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: True if the given absolute offset is contained in the cursors 
+            current region 
+ 
+        **Note:** cursor must be valid for this to work&quot;&quot;&quot;</span>
+        <span class="s5"># unroll methods</span>
+        <span class="s2">return </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">_b </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_ofs</span><span class="s3">) &lt;= </span><span class="s1">ofs </span><span class="s3">&lt; (</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_region</span><span class="s3">.</span><span class="s1">_b </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_ofs </span><span class="s3">+ </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_size</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">file_size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: size of the underlying file&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">.</span><span class="s1">file_size</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">path_or_fd</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: path or file descriptor of the underlying mapped file&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">.</span><span class="s1">path_or_fd</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">path</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: path of the underlying mapped file 
+        :raise ValueError: if attached path is not a path&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">.</span><span class="s1">path_or_fd</span><span class="s3">(), </span><span class="s1">int</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;Path queried although mapping was applied to a file descriptor&quot;</span><span class="s3">)</span>
+        <span class="s5"># END handle type</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">.</span><span class="s1">path_or_fd</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">fd</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: file descriptor used to create the underlying mapping. 
+ 
+        **Note:** it is not required to be valid anymore 
+        :raise ValueError: if the mapping was not created by a file descriptor&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">isinstance</span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">.</span><span class="s1">path_or_fd</span><span class="s3">(), </span><span class="s1">str</span><span class="s3">):</span>
+            <span class="s2">raise </span><span class="s1">ValueError</span><span class="s3">(</span><span class="s4">&quot;File descriptor queried although mapping was generated from path&quot;</span><span class="s3">)</span>
+        <span class="s5"># END handle type</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_rlist</span><span class="s3">.</span><span class="s1">path_or_fd</span><span class="s3">()</span>
+
+    <span class="s5">#} END interface</span>
+
+
+<span class="s2">class </span><span class="s1">StaticWindowMapManager</span><span class="s3">:</span>
+
+    <span class="s0">&quot;&quot;&quot;Provides a manager which will produce single size cursors that are allowed 
+    to always map the whole file. 
+ 
+    Clients must be written to specifically know that they are accessing their data 
+    through a StaticWindowMapManager, as they otherwise have to deal with their window size. 
+ 
+    These clients would have to use a SlidingWindowMapBuffer to hide this fact. 
+ 
+    This type will always use a maximum window size, and optimize certain methods to 
+    accommodate this fact&quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s3">= [</span>
+        <span class="s4">'_fdict'</span><span class="s3">,           </span><span class="s5"># mapping of path -&gt; StorageHelper (of some kind</span>
+        <span class="s4">'_window_size'</span><span class="s3">,     </span><span class="s5"># maximum size of a window</span>
+        <span class="s4">'_max_memory_size'</span><span class="s3">,  </span><span class="s5"># maximum amount of memory we may allocate</span>
+        <span class="s4">'_max_handle_count'</span><span class="s3">,        </span><span class="s5"># maximum amount of handles to keep open</span>
+        <span class="s4">'_memory_size'</span><span class="s3">,     </span><span class="s5"># currently allocated memory size</span>
+        <span class="s4">'_handle_count'</span><span class="s3">,        </span><span class="s5"># amount of currently allocated file handles</span>
+    <span class="s3">]</span>
+
+    <span class="s5">#{ Configuration</span>
+    <span class="s1">MapRegionListCls </span><span class="s3">= </span><span class="s1">MapRegionList</span>
+    <span class="s1">MapWindowCls </span><span class="s3">= </span><span class="s1">MapWindow</span>
+    <span class="s1">MapRegionCls </span><span class="s3">= </span><span class="s1">MapRegion</span>
+    <span class="s1">WindowCursorCls </span><span class="s3">= </span><span class="s1">WindowCursor</span>
+    <span class="s5">#} END configuration</span>
+
+    <span class="s1">_MB_in_bytes </span><span class="s3">= </span><span class="s6">1024 </span><span class="s3">* </span><span class="s6">1024</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">window_size</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">max_memory_size</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">max_open_handles</span><span class="s3">=</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">maxsize</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;initialize the manager with the given parameters. 
+        :param window_size: if -1, a default window size will be chosen depending on 
+            the operating system's architecture. It will internally be quantified to a multiple of the page size 
+            If 0, the window may have any size, which basically results in mapping the whole file at one 
+        :param max_memory_size: maximum amount of memory we may map at once before releasing mapped regions. 
+            If 0, a viable default will be set depending on the system's architecture. 
+            It is a soft limit that is tried to be kept, but nothing bad happens if we have to over-allocate 
+        :param max_open_handles: if not maxint, limit the amount of open file handles to the given number. 
+            Otherwise the amount is only limited by the system itself. If a system or soft limit is hit, 
+            the manager will free as many handles as possible&quot;&quot;&quot;</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_fdict </span><span class="s3">= </span><span class="s1">dict</span><span class="s3">()</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_window_size </span><span class="s3">= </span><span class="s1">window_size</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_max_memory_size </span><span class="s3">= </span><span class="s1">max_memory_size</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_max_handle_count </span><span class="s3">= </span><span class="s1">max_open_handles</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_memory_size </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s1">self</span><span class="s3">.</span><span class="s1">_handle_count </span><span class="s3">= </span><span class="s6">0</span>
+
+        <span class="s2">if </span><span class="s1">window_size </span><span class="s3">&lt; </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">coeff </span><span class="s3">= </span><span class="s6">64</span>
+            <span class="s2">if </span><span class="s1">is_64_bit</span><span class="s3">():</span>
+                <span class="s1">coeff </span><span class="s3">= </span><span class="s6">1024</span>
+            <span class="s5"># END handle arch</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_window_size </span><span class="s3">= </span><span class="s1">coeff </span><span class="s3">* </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_MB_in_bytes</span>
+        <span class="s5"># END handle max window size</span>
+
+        <span class="s2">if </span><span class="s1">max_memory_size </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+            <span class="s1">coeff </span><span class="s3">= </span><span class="s6">1024</span>
+            <span class="s2">if </span><span class="s1">is_64_bit</span><span class="s3">():</span>
+                <span class="s1">coeff </span><span class="s3">= </span><span class="s6">8192</span>
+            <span class="s5"># END handle arch</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_max_memory_size </span><span class="s3">= </span><span class="s1">coeff </span><span class="s3">* </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_MB_in_bytes</span>
+        <span class="s5"># END handle max memory size</span>
+
+    <span class="s5">#{ Internal Methods</span>
+
+    <span class="s2">def </span><span class="s1">_collect_lru_region</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">size</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Unmap the region which was least-recently used and has no client 
+        :param size: size of the region we want to map next (assuming its not already mapped partially or full 
+            if 0, we try to free any available region 
+        :return: Amount of freed regions 
+ 
+        .. Note:: 
+            We don't raise exceptions anymore, in order to keep the system working, allowing temporary overallocation. 
+            If the system runs out of memory, it will tell. 
+ 
+        .. TODO:: 
+            implement a case where all unusued regions are discarded efficiently. 
+            Currently its only brute force 
+        &quot;&quot;&quot;</span>
+        <span class="s1">num_found </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">while </span><span class="s3">(</span><span class="s1">size </span><span class="s3">== </span><span class="s6">0</span><span class="s3">) </span><span class="s2">or </span><span class="s3">(</span><span class="s1">self</span><span class="s3">.</span><span class="s1">_memory_size </span><span class="s3">+ </span><span class="s1">size </span><span class="s3">&gt; </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_max_memory_size</span><span class="s3">):</span>
+            <span class="s1">lru_region </span><span class="s3">= </span><span class="s2">None</span>
+            <span class="s1">lru_list </span><span class="s3">= </span><span class="s2">None</span>
+            <span class="s2">for </span><span class="s1">regions </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fdict</span><span class="s3">.</span><span class="s1">values</span><span class="s3">():</span>
+                <span class="s2">for </span><span class="s1">region </span><span class="s2">in </span><span class="s1">regions</span><span class="s3">:</span>
+                    <span class="s5"># check client count - if it's 1, it's just us</span>
+                    <span class="s2">if </span><span class="s3">(</span><span class="s1">region</span><span class="s3">.</span><span class="s1">client_count</span><span class="s3">() == </span><span class="s6">1 </span><span class="s2">and</span>
+                            <span class="s3">(</span><span class="s1">lru_region </span><span class="s2">is None or </span><span class="s1">region</span><span class="s3">.</span><span class="s1">_uc </span><span class="s3">&lt; </span><span class="s1">lru_region</span><span class="s3">.</span><span class="s1">_uc</span><span class="s3">)):</span>
+                        <span class="s1">lru_region </span><span class="s3">= </span><span class="s1">region</span>
+                        <span class="s1">lru_list </span><span class="s3">= </span><span class="s1">regions</span>
+                    <span class="s5"># END update lru_region</span>
+                <span class="s5"># END for each region</span>
+            <span class="s5"># END for each regions list</span>
+
+            <span class="s2">if </span><span class="s1">lru_region </span><span class="s2">is None</span><span class="s3">:</span>
+                <span class="s2">break</span>
+            <span class="s5"># END handle region not found</span>
+
+            <span class="s1">num_found </span><span class="s3">+= </span><span class="s6">1</span>
+            <span class="s2">del</span><span class="s3">(</span><span class="s1">lru_list</span><span class="s3">[</span><span class="s1">lru_list</span><span class="s3">.</span><span class="s1">index</span><span class="s3">(</span><span class="s1">lru_region</span><span class="s3">)])</span>
+            <span class="s1">lru_region</span><span class="s3">.</span><span class="s1">increment_client_count</span><span class="s3">(-</span><span class="s6">1</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_memory_size </span><span class="s3">-= </span><span class="s1">lru_region</span><span class="s3">.</span><span class="s1">size</span><span class="s3">()</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_handle_count </span><span class="s3">-= </span><span class="s6">1</span>
+        <span class="s5"># END while there is more memory to free</span>
+        <span class="s2">return </span><span class="s1">num_found</span>
+
+    <span class="s2">def </span><span class="s1">_obtain_region</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">a</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">, </span><span class="s1">is_recursive</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Utility to create a new region - for more information on the parameters, 
+        see MapCursor.use_region. 
+        :param a: A regions (a)rray 
+        :return: The newly created region&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_memory_size </span><span class="s3">+ </span><span class="s1">size </span><span class="s3">&gt; </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_max_memory_size</span><span class="s3">:</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_collect_lru_region</span><span class="s3">(</span><span class="s1">size</span><span class="s3">)</span>
+        <span class="s5"># END handle collection</span>
+
+        <span class="s1">r </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">a</span><span class="s3">:</span>
+            <span class="s2">assert </span><span class="s1">len</span><span class="s3">(</span><span class="s1">a</span><span class="s3">) == </span><span class="s6">1</span>
+            <span class="s1">r </span><span class="s3">= </span><span class="s1">a</span><span class="s3">[</span><span class="s6">0</span><span class="s3">]</span>
+        <span class="s2">else</span><span class="s3">:</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s1">r </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">MapRegionCls</span><span class="s3">(</span><span class="s1">a</span><span class="s3">.</span><span class="s1">path_or_fd</span><span class="s3">(), </span><span class="s6">0</span><span class="s3">, </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">maxsize</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">Exception</span><span class="s3">:</span>
+                <span class="s5"># apparently we are out of system resources or hit a limit</span>
+                <span class="s5"># As many more operations are likely to fail in that condition (</span>
+                <span class="s5"># like reading a file from disk, etc) we free up as much as possible</span>
+                <span class="s5"># As this invalidates our insert position, we have to recurse here</span>
+                <span class="s2">if </span><span class="s1">is_recursive</span><span class="s3">:</span>
+                    <span class="s5"># we already tried this, and still have no success in obtaining</span>
+                    <span class="s5"># a mapping. This is an exception, so we propagate it</span>
+                    <span class="s2">raise</span>
+                <span class="s5"># END handle existing recursion</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_collect_lru_region</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+                <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_obtain_region</span><span class="s3">(</span><span class="s1">a</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">, </span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s5"># END handle exceptions</span>
+
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_handle_count </span><span class="s3">+= </span><span class="s6">1</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_memory_size </span><span class="s3">+= </span><span class="s1">r</span><span class="s3">.</span><span class="s1">size</span><span class="s3">()</span>
+            <span class="s1">a</span><span class="s3">.</span><span class="s1">append</span><span class="s3">(</span><span class="s1">r</span><span class="s3">)</span>
+        <span class="s5"># END handle array</span>
+
+        <span class="s2">assert </span><span class="s1">r</span><span class="s3">.</span><span class="s1">includes_ofs</span><span class="s3">(</span><span class="s1">offset</span><span class="s3">)</span>
+        <span class="s2">return </span><span class="s1">r</span>
+
+    <span class="s5">#}END internal methods</span>
+
+    <span class="s5">#{ Interface</span>
+    <span class="s2">def </span><span class="s1">make_cursor</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">path_or_fd</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        :return: a cursor pointing to the given path or file descriptor. 
+            It can be used to map new regions of the file into memory 
+ 
+        **Note:** if a file descriptor is given, it is assumed to be open and valid, 
+        but may be closed afterwards. To refer to the same file, you may reuse 
+        your existing file descriptor, but keep in mind that new windows can only 
+        be mapped as long as it stays valid. This is why the using actual file paths 
+        are preferred unless you plan to keep the file descriptor open. 
+ 
+        **Note:** file descriptors are problematic as they are not necessarily unique, as two 
+        different files opened and closed in succession might have the same file descriptor id. 
+ 
+        **Note:** Using file descriptors directly is faster once new windows are mapped as it 
+        prevents the file to be opened again just for the purpose of mapping it.&quot;&quot;&quot;</span>
+        <span class="s1">regions </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fdict</span><span class="s3">.</span><span class="s1">get</span><span class="s3">(</span><span class="s1">path_or_fd</span><span class="s3">)</span>
+        <span class="s2">if </span><span class="s1">regions </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">regions </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">MapRegionListCls</span><span class="s3">(</span><span class="s1">path_or_fd</span><span class="s3">)</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_fdict</span><span class="s3">[</span><span class="s1">path_or_fd</span><span class="s3">] = </span><span class="s1">regions</span>
+        <span class="s5"># END obtain region for path</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">WindowCursorCls</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">regions</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">collect</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Collect all available free-to-collect mapped regions 
+        :return: Amount of freed handles&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_collect_lru_region</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">num_file_handles</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: amount of file handles in use. Each mapped region uses one file handle&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_handle_count</span>
+
+    <span class="s2">def </span><span class="s1">num_open_files</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Amount of opened files in the system&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">reduce</span><span class="s3">(</span><span class="s2">lambda </span><span class="s1">x</span><span class="s3">, </span><span class="s1">y</span><span class="s3">: </span><span class="s1">x </span><span class="s3">+ </span><span class="s1">y</span><span class="s3">, (</span><span class="s6">1 </span><span class="s2">for </span><span class="s1">rlist </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fdict</span><span class="s3">.</span><span class="s1">values</span><span class="s3">() </span><span class="s2">if </span><span class="s1">len</span><span class="s3">(</span><span class="s1">rlist</span><span class="s3">) &gt; </span><span class="s6">0</span><span class="s3">), </span><span class="s6">0</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">window_size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: size of each window when allocating new regions&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_window_size</span>
+
+    <span class="s2">def </span><span class="s1">mapped_memory_size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: amount of bytes currently mapped in total&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_memory_size</span>
+
+    <span class="s2">def </span><span class="s1">max_file_handles</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: maximum amount of handles we may have opened&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_max_handle_count</span>
+
+    <span class="s2">def </span><span class="s1">max_mapped_memory_size</span><span class="s3">(</span><span class="s1">self</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;:return: maximum amount of memory we may allocate&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_max_memory_size</span>
+
+    <span class="s5">#} END interface</span>
+
+    <span class="s5">#{ Special Purpose Interface</span>
+
+    <span class="s2">def </span><span class="s1">force_map_handle_removal_win</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">base_path</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;ONLY AVAILABLE ON WINDOWS 
+        On windows removing files is not allowed if anybody still has it opened. 
+        If this process is ourselves, and if the whole process uses this memory 
+        manager (as far as the parent framework is concerned) we can enforce 
+        closing all memory maps whose path matches the given base path to 
+        allow the respective operation after all. 
+        The respective system must NOT access the closed memory regions anymore ! 
+        This really may only be used if you know that the items which keep 
+        the cursors alive will not be using it anymore. They need to be recreated ! 
+        :return: Amount of closed handles 
+ 
+        **Note:** does nothing on non-windows platforms&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">sys</span><span class="s3">.</span><span class="s1">platform </span><span class="s3">!= </span><span class="s4">'win32'</span><span class="s3">:</span>
+            <span class="s2">return</span>
+        <span class="s5"># END early bailout</span>
+
+        <span class="s1">num_closed </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s2">for </span><span class="s1">path</span><span class="s3">, </span><span class="s1">rlist </span><span class="s2">in </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_fdict</span><span class="s3">.</span><span class="s1">items</span><span class="s3">():</span>
+            <span class="s2">if </span><span class="s1">path</span><span class="s3">.</span><span class="s1">startswith</span><span class="s3">(</span><span class="s1">base_path</span><span class="s3">):</span>
+                <span class="s2">for </span><span class="s1">region </span><span class="s2">in </span><span class="s1">rlist</span><span class="s3">:</span>
+                    <span class="s1">region</span><span class="s3">.</span><span class="s1">release</span><span class="s3">()</span>
+                    <span class="s1">num_closed </span><span class="s3">+= </span><span class="s6">1</span>
+            <span class="s5"># END path matches</span>
+        <span class="s5"># END for each path</span>
+        <span class="s2">return </span><span class="s1">num_closed</span>
+    <span class="s5">#} END special purpose interface</span>
+
+
+<span class="s2">class </span><span class="s1">SlidingWindowMapManager</span><span class="s3">(</span><span class="s1">StaticWindowMapManager</span><span class="s3">):</span>
+
+    <span class="s0">&quot;&quot;&quot;Maintains a list of ranges of mapped memory regions in one or more files and allows to easily 
+    obtain additional regions assuring there is no overlap. 
+    Once a certain memory limit is reached globally, or if there cannot be more open file handles 
+    which result from each mmap call, the least recently used, and currently unused mapped regions 
+    are unloaded automatically. 
+ 
+    **Note:** currently not thread-safe ! 
+ 
+    **Note:** in the current implementation, we will automatically unload windows if we either cannot 
+        create more memory maps (as the open file handles limit is hit) or if we have allocated more than 
+        a safe amount of memory already, which would possibly cause memory allocations to fail as our address 
+        space is full.&quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ </span><span class="s3">= </span><span class="s1">tuple</span><span class="s3">()</span>
+
+    <span class="s2">def </span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">window_size</span><span class="s3">=-</span><span class="s6">1</span><span class="s3">, </span><span class="s1">max_memory_size</span><span class="s3">=</span><span class="s6">0</span><span class="s3">, </span><span class="s1">max_open_handles</span><span class="s3">=</span><span class="s1">sys</span><span class="s3">.</span><span class="s1">maxsize</span><span class="s3">):</span>
+        <span class="s0">&quot;&quot;&quot;Adjusts the default window size to -1&quot;&quot;&quot;</span>
+        <span class="s1">super</span><span class="s3">().</span><span class="s1">__init__</span><span class="s3">(</span><span class="s1">window_size</span><span class="s3">, </span><span class="s1">max_memory_size</span><span class="s3">, </span><span class="s1">max_open_handles</span><span class="s3">)</span>
+
+    <span class="s2">def </span><span class="s1">_obtain_region</span><span class="s3">(</span><span class="s1">self</span><span class="s3">, </span><span class="s1">a</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">, </span><span class="s1">is_recursive</span><span class="s3">):</span>
+        <span class="s5"># bisect to find an existing region. The c++ implementation cannot</span>
+        <span class="s5"># do that as it uses a linked list for regions.</span>
+        <span class="s1">r </span><span class="s3">= </span><span class="s2">None</span>
+        <span class="s1">lo </span><span class="s3">= </span><span class="s6">0</span>
+        <span class="s1">hi </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">a</span><span class="s3">)</span>
+        <span class="s2">while </span><span class="s1">lo </span><span class="s3">&lt; </span><span class="s1">hi</span><span class="s3">:</span>
+            <span class="s1">mid </span><span class="s3">= (</span><span class="s1">lo </span><span class="s3">+ </span><span class="s1">hi</span><span class="s3">) // </span><span class="s6">2</span>
+            <span class="s1">ofs </span><span class="s3">= </span><span class="s1">a</span><span class="s3">[</span><span class="s1">mid</span><span class="s3">].</span><span class="s1">_b</span>
+            <span class="s2">if </span><span class="s1">ofs </span><span class="s3">&lt;= </span><span class="s1">offset</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">a</span><span class="s3">[</span><span class="s1">mid</span><span class="s3">].</span><span class="s1">includes_ofs</span><span class="s3">(</span><span class="s1">offset</span><span class="s3">):</span>
+                    <span class="s1">r </span><span class="s3">= </span><span class="s1">a</span><span class="s3">[</span><span class="s1">mid</span><span class="s3">]</span>
+                    <span class="s2">break</span>
+                <span class="s5"># END have region</span>
+                <span class="s1">lo </span><span class="s3">= </span><span class="s1">mid </span><span class="s3">+ </span><span class="s6">1</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s1">hi </span><span class="s3">= </span><span class="s1">mid</span>
+            <span class="s5"># END handle position</span>
+        <span class="s5"># END while bisecting</span>
+
+        <span class="s2">if </span><span class="s1">r </span><span class="s2">is None</span><span class="s3">:</span>
+            <span class="s1">window_size </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_window_size</span>
+            <span class="s1">left </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">MapWindowCls</span><span class="s3">(</span><span class="s6">0</span><span class="s3">, </span><span class="s6">0</span><span class="s3">)</span>
+            <span class="s1">mid </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">MapWindowCls</span><span class="s3">(</span><span class="s1">offset</span><span class="s3">, </span><span class="s1">size</span><span class="s3">)</span>
+            <span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">MapWindowCls</span><span class="s3">(</span><span class="s1">a</span><span class="s3">.</span><span class="s1">file_size</span><span class="s3">(), </span><span class="s6">0</span><span class="s3">)</span>
+
+            <span class="s5"># we want to honor the max memory size, and assure we have anough</span>
+            <span class="s5"># memory available</span>
+            <span class="s5"># Save calls !</span>
+            <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_memory_size </span><span class="s3">+ </span><span class="s1">window_size </span><span class="s3">&gt; </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_max_memory_size</span><span class="s3">:</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_collect_lru_region</span><span class="s3">(</span><span class="s1">window_size</span><span class="s3">)</span>
+            <span class="s5"># END handle collection</span>
+
+            <span class="s5"># we assume the list remains sorted by offset</span>
+            <span class="s1">insert_pos </span><span class="s3">= </span><span class="s6">0</span>
+            <span class="s1">len_regions </span><span class="s3">= </span><span class="s1">len</span><span class="s3">(</span><span class="s1">a</span><span class="s3">)</span>
+            <span class="s2">if </span><span class="s1">len_regions </span><span class="s3">== </span><span class="s6">1</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">a</span><span class="s3">[</span><span class="s6">0</span><span class="s3">].</span><span class="s1">_b </span><span class="s3">&lt;= </span><span class="s1">offset</span><span class="s3">:</span>
+                    <span class="s1">insert_pos </span><span class="s3">= </span><span class="s6">1</span>
+                <span class="s5"># END maintain sort</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s5"># find insert position</span>
+                <span class="s1">insert_pos </span><span class="s3">= </span><span class="s1">len_regions</span>
+                <span class="s2">for </span><span class="s1">i</span><span class="s3">, </span><span class="s1">region </span><span class="s2">in </span><span class="s1">enumerate</span><span class="s3">(</span><span class="s1">a</span><span class="s3">):</span>
+                    <span class="s2">if </span><span class="s1">region</span><span class="s3">.</span><span class="s1">_b </span><span class="s3">&gt; </span><span class="s1">offset</span><span class="s3">:</span>
+                        <span class="s1">insert_pos </span><span class="s3">= </span><span class="s1">i</span>
+                        <span class="s2">break</span>
+                    <span class="s5"># END if insert position is correct</span>
+                <span class="s5"># END for each region</span>
+            <span class="s5"># END obtain insert pos</span>
+
+            <span class="s5"># adjust the actual offset and size values to create the largest</span>
+            <span class="s5"># possible mapping</span>
+            <span class="s2">if </span><span class="s1">insert_pos </span><span class="s3">== </span><span class="s6">0</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">len_regions</span><span class="s3">:</span>
+                    <span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">MapWindowCls</span><span class="s3">.</span><span class="s1">from_region</span><span class="s3">(</span><span class="s1">a</span><span class="s3">[</span><span class="s1">insert_pos</span><span class="s3">])</span>
+                <span class="s5"># END adjust right side</span>
+            <span class="s2">else</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">insert_pos </span><span class="s3">!= </span><span class="s1">len_regions</span><span class="s3">:</span>
+                    <span class="s1">right </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">MapWindowCls</span><span class="s3">.</span><span class="s1">from_region</span><span class="s3">(</span><span class="s1">a</span><span class="s3">[</span><span class="s1">insert_pos</span><span class="s3">])</span>
+                <span class="s5"># END adjust right window</span>
+                <span class="s1">left </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">MapWindowCls</span><span class="s3">.</span><span class="s1">from_region</span><span class="s3">(</span><span class="s1">a</span><span class="s3">[</span><span class="s1">insert_pos </span><span class="s3">- </span><span class="s6">1</span><span class="s3">])</span>
+            <span class="s5"># END adjust surrounding windows</span>
+
+            <span class="s1">mid</span><span class="s3">.</span><span class="s1">extend_left_to</span><span class="s3">(</span><span class="s1">left</span><span class="s3">, </span><span class="s1">window_size</span><span class="s3">)</span>
+            <span class="s1">mid</span><span class="s3">.</span><span class="s1">extend_right_to</span><span class="s3">(</span><span class="s1">right</span><span class="s3">, </span><span class="s1">window_size</span><span class="s3">)</span>
+            <span class="s1">mid</span><span class="s3">.</span><span class="s1">align</span><span class="s3">()</span>
+
+            <span class="s5"># it can happen that we align beyond the end of the file</span>
+            <span class="s2">if </span><span class="s1">mid</span><span class="s3">.</span><span class="s1">ofs_end</span><span class="s3">() &gt; </span><span class="s1">right</span><span class="s3">.</span><span class="s1">ofs</span><span class="s3">:</span>
+                <span class="s1">mid</span><span class="s3">.</span><span class="s1">size </span><span class="s3">= </span><span class="s1">right</span><span class="s3">.</span><span class="s1">ofs </span><span class="s3">- </span><span class="s1">mid</span><span class="s3">.</span><span class="s1">ofs</span>
+            <span class="s5"># END readjust size</span>
+
+            <span class="s5"># insert new region at the right offset to keep the order</span>
+            <span class="s2">try</span><span class="s3">:</span>
+                <span class="s2">if </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_handle_count </span><span class="s3">&gt;= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_max_handle_count</span><span class="s3">:</span>
+                    <span class="s2">raise </span><span class="s1">Exception</span>
+                <span class="s5"># END assert own imposed max file handles</span>
+                <span class="s1">r </span><span class="s3">= </span><span class="s1">self</span><span class="s3">.</span><span class="s1">MapRegionCls</span><span class="s3">(</span><span class="s1">a</span><span class="s3">.</span><span class="s1">path_or_fd</span><span class="s3">(), </span><span class="s1">mid</span><span class="s3">.</span><span class="s1">ofs</span><span class="s3">, </span><span class="s1">mid</span><span class="s3">.</span><span class="s1">size</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">)</span>
+            <span class="s2">except </span><span class="s1">Exception</span><span class="s3">:</span>
+                <span class="s5"># apparently we are out of system resources or hit a limit</span>
+                <span class="s5"># As many more operations are likely to fail in that condition (</span>
+                <span class="s5"># like reading a file from disk, etc) we free up as much as possible</span>
+                <span class="s5"># As this invalidates our insert position, we have to recurse here</span>
+                <span class="s2">if </span><span class="s1">is_recursive</span><span class="s3">:</span>
+                    <span class="s5"># we already tried this, and still have no success in obtaining</span>
+                    <span class="s5"># a mapping. This is an exception, so we propagate it</span>
+                    <span class="s2">raise</span>
+                <span class="s5"># END handle existing recursion</span>
+                <span class="s1">self</span><span class="s3">.</span><span class="s1">_collect_lru_region</span><span class="s3">(</span><span class="s6">0</span><span class="s3">)</span>
+                <span class="s2">return </span><span class="s1">self</span><span class="s3">.</span><span class="s1">_obtain_region</span><span class="s3">(</span><span class="s1">a</span><span class="s3">, </span><span class="s1">offset</span><span class="s3">, </span><span class="s1">size</span><span class="s3">, </span><span class="s1">flags</span><span class="s3">, </span><span class="s2">True</span><span class="s3">)</span>
+            <span class="s5"># END handle exceptions</span>
+
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_handle_count </span><span class="s3">+= </span><span class="s6">1</span>
+            <span class="s1">self</span><span class="s3">.</span><span class="s1">_memory_size </span><span class="s3">+= </span><span class="s1">r</span><span class="s3">.</span><span class="s1">size</span><span class="s3">()</span>
+            <span class="s1">a</span><span class="s3">.</span><span class="s1">insert</span><span class="s3">(</span><span class="s1">insert_pos</span><span class="s3">, </span><span class="s1">r</span><span class="s3">)</span>
+        <span class="s5"># END create new region</span>
+        <span class="s2">return </span><span class="s1">r</span>
+</pre>
+</body>
+</html>

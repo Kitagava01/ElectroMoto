@@ -1,0 +1,241 @@
+<html>
+<head>
+<title>templating.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #5f826b; font-style: italic;}
+.s5 { color: #6aab73;}
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+templating.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+
+<span class="s0">from </span><span class="s1">jinja2 </span><span class="s0">import </span><span class="s1">BaseLoader</span>
+<span class="s0">from </span><span class="s1">jinja2 </span><span class="s0">import </span><span class="s1">Environment </span><span class="s0">as </span><span class="s1">BaseEnvironment</span>
+<span class="s0">from </span><span class="s1">jinja2 </span><span class="s0">import </span><span class="s1">Template</span>
+<span class="s0">from </span><span class="s1">jinja2 </span><span class="s0">import </span><span class="s1">TemplateNotFound</span>
+
+<span class="s0">from </span><span class="s2">.</span><span class="s1">globals </span><span class="s0">import </span><span class="s1">_cv_app</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">globals </span><span class="s0">import </span><span class="s1">_cv_request</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">globals </span><span class="s0">import </span><span class="s1">current_app</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">globals </span><span class="s0">import </span><span class="s1">request</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">helpers </span><span class="s0">import </span><span class="s1">stream_with_context</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">signals </span><span class="s0">import </span><span class="s1">before_render_template</span>
+<span class="s0">from </span><span class="s2">.</span><span class="s1">signals </span><span class="s0">import </span><span class="s1">template_rendered</span>
+
+<span class="s0">if </span><span class="s1">t</span><span class="s2">.</span><span class="s1">TYPE_CHECKING</span><span class="s2">:  </span><span class="s3"># pragma: no cover</span>
+    <span class="s0">from </span><span class="s2">.</span><span class="s1">app </span><span class="s0">import </span><span class="s1">Flask</span>
+    <span class="s0">from </span><span class="s2">.</span><span class="s1">sansio</span><span class="s2">.</span><span class="s1">app </span><span class="s0">import </span><span class="s1">App</span>
+    <span class="s0">from </span><span class="s2">.</span><span class="s1">sansio</span><span class="s2">.</span><span class="s1">scaffold </span><span class="s0">import </span><span class="s1">Scaffold</span>
+
+
+<span class="s0">def </span><span class="s1">_default_template_ctx_processor</span><span class="s2">() </span><span class="s1">-&gt; dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]:</span>
+    <span class="s4">&quot;&quot;&quot;Default template context processor.  Injects `request`, 
+    `session` and `g`. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">appctx </span><span class="s2">= </span><span class="s1">_cv_app</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s1">reqctx </span><span class="s2">= </span><span class="s1">_cv_request</span><span class="s2">.</span><span class="s1">get</span><span class="s2">(</span><span class="s0">None</span><span class="s2">)</span>
+    <span class="s1">rv</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">] = {}</span>
+    <span class="s0">if </span><span class="s1">appctx </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s1">rv</span><span class="s2">[</span><span class="s5">&quot;g&quot;</span><span class="s2">] = </span><span class="s1">appctx</span><span class="s2">.</span><span class="s1">g</span>
+    <span class="s0">if </span><span class="s1">reqctx </span><span class="s0">is not None</span><span class="s2">:</span>
+        <span class="s1">rv</span><span class="s2">[</span><span class="s5">&quot;request&quot;</span><span class="s2">] = </span><span class="s1">reqctx</span><span class="s2">.</span><span class="s1">request</span>
+        <span class="s1">rv</span><span class="s2">[</span><span class="s5">&quot;session&quot;</span><span class="s2">] = </span><span class="s1">reqctx</span><span class="s2">.</span><span class="s1">session</span>
+    <span class="s0">return </span><span class="s1">rv</span>
+
+
+<span class="s0">class </span><span class="s1">Environment</span><span class="s2">(</span><span class="s1">BaseEnvironment</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;Works like a regular Jinja2 environment but has some additional 
+    knowledge of how Flask's blueprint works so that it can prepend the 
+    name of the blueprint to referenced templates if necessary. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">app</span><span class="s2">: </span><span class="s1">App</span><span class="s2">, **</span><span class="s1">options</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s0">if </span><span class="s5">&quot;loader&quot; </span><span class="s0">not in </span><span class="s1">options</span><span class="s2">:</span>
+            <span class="s1">options</span><span class="s2">[</span><span class="s5">&quot;loader&quot;</span><span class="s2">] = </span><span class="s1">app</span><span class="s2">.</span><span class="s1">create_global_jinja_loader</span><span class="s2">()</span>
+        <span class="s1">BaseEnvironment</span><span class="s2">.</span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, **</span><span class="s1">options</span><span class="s2">)</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">app </span><span class="s2">= </span><span class="s1">app</span>
+
+
+<span class="s0">class </span><span class="s1">DispatchingJinjaLoader</span><span class="s2">(</span><span class="s1">BaseLoader</span><span class="s2">):</span>
+    <span class="s4">&quot;&quot;&quot;A loader that looks for templates in the application and all 
+    the blueprint folders. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">app</span><span class="s2">: </span><span class="s1">App</span><span class="s2">) </span><span class="s1">-&gt; </span><span class="s0">None</span><span class="s2">:</span>
+        <span class="s1">self</span><span class="s2">.</span><span class="s1">app </span><span class="s2">= </span><span class="s1">app</span>
+
+    <span class="s0">def </span><span class="s1">get_source</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">environment</span><span class="s2">: </span><span class="s1">BaseEnvironment</span><span class="s2">, </span><span class="s1">template</span><span class="s2">: </span><span class="s1">str</span>
+    <span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[], </span><span class="s1">bool</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">]:</span>
+        <span class="s0">if </span><span class="s1">self</span><span class="s2">.</span><span class="s1">app</span><span class="s2">.</span><span class="s1">config</span><span class="s2">[</span><span class="s5">&quot;EXPLAIN_TEMPLATE_LOADING&quot;</span><span class="s2">]:</span>
+            <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_source_explained</span><span class="s2">(</span><span class="s1">environment</span><span class="s2">, </span><span class="s1">template</span><span class="s2">)</span>
+        <span class="s0">return </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_get_source_fast</span><span class="s2">(</span><span class="s1">environment</span><span class="s2">, </span><span class="s1">template</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_get_source_explained</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">environment</span><span class="s2">: </span><span class="s1">BaseEnvironment</span><span class="s2">, </span><span class="s1">template</span><span class="s2">: </span><span class="s1">str</span>
+    <span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[], </span><span class="s1">bool</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">]:</span>
+        <span class="s1">attempts </span><span class="s2">= []</span>
+        <span class="s1">rv</span><span class="s2">: </span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[], </span><span class="s1">bool</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">] | </span><span class="s0">None</span>
+        <span class="s1">trv</span><span class="s2">: </span><span class="s0">None </span><span class="s2">| (</span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[], </span><span class="s1">bool</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">]) = </span><span class="s0">None</span>
+
+        <span class="s0">for </span><span class="s1">srcobj</span><span class="s2">, </span><span class="s1">loader </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_iter_loaders</span><span class="s2">(</span><span class="s1">template</span><span class="s2">):</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s1">rv </span><span class="s2">= </span><span class="s1">loader</span><span class="s2">.</span><span class="s1">get_source</span><span class="s2">(</span><span class="s1">environment</span><span class="s2">, </span><span class="s1">template</span><span class="s2">)</span>
+                <span class="s0">if </span><span class="s1">trv </span><span class="s0">is None</span><span class="s2">:</span>
+                    <span class="s1">trv </span><span class="s2">= </span><span class="s1">rv</span>
+            <span class="s0">except </span><span class="s1">TemplateNotFound</span><span class="s2">:</span>
+                <span class="s1">rv </span><span class="s2">= </span><span class="s0">None</span>
+            <span class="s1">attempts</span><span class="s2">.</span><span class="s1">append</span><span class="s2">((</span><span class="s1">loader</span><span class="s2">, </span><span class="s1">srcobj</span><span class="s2">, </span><span class="s1">rv</span><span class="s2">))</span>
+
+        <span class="s0">from </span><span class="s2">.</span><span class="s1">debughelpers </span><span class="s0">import </span><span class="s1">explain_template_loading_attempts</span>
+
+        <span class="s1">explain_template_loading_attempts</span><span class="s2">(</span><span class="s1">self</span><span class="s2">.</span><span class="s1">app</span><span class="s2">, </span><span class="s1">template</span><span class="s2">, </span><span class="s1">attempts</span><span class="s2">)</span>
+
+        <span class="s0">if </span><span class="s1">trv </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">return </span><span class="s1">trv</span>
+        <span class="s0">raise </span><span class="s1">TemplateNotFound</span><span class="s2">(</span><span class="s1">template</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_get_source_fast</span><span class="s2">(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">environment</span><span class="s2">: </span><span class="s1">BaseEnvironment</span><span class="s2">, </span><span class="s1">template</span><span class="s2">: </span><span class="s1">str</span>
+    <span class="s2">) </span><span class="s1">-&gt; tuple</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">str </span><span class="s2">| </span><span class="s0">None</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Callable</span><span class="s2">[[], </span><span class="s1">bool</span><span class="s2">] | </span><span class="s0">None</span><span class="s2">]:</span>
+        <span class="s0">for </span><span class="s1">_srcobj</span><span class="s2">, </span><span class="s1">loader </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">_iter_loaders</span><span class="s2">(</span><span class="s1">template</span><span class="s2">):</span>
+            <span class="s0">try</span><span class="s2">:</span>
+                <span class="s0">return </span><span class="s1">loader</span><span class="s2">.</span><span class="s1">get_source</span><span class="s2">(</span><span class="s1">environment</span><span class="s2">, </span><span class="s1">template</span><span class="s2">)</span>
+            <span class="s0">except </span><span class="s1">TemplateNotFound</span><span class="s2">:</span>
+                <span class="s0">continue</span>
+        <span class="s0">raise </span><span class="s1">TemplateNotFound</span><span class="s2">(</span><span class="s1">template</span><span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">_iter_loaders</span><span class="s2">(</span><span class="s1">self</span><span class="s2">, </span><span class="s1">template</span><span class="s2">: </span><span class="s1">str</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Iterator</span><span class="s2">[</span><span class="s1">tuple</span><span class="s2">[</span><span class="s1">Scaffold</span><span class="s2">, </span><span class="s1">BaseLoader</span><span class="s2">]]:</span>
+        <span class="s1">loader </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">app</span><span class="s2">.</span><span class="s1">jinja_loader</span>
+        <span class="s0">if </span><span class="s1">loader </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s0">yield </span><span class="s1">self</span><span class="s2">.</span><span class="s1">app</span><span class="s2">, </span><span class="s1">loader</span>
+
+        <span class="s0">for </span><span class="s1">blueprint </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">app</span><span class="s2">.</span><span class="s1">iter_blueprints</span><span class="s2">():</span>
+            <span class="s1">loader </span><span class="s2">= </span><span class="s1">blueprint</span><span class="s2">.</span><span class="s1">jinja_loader</span>
+            <span class="s0">if </span><span class="s1">loader </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s0">yield </span><span class="s1">blueprint</span><span class="s2">, </span><span class="s1">loader</span>
+
+    <span class="s0">def </span><span class="s1">list_templates</span><span class="s2">(</span><span class="s1">self</span><span class="s2">) </span><span class="s1">-&gt; list</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s1">result </span><span class="s2">= </span><span class="s1">set</span><span class="s2">()</span>
+        <span class="s1">loader </span><span class="s2">= </span><span class="s1">self</span><span class="s2">.</span><span class="s1">app</span><span class="s2">.</span><span class="s1">jinja_loader</span>
+        <span class="s0">if </span><span class="s1">loader </span><span class="s0">is not None</span><span class="s2">:</span>
+            <span class="s1">result</span><span class="s2">.</span><span class="s1">update</span><span class="s2">(</span><span class="s1">loader</span><span class="s2">.</span><span class="s1">list_templates</span><span class="s2">())</span>
+
+        <span class="s0">for </span><span class="s1">blueprint </span><span class="s0">in </span><span class="s1">self</span><span class="s2">.</span><span class="s1">app</span><span class="s2">.</span><span class="s1">iter_blueprints</span><span class="s2">():</span>
+            <span class="s1">loader </span><span class="s2">= </span><span class="s1">blueprint</span><span class="s2">.</span><span class="s1">jinja_loader</span>
+            <span class="s0">if </span><span class="s1">loader </span><span class="s0">is not None</span><span class="s2">:</span>
+                <span class="s0">for </span><span class="s1">template </span><span class="s0">in </span><span class="s1">loader</span><span class="s2">.</span><span class="s1">list_templates</span><span class="s2">():</span>
+                    <span class="s1">result</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">template</span><span class="s2">)</span>
+
+        <span class="s0">return </span><span class="s1">list</span><span class="s2">(</span><span class="s1">result</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_render</span><span class="s2">(</span><span class="s1">app</span><span class="s2">: </span><span class="s1">Flask</span><span class="s2">, </span><span class="s1">template</span><span class="s2">: </span><span class="s1">Template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s1">app</span><span class="s2">.</span><span class="s1">update_template_context</span><span class="s2">(</span><span class="s1">context</span><span class="s2">)</span>
+    <span class="s1">before_render_template</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">app</span><span class="s2">, </span><span class="s1">_async_wrapper</span><span class="s2">=</span><span class="s1">app</span><span class="s2">.</span><span class="s1">ensure_sync</span><span class="s2">, </span><span class="s1">template</span><span class="s2">=</span><span class="s1">template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">=</span><span class="s1">context</span>
+    <span class="s2">)</span>
+    <span class="s1">rv </span><span class="s2">= </span><span class="s1">template</span><span class="s2">.</span><span class="s1">render</span><span class="s2">(</span><span class="s1">context</span><span class="s2">)</span>
+    <span class="s1">template_rendered</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">app</span><span class="s2">, </span><span class="s1">_async_wrapper</span><span class="s2">=</span><span class="s1">app</span><span class="s2">.</span><span class="s1">ensure_sync</span><span class="s2">, </span><span class="s1">template</span><span class="s2">=</span><span class="s1">template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">=</span><span class="s1">context</span>
+    <span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">rv</span>
+
+
+<span class="s0">def </span><span class="s1">render_template</span><span class="s2">(</span>
+    <span class="s1">template_name_or_list</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s1">Template </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str </span><span class="s2">| </span><span class="s1">Template</span><span class="s2">],</span>
+    <span class="s2">**</span><span class="s1">context</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot;Render a template by name with the given context. 
+ 
+    :param template_name_or_list: The name of the template to render. If 
+        a list is given, the first name to exist will be rendered. 
+    :param context: The variables to make available in the template. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">app </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">_get_current_object</span><span class="s2">()  </span><span class="s3"># type: ignore[attr-defined]</span>
+    <span class="s1">template </span><span class="s2">= </span><span class="s1">app</span><span class="s2">.</span><span class="s1">jinja_env</span><span class="s2">.</span><span class="s1">get_or_select_template</span><span class="s2">(</span><span class="s1">template_name_or_list</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">_render</span><span class="s2">(</span><span class="s1">app</span><span class="s2">, </span><span class="s1">template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">render_template_string</span><span class="s2">(</span><span class="s1">source</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, **</span><span class="s1">context</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; str</span><span class="s2">:</span>
+    <span class="s4">&quot;&quot;&quot;Render a template from the given source string with the given 
+    context. 
+ 
+    :param source: The source code of the template to render. 
+    :param context: The variables to make available in the template. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">app </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">_get_current_object</span><span class="s2">()  </span><span class="s3"># type: ignore[attr-defined]</span>
+    <span class="s1">template </span><span class="s2">= </span><span class="s1">app</span><span class="s2">.</span><span class="s1">jinja_env</span><span class="s2">.</span><span class="s1">from_string</span><span class="s2">(</span><span class="s1">source</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">_render</span><span class="s2">(</span><span class="s1">app</span><span class="s2">, </span><span class="s1">template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">_stream</span><span class="s2">(</span>
+    <span class="s1">app</span><span class="s2">: </span><span class="s1">Flask</span><span class="s2">, </span><span class="s1">template</span><span class="s2">: </span><span class="s1">Template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">: </span><span class="s1">dict</span><span class="s2">[</span><span class="s1">str</span><span class="s2">, </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">]</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Iterator</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+    <span class="s1">app</span><span class="s2">.</span><span class="s1">update_template_context</span><span class="s2">(</span><span class="s1">context</span><span class="s2">)</span>
+    <span class="s1">before_render_template</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+        <span class="s1">app</span><span class="s2">, </span><span class="s1">_async_wrapper</span><span class="s2">=</span><span class="s1">app</span><span class="s2">.</span><span class="s1">ensure_sync</span><span class="s2">, </span><span class="s1">template</span><span class="s2">=</span><span class="s1">template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">=</span><span class="s1">context</span>
+    <span class="s2">)</span>
+
+    <span class="s0">def </span><span class="s1">generate</span><span class="s2">() </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Iterator</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+        <span class="s0">yield from </span><span class="s1">template</span><span class="s2">.</span><span class="s1">generate</span><span class="s2">(</span><span class="s1">context</span><span class="s2">)</span>
+        <span class="s1">template_rendered</span><span class="s2">.</span><span class="s1">send</span><span class="s2">(</span>
+            <span class="s1">app</span><span class="s2">, </span><span class="s1">_async_wrapper</span><span class="s2">=</span><span class="s1">app</span><span class="s2">.</span><span class="s1">ensure_sync</span><span class="s2">, </span><span class="s1">template</span><span class="s2">=</span><span class="s1">template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">=</span><span class="s1">context</span>
+        <span class="s2">)</span>
+
+    <span class="s1">rv </span><span class="s2">= </span><span class="s1">generate</span><span class="s2">()</span>
+
+    <span class="s3"># If a request context is active, keep it while generating.</span>
+    <span class="s0">if </span><span class="s1">request</span><span class="s2">:</span>
+        <span class="s1">rv </span><span class="s2">= </span><span class="s1">stream_with_context</span><span class="s2">(</span><span class="s1">rv</span><span class="s2">)</span>
+
+    <span class="s0">return </span><span class="s1">rv</span>
+
+
+<span class="s0">def </span><span class="s1">stream_template</span><span class="s2">(</span>
+    <span class="s1">template_name_or_list</span><span class="s2">: </span><span class="s1">str </span><span class="s2">| </span><span class="s1">Template </span><span class="s2">| </span><span class="s1">list</span><span class="s2">[</span><span class="s1">str </span><span class="s2">| </span><span class="s1">Template</span><span class="s2">],</span>
+    <span class="s2">**</span><span class="s1">context</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">,</span>
+<span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Iterator</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+    <span class="s4">&quot;&quot;&quot;Render a template by name with the given context as a stream. 
+    This returns an iterator of strings, which can be used as a 
+    streaming response from a view. 
+ 
+    :param template_name_or_list: The name of the template to render. If 
+        a list is given, the first name to exist will be rendered. 
+    :param context: The variables to make available in the template. 
+ 
+    .. versionadded:: 2.2 
+    &quot;&quot;&quot;</span>
+    <span class="s1">app </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">_get_current_object</span><span class="s2">()  </span><span class="s3"># type: ignore[attr-defined]</span>
+    <span class="s1">template </span><span class="s2">= </span><span class="s1">app</span><span class="s2">.</span><span class="s1">jinja_env</span><span class="s2">.</span><span class="s1">get_or_select_template</span><span class="s2">(</span><span class="s1">template_name_or_list</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">_stream</span><span class="s2">(</span><span class="s1">app</span><span class="s2">, </span><span class="s1">template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">)</span>
+
+
+<span class="s0">def </span><span class="s1">stream_template_string</span><span class="s2">(</span><span class="s1">source</span><span class="s2">: </span><span class="s1">str</span><span class="s2">, **</span><span class="s1">context</span><span class="s2">: </span><span class="s1">t</span><span class="s2">.</span><span class="s1">Any</span><span class="s2">) </span><span class="s1">-&gt; t</span><span class="s2">.</span><span class="s1">Iterator</span><span class="s2">[</span><span class="s1">str</span><span class="s2">]:</span>
+    <span class="s4">&quot;&quot;&quot;Render a template from the given source string with the given 
+    context as a stream. This returns an iterator of strings, which can 
+    be used as a streaming response from a view. 
+ 
+    :param source: The source code of the template to render. 
+    :param context: The variables to make available in the template. 
+ 
+    .. versionadded:: 2.2 
+    &quot;&quot;&quot;</span>
+    <span class="s1">app </span><span class="s2">= </span><span class="s1">current_app</span><span class="s2">.</span><span class="s1">_get_current_object</span><span class="s2">()  </span><span class="s3"># type: ignore[attr-defined]</span>
+    <span class="s1">template </span><span class="s2">= </span><span class="s1">app</span><span class="s2">.</span><span class="s1">jinja_env</span><span class="s2">.</span><span class="s1">from_string</span><span class="s2">(</span><span class="s1">source</span><span class="s2">)</span>
+    <span class="s0">return </span><span class="s1">_stream</span><span class="s2">(</span><span class="s1">app</span><span class="s2">, </span><span class="s1">template</span><span class="s2">, </span><span class="s1">context</span><span class="s2">)</span>
+</pre>
+</body>
+</html>
